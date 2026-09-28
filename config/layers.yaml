@@ -19,6 +19,16 @@ hard:
   max_slope_deg: 8.0
   goal_slope_deg: 5.0
 
+scoring:
+  percentile_low: 2.0
+  percentile_high: 98.0
+  n_sites: 10
+  min_separation_km: 10.0
+  weights:
+    illumination: 0.5
+    hydrogen: 0.3
+    earth_visibility: 0.2
+
 earth_visibility:
   # Approximation: 100 km ray toward sub-Earth (lon 0°, lat 0°) in the
   # stereographic plane. Horizon elevation is the max terrain elevation
