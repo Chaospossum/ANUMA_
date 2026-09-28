@@ -200,6 +200,11 @@ def create_app() -> FastAPI:
             "resolution_m": grid.resolution_m,
             "width": grid.width,
             "height": grid.height,
+            "defaults": {
+                "weights": dict(cfg["scoring"]["weights"]),
+                "max_slope_deg": float(cfg["hard"]["max_slope_deg"]),
+                "n": int(cfg["scoring"]["n_sites"]),
+            },
             "layers": layers,
         }
 

@@ -193,3 +193,21 @@ def test_layers_ingested_flag(client_ingested: TestClient):
     assert present["slope"] is True
     assert present["illumination"] is True
     assert present["dem"] is False
+
+
+def test_index_folio_is_local():
+    clear_cache()
+    client = TestClient(app)
+    response = client.get("/")
+    assert response.status_code == 200
+    text = response.text
+    assert "ANUMA" in text
+    assert "/vendor/leaflet.js" in text
+    assert "/vendor/proj4.js" in text
+    assert "/vendor/proj4leaflet.js" in text
+    assert "cdn" not in text.lower()
+    assert "unpkg" not in text.lower()
+    css = client.get("/style.css")
+    assert css.status_code == 200
+    assert "Cormorant Garamond" in css.text
+    assert "cdn" not in css.text.lower()

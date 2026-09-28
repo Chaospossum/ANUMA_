@@ -2,7 +2,7 @@
 
 Landing-site decision support for the lunar south pole. Demo case: ispace-EUROPE MAGPIE (ESA, 2029), Neospace Challenge 2026.
 
-Phases 1–3 are in this tree: ingest, scoring, and the FastAPI surface. The map UI is Phase 4. Static figures are Phase 5.
+Phases 1–4 are in this tree: ingest, scoring, FastAPI, and the south-polar folio at `http://localhost:8000`. Static figures are Phase 5.
 
 ## Install
 
@@ -37,7 +37,15 @@ python3 -m anuma.ingest --synthetic --data-dir /tmp/anuma-test
 | Illumination | `AVGVISIB_65S_240M_201608.jp2` | 46.4 MiB |
 | Hydrogen | `hydrogenhd.dat` (Lunar Prospector, LEND map not on PDS) | 506 KiB |
 
-If a URL fails, ingest prints the URL and the error and stops. It does not invent rasters.
+Open `http://localhost:8000`. The stereographic well stays empty until `data/grid/` holds real warped layers. The UI will not fill the map with `--synthetic` scores.
+
+If ingest has not been run:
+
+```bash
+python3 -m anuma.ingest
+```
+
+The LOLA DEM is 2.51 GiB and can take a long time. Until it finishes, the folio shows the not-ingested state and the command above.
 
 ## Grid
 

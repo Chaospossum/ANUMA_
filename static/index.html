@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ANUMA · South polar landing folio</title>
+    <link rel="stylesheet" href="/vendor/leaflet.css" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="field">
+      <header class="mast">
+        <div class="mast-title">
+          <h1>ANUMA</h1>
+          <p class="deck">South polar landing folio</p>
+        </div>
+        <p class="mast-meta">
+          MAGPIE · ispace-EUROPE · Neospace 2026
+          <span class="dot">·</span>
+          Moon 80°S–90°S · 240 m stereographic
+        </p>
+      </header>
+
+      <aside class="rail rail-west" aria-label="Scoring instruments">
+        <p class="rail-kicker">Instruments</p>
+
+        <section class="inst-block">
+          <h2>Soft layers</h2>
+          <label class="inst sun">
+            <span class="inst-row">
+              <span class="inst-name">Illumination</span>
+              <span class="inst-val mono" id="w-illum-val">0.50</span>
+            </span>
+            <input id="w-illum" type="range" min="0" max="1" step="0.01" value="0.5" />
+          </label>
+          <label class="inst ice">
+            <span class="inst-row">
+              <span class="inst-name">Hydrogen</span>
+              <span class="inst-val mono" id="w-hydro-val">0.30</span>
+            </span>
+            <input id="w-hydro" type="range" min="0" max="1" step="0.01" value="0.3" />
+          </label>
+          <label class="inst earth">
+            <span class="inst-row">
+              <span class="inst-name">Earth visibility</span>
+              <span class="inst-val mono" id="w-earth-val">0.20</span>
+            </span>
+            <input id="w-earth" type="range" min="0" max="1" step="0.01" value="0.2" />
+          </label>
+        </section>
+
+        <section class="inst-block">
+          <h2>Hard mask</h2>
+          <label class="inst-numeric">
+            <span class="inst-name">Max slope</span>
+            <span class="numeric-wrap">
+              <input id="max-slope" type="number" min="0" max="45" step="0.5" value="8" />
+              <span class="unit mono">deg</span>
+            </span>
+          </label>
+          <p class="hint">HLS default 8°. Goal 5°.</p>
+        </section>
+
+        <section class="inst-block">
+          <h2>Display</h2>
+          <button type="button" id="btn-score" class="score-btn">Score</button>
+          <label class="inst-select">
+            <span class="inst-name">Show single layer</span>
+            <select id="layer-select">
+              <option value="score">Combined score</option>
+            </select>
+          </label>
+          <label class="toggle">
+            <input id="artemis-toggle" type="checkbox" />
+            <span>Artemis III regions</span>
+          </label>
+        </section>
+      </aside>
+
+      <main class="well-wrap">
+        <div class="well">
+          <div id="map" role="img" aria-label="South polar stereographic map"></div>
+          <div id="veil" class="veil" hidden>
+            <p class="veil-kicker" id="veil-kicker"></p>
+            <p class="veil-body" id="veil-body"></p>
+            <pre class="veil-cmd mono" id="veil-cmd" hidden></pre>
+            <p class="veil-note" id="veil-note"></p>
+          </div>
+        </div>
+        <div class="well-tools">
+          <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
+          <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
+        </div>
+        <div class="well-readout">
+          <span id="coords" class="mono">90.0000°S  000.0000°E</span>
+          <div class="scale" id="scale-bar">
+            <span class="scale-line" id="scale-line"></span>
+            <span class="scale-label mono" id="scale-label">50 km</span>
+          </div>
+        </div>
+      </main>
+
+      <aside class="rail rail-east" aria-label="Ranked sites">
+        <p class="rail-kicker">Flight log</p>
+        <ol id="sites" class="log"></ol>
+        <section class="artemis-rail" id="artemis-rail" hidden>
+          <h2>Artemis III</h2>
+          <p class="hint" id="artemis-note"></p>
+          <ul id="artemis-list" class="artemis-list"></ul>
+        </section>
+      </aside>
+    </div>
+
+    <script src="/vendor/leaflet.js"></script>
+    <script src="/vendor/proj4.js"></script>
+    <script src="/vendor/proj4leaflet.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

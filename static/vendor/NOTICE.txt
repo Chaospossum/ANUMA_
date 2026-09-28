@@ -1,0 +1,7 @@
+Vendored runtime assets. No CDN at page load.
+
+- Leaflet 1.9.4 — https://leafletjs.com/ — BSD-2-Clause
+- Proj4js 2.15.0 — https://github.com/proj4js/proj4js — MIT
+- Proj4Leaflet 1.0.2 — https://github.com/kartena/Proj4Leaflet — BSD-2-Clause
+- Cormorant Garamond (latin 600/700) — https://github.com/CatharsisFonts/Cormorant — SIL OFL 1.1
+- IBM Plex Mono (latin 400/500) — https://github.com/IBM/plex — SIL OFL 1.1
