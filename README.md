@@ -2,7 +2,7 @@
 
 Landing-site decision support for the lunar south pole. Demo case: ispace-EUROPE MAGPIE (ESA, 2029), Neospace Challenge 2026.
 
-Phases 1–4 are in this tree: ingest, scoring, FastAPI, and the south-polar folio at `http://localhost:8000`. Static figures are Phase 5.
+Phases 1–4 are in this tree: ingest, scoring, FastAPI, and the map UI at `http://localhost:8000`. Static figures are Phase 5.
 
 ## Install
 
@@ -45,7 +45,7 @@ If ingest has not been run:
 python3 -m anuma.ingest
 ```
 
-The LOLA DEM is 2.51 GiB and can take a long time. Until it finishes, the folio shows the not-ingested state and the command above.
+The LOLA DEM is 2.51 GiB and can take a long time. Until it finishes, the UI shows the not-ingested state and the command above.
 
 ## Grid
 

@@ -3,12 +3,6 @@
 
   var PROJ4 = "+proj=stere +lat_0=-90 +lon_0=0 +R=1737400 +units=m +no_defs";
   var TICKS = 10;
-  var LAYER_ACCENT = {
-    illumination: "sun",
-    hydrogen: "ice",
-    earth_visibility: "earth",
-    slope: "earth",
-  };
 
   var map = null;
   var overlay = null;
@@ -44,6 +38,7 @@
     artemisList: document.getElementById("artemis-list"),
     zoomIn: document.getElementById("zoom-in"),
     zoomOut: document.getElementById("zoom-out"),
+    status: document.getElementById("status"),
   };
 
   function fmt(n) {
@@ -82,14 +77,19 @@
     els.veil.hidden = true;
   }
 
+  function emptySites(message) {
+    els.sites.innerHTML =
+      '<tr><td class="empty" colspan="8">' + message + "</td></tr>";
+  }
+
   function showNotIngested(command) {
     showVeil(
       "Grid not on disk",
-      "ANUMA will not invent a south-polar score. Warp the LOLA DEM, illumination map, and hydrogen layer onto the 240 m grid first.",
+      "anuma will not invent a south-polar score. Warp the LOLA DEM, illumination map, and hydrogen layer onto the 240 m grid first.",
       command || "python3 -m anuma.ingest",
-      "The DEM is 2.51 GiB. If ingest has not finished, this well stays empty."
+      "The DEM is 2.51 GiB. If ingest has not finished, the map stays empty."
     );
-    els.sites.innerHTML = '<li class="log-empty">No ranked sites until the grid is ingested and scored.</li>';
+    emptySites("No ranked sites until the grid is ingested and scored.");
   }
 
   function projectedBounds(bounds) {
@@ -138,8 +138,8 @@
       icon: L.divIcon({
         className: "pole-mark",
         html: '<span class="pole-ring"></span>',
-        iconSize: [14, 14],
-        iconAnchor: [7, 7],
+        iconSize: [12, 12],
+        iconAnchor: [6, 6],
       }),
       interactive: false,
       keyboard: false,
@@ -166,7 +166,7 @@
         chosen = targets[i];
       }
     }
-    var px = chosen * 80 / km80;
+    var px = (chosen * 80) / km80;
     els.scaleLine.style.width = Math.max(24, Math.min(140, px)) + "px";
     els.scaleLabel.textContent = chosen + " km";
   }
@@ -178,79 +178,67 @@
     els.coords.textContent = fmtLat(latlng.lat) + "  " + fmtLon(latlng.lng);
   }
 
-  function ticksHtml(value, weight, accent) {
+  function ticksHtml(value, weight) {
     var frac = weight > 0 ? value / weight : 0;
     var nOn = Math.round(Math.max(0, Math.min(1, frac)) * TICKS);
-    var html = '<div class="ticks">';
+    var html = '<span class="ticks">';
     var i;
     for (i = 0; i < TICKS; i += 1) {
-      html += '<span class="tick' + (i < nOn ? " on " + accent : "") + '"></span>';
+      html += '<span class="tick' + (i < nOn ? " on" : "") + '"></span>';
     }
-    return html + "</div>";
+    return html + "</span>";
   }
 
-  function contribBlock(site) {
-    var names = Object.keys(site.contributions || {});
-    var html = '<div class="contrib">';
-    names.forEach(function (name) {
-      var accent = LAYER_ACCENT[name] || "earth";
-      var label = name.replace(/_/g, " ");
-      html +=
-        '<div class="contrib-row"><span class="contrib-name">' +
-        label +
-        "</span>" +
-        ticksHtml(site.contributions[name] || 0, currentWeights()[name] || 1, accent) +
-        "</div>";
-    });
-    return html + "</div>";
-  }
-
-  function artemisLine(site) {
+  function artemisCell(site) {
     if (site.nearest) {
       var dist =
-        site.distance_km == null ? "" : " · " + Number(site.distance_km).toFixed(1) + " km";
+        site.distance_km == null ? "" : " (" + Number(site.distance_km).toFixed(1) + " km)";
       return site.nearest + dist;
     }
-    return "Artemis centres unpublished";
+    return "unpublished";
   }
 
   function renderSites(sites) {
     els.sites.innerHTML = "";
     if (!sites || !sites.length) {
-      els.sites.innerHTML = '<li class="log-empty">No sites passed the slope mask.</li>';
+      emptySites("No sites passed the slope mask.");
       return;
     }
     if (siteLayer) {
       map.removeLayer(siteLayer);
     }
     siteLayer = L.layerGroup().addTo(map);
+    var weights = currentWeights();
     sites.forEach(function (site, index) {
-      var li = document.createElement("li");
-      var btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "log-row" + (selectedRank === index ? " active" : "");
-      btn.innerHTML =
-        '<span class="log-index">' +
+      var contrib = site.contributions || {};
+      var tr = document.createElement("tr");
+      if (selectedRank === index) {
+        tr.className = "active";
+      }
+      tr.innerHTML =
+        '<td class="num">' +
         pad2(index + 1) +
-        '  <span class="log-score">' +
-        Number(site.total).toFixed(3) +
-        "</span></span>" +
-        '<span class="log-coords">' +
+        '</td><td class="num">' +
         fmtLat(site.lat) +
-        "  " +
+        '</td><td class="num">' +
         fmtLon(site.lon) +
-        "</span>" +
-        '<p class="log-artemis">' +
-        artemisLine(site) +
-        "</p>" +
-        contribBlock(site);
-      btn.addEventListener("click", function () {
+        '</td><td class="num">' +
+        Number(site.total).toFixed(3) +
+        "</td><td>" +
+        ticksHtml(contrib.illumination || 0, weights.illumination || 1) +
+        "</td><td>" +
+        ticksHtml(contrib.hydrogen || 0, weights.hydrogen || 1) +
+        "</td><td>" +
+        ticksHtml(contrib.earth_visibility || 0, weights.earth_visibility || 1) +
+        "</td><td>" +
+        artemisCell(site) +
+        "</td>";
+      tr.addEventListener("click", function () {
         selectedRank = index;
         map.setView([site.lat, site.lon], Math.max(map.getZoom(), 4));
         renderSites(sites);
       });
-      li.appendChild(btn);
-      els.sites.appendChild(li);
+      els.sites.appendChild(tr);
 
       L.marker([site.lat, site.lon], {
         icon: L.divIcon({
@@ -274,8 +262,8 @@
       els.artemisRail.hidden = true;
       return;
     }
-    els.artemisRail.hidden = false;
-    els.artemisNote.textContent = artemis.note || "NASA has not published region centres.";
+    els.artemisNote.textContent =
+      artemis.note || "NASA has not published region centres.";
     els.artemisList.innerHTML = "";
     (artemis.regions || []).forEach(function (region) {
       var li = document.createElement("li");
@@ -348,7 +336,7 @@
       new ResizeObserver(function () {
         map.invalidateSize();
         updateScale();
-      }).observe(document.querySelector(".well"));
+      }).observe(document.getElementById("map-frame"));
     }
     window.setTimeout(function () {
       map.invalidateSize();
@@ -389,7 +377,12 @@
         return;
       }
       if (!response.ok) {
-        showVeil("Score failed", payload.detail || payload.message || "The API returned an error.", "", "");
+        showVeil(
+          "Score failed",
+          payload.detail || payload.message || "The API returned an error.",
+          "",
+          ""
+        );
         return;
       }
       lastScore = payload;
@@ -450,6 +443,7 @@
         map.removeLayer(artemisLayer);
         artemisLayer = null;
       }
+      els.artemisRail.hidden = true;
       return;
     }
     var response = await fetch("/artemis3.geojson");
@@ -475,7 +469,7 @@
     }
     artemisLayer = L.geoJSON(geojson, {
       style: {
-        color: "#8ec9c4",
+        color: "#161921",
         weight: 1,
         fill: false,
       },

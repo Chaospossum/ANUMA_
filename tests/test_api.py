@@ -201,7 +201,8 @@ def test_index_folio_is_local():
     response = client.get("/")
     assert response.status_code == 200
     text = response.text
-    assert "ANUMA" in text
+    assert "anuma" in text
+    assert "ispace-EUROPE" in text
     assert "/vendor/leaflet.js" in text
     assert "/vendor/proj4.js" in text
     assert "/vendor/proj4leaflet.js" in text
@@ -209,5 +210,6 @@ def test_index_folio_is_local():
     assert "unpkg" not in text.lower()
     css = client.get("/style.css")
     assert css.status_code == 200
-    assert "Cormorant Garamond" in css.text
+    assert "Outfit" in css.text
+    assert "Cormorant" not in css.text
     assert "cdn" not in css.text.lower()
