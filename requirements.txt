@@ -6,3 +6,6 @@ pyyaml
 scipy
 affine
 pytest
+fastapi
+uvicorn
+httpx

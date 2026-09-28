@@ -15,11 +15,12 @@ dependencies = [
   "pyyaml",
   "scipy",
   "affine",
+  "fastapi",
+  "uvicorn",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
-serve = ["fastapi", "uvicorn"]
+dev = ["pytest", "httpx"]
 
 [tool.setuptools.packages.find]
 include = ["anuma*"]

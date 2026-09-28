@@ -2,7 +2,7 @@
 
 Landing-site decision support for the lunar south pole. Demo case: ispace-EUROPE MAGPIE (ESA, 2029), Neospace Challenge 2026.
 
-Phases 2–6 (scoring, API, map UI, static figures) are not in this tree yet. Phase 1 builds the common 240 m grid and the ingested layers.
+Phases 1–3 are in this tree: ingest, scoring, and the FastAPI surface. The map UI is Phase 4. Static figures are Phase 5.
 
 ## Install
 
@@ -16,16 +16,18 @@ python3 -m pip install -r requirements.txt
 
 ```bash
 python3 -m anuma.ingest
-python3 -m uvicorn anuma.api:app --host 127.0.0.1 --port 43127   # Phase 3, not implemented yet
+python3 -m uvicorn anuma.api:app --host 127.0.0.1 --port 8000
 python3 -m anuma.render_static --weights config/demo_weights.yaml  # Phase 5, not implemented yet
 ```
 
-Unit tests use fake layers only:
+Unit tests use constructed arrays and `--synthetic` ingest only:
 
 ```bash
-python3 -m pytest tests/test_ingest.py
+python3 -m pytest tests/test_ingest.py tests/test_score.py tests/test_api.py
 python3 -m anuma.ingest --synthetic --data-dir /tmp/anuma-test
 ```
+
+`POST /score` and `GET /layer/{name}.png` return HTTP 412 with the ingest command until real grids exist in `data/grid/`. The API does not score `--synthetic` layers for the demo.
 
 ## Ingest download sizes
 
