@@ -344,6 +344,12 @@
       updateCoords(event.latlng);
     });
     map.on("zoomend moveend", updateScale);
+    if (window.ResizeObserver) {
+      new ResizeObserver(function () {
+        map.invalidateSize();
+        updateScale();
+      }).observe(document.querySelector(".well"));
+    }
     window.setTimeout(function () {
       map.invalidateSize();
       updateScale();
@@ -501,13 +507,7 @@
     if (!meta.ingested) {
       showNotIngested(meta.ingest_command);
     } else {
-      showVeil(
-        "80°S stereographic",
-        "Set illumination, hydrogen, and Earth-visibility weights, then Score.",
-        "",
-        "Viridis is the science colormap. Single layers render in grey."
-      );
-      els.sites.innerHTML = '<li class="log-empty">Score to rank ten sites, 10 km apart.</li>';
+      await runScore();
     }
   }
 
