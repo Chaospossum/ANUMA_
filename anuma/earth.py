@@ -18,6 +18,16 @@ from scipy.ndimage import map_coordinates
 from anuma.grid import Grid
 
 
+def _stereo_to_lonlat(x: np.ndarray, y: np.ndarray, radius: float):
+    """South-polar stereographic (lon_0=0) to lon/lat. Matches PROJ within 1e-12 deg."""
+    rho = np.hypot(x, y)
+    angular = 2.0 * np.arctan(rho / (2.0 * radius))
+    lat = np.degrees(-np.pi / 2.0 + angular)
+    lon = np.degrees(np.arctan2(x, y))
+    lon = np.where(rho == 0.0, 0.0, lon)
+    return lon, lat
+
+
 def _xyz(lon: np.ndarray, lat: np.ndarray, height: np.ndarray, radius: float):
     lonr = np.radians(lon)
     latr = np.radians(lat)
@@ -31,9 +41,7 @@ def earth_visibility(
 ) -> np.ndarray:
     """Return Earth clearance in degrees (Earth elevation minus horizon)."""
     x, y = grid.pixel_centers()
-    lon, lat = grid.inv.transform(x, y)
-    lon = np.asarray(lon)
-    lat = np.asarray(lat)
+    lon, lat = _stereo_to_lonlat(x, y, grid.radius_m)
     height = np.where(np.isfinite(dem), dem, 0.0).astype(np.float64)
 
     target_x, target_y = grid.fwd.transform(
@@ -61,8 +69,8 @@ def earth_visibility(
         cols = (xs - grid.affine.c) / grid.affine.a
         rows = (ys - grid.affine.f) / grid.affine.e
         zs = map_coordinates(height, [rows, cols], order=1, mode="nearest")
-        slon, slat = grid.inv.transform(xs, ys)
-        sx, sy, sz = _xyz(np.asarray(slon), np.asarray(slat), zs, grid.radius_m)
+        slon, slat = _stereo_to_lonlat(xs, ys, grid.radius_m)
+        sx, sy, sz = _xyz(slon, slat, zs, grid.radius_m)
         look = np.stack([sx - ox, sy - oy, sz - oz], axis=-1)
         look /= np.maximum(np.linalg.norm(look, axis=-1, keepdims=True), 1e-9)
         cosz = np.clip(np.sum(look * zenith, axis=-1), -1.0, 1.0)

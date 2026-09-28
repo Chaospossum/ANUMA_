@@ -52,12 +52,12 @@ class Grid:
     def to_pixel(self, lon: float, lat: float) -> tuple[float, float]:
         """Return (row, col) in pixel coordinates from the UL corner."""
         x, y = self.fwd.transform(lon, lat)
-        col, row = ~self.affine * (x, y)
+        col, row = ~self.affine @ (x, y)
         return float(row), float(col)
 
     def to_lonlat(self, row: float, col: float) -> tuple[float, float]:
         """Return (lon, lat) in degrees for a pixel coordinate."""
-        x, y = self.affine * (col, row)
+        x, y = self.affine @ (col, row)
         lon, lat = self.inv.transform(x, y)
         return float(lon), float(lat)
 
