@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+data/raw/
+data/grid/
+data/quicklook/
+out/
+agent-tools/
+.DS_Store

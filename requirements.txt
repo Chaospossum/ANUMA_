@@ -1,0 +1,8 @@
+numpy
+rasterio
+pyproj
+matplotlib
+pyyaml
+scipy
+affine
+pytest

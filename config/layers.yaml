@@ -1,0 +1,139 @@
+# All layer constants for ANUMA. Do not hard-code these in Python.
+
+projection:
+  proj4: "+proj=stere +lat_0=-90 +lon_0=0 +R=1737400 +units=m +no_defs"
+  geodetic_proj4: "+proj=longlat +R=1737400 +no_defs"
+  radius_m: 1737400.0
+  resolution_m: 240.0
+  lat_min: -90.0
+  lat_max: -80.0
+
+paths:
+  raw: data/raw
+  grid: data/grid
+  quicklook: data/quicklook
+  grid_json: data/grid/grid.json
+  artemis_geojson: data/artemis3_regions.geojson
+
+hard:
+  max_slope_deg: 8.0
+  goal_slope_deg: 5.0
+
+earth_visibility:
+  # Approximation: 100 km ray toward sub-Earth (lon 0°, lat 0°) in the
+  # stereographic plane. Horizon elevation is the max terrain elevation
+  # angle along that ray (sphere + DEM height). Compared with
+  # asin(cos(lat)*cos(lon)), the elevation of a distant Earth along +X
+  # in the ME frame. No libration, no Earth angular size, no refraction.
+  ray_length_m: 100000.0
+  ray_step_m: 2000.0
+  sub_earth_lon: 0.0
+  sub_earth_lat: 0.0
+
+layers:
+  dem:
+    name: dem
+    unit: m
+    product_name: LDEM_80S_20MPP_ADJ
+    filename: LDEM_80S_20MPP_ADJ.TIF
+    url: https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_20MPP_ADJ.TIF
+    expected_bytes: 2696082051
+    resolution_m: 20
+    coverage: "80S to 90S, polar stereographic, about ±304 km"
+    citation: "Barker et al. (2023), Planet. Sci. J. 4, 183. https://doi.org/10.3847/PSJ/acf3e1"
+    data_doi: "https://doi.org/10.60903/gsfcpgda-lola-spole"
+    licence: "Citation requested on the PGDA product page; no other licence text."
+    catalog: https://pgda.gsfc.nasa.gov/products/90
+
+  slope:
+    name: slope
+    unit: deg
+    mode: lower_better
+    method: horn_3x3
+    citation: "Derived from LDEM_80S_20MPP_ADJ with a 3x3 Horn gradient on the 240 m grid."
+
+  illumination:
+    name: illumination
+    unit: fraction
+    mode: higher_better
+    product_name: AVGVISIB_65S_240M_201608
+    filename: avgvisib_65s_240m_201608.jp2
+    url: https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/extras/illumination/jp2/avgvisib_65s_240m_201608.jp2
+    expected_bytes: 48625783
+    scale: 0.00004
+    offset: 0.0
+    nodata: -32768
+    resolution_m: 240
+    coverage: "complete 65S to pole; partial to about 55.2S"
+    citation: "Mazarico et al. (2011), Icarus 211, 1066–1081. https://doi.org/10.1016/j.icarus.2010.10.030"
+    licence: "PDS EXTRAS; readme states the files are not supported by PDS or the LOLA team. No licence grant stated."
+    catalog: https://pgda.gsfc.nasa.gov/products/69
+    # JP2 aux.xml has scale/offset but no CRS. Apply polar stereo from the PDS label.
+    # IMG label CENTER_LONGITUDE=0; JP2 label says 180. Use 0 to match LDEM / ANUMA.
+    georef:
+      width: 6420
+      height: 6420
+      pixel_m: 240.0
+      sample_projection_offset: 3209.5
+      line_projection_offset: 3209.5
+      center_longitude: 0.0
+      proj4: "+proj=stere +lat_0=-90 +lon_0=0 +R=1737400 +units=m +no_defs"
+    sidecars:
+      - filename: avgvisib_65s_240m_201608_aux.xml
+        url: https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/extras/illumination/jp2/avgvisib_65s_240m_201608_aux.xml
+      - filename: avgvisib_65s_240m_201608_jp2.lbl
+        url: https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/extras/illumination/jp2/avgvisib_65s_240m_201608_jp2.lbl
+
+  hydrogen:
+    name: hydrogen
+    unit: ppm
+    mode: higher_better
+    product_name: hydrogenhd
+    filename: hydrogenhd.dat
+    url: https://pds-geosciences.wustl.edu/missions/lunarp/reduced/hydrogenhd.dat
+    expected_bytes: 518400
+    ascii_url: https://pds-geosciences.wustl.edu/missions/lunarp/reduced/hydrogenhd.txt
+    ascii_filename: hydrogenhd.txt
+    width: 720
+    height: 360
+    dtype: ">i2"
+    # PDS special-product note: binary integers are 10× the ASCII ppm values.
+    scale: 0.1
+    # First line = south pole, first sample = -180°E, 0.5° pixels, south-up.
+    xmin: -180.0
+    ymax: -90.0
+    xres: 0.5
+    yres: 0.5
+    geodetic_proj4: "+proj=longlat +R=1737400 +no_defs"
+    coverage: "global 0.5° cylindrical; polar pixels are coarse"
+    citation: "Feldman et al. (2001), J. Geophys. Res. 106(E10), 23231–23251. https://doi.org/10.1029/2000JE001444"
+    licence: "PDS Geosciences Node special product, not a peer-reviewed PDS archive. No licence text."
+    catalog: https://pds-geosciences.wustl.edu/missions/lunarp/reduced_special.html
+    fallback_reason: "LRO LEND has no downloadable collimated-epithermal hydrogen map on PDS; only time-series counts."
+
+  earth_visibility:
+    name: earth_visibility
+    unit: deg
+    mode: higher_better
+    citation: "Derived from the ingested DEM. Clearance = Earth elevation minus horizon elevation toward (0°E, 0°N)."
+
+artemis3:
+  source_url: https://www.nasa.gov/news-release/nasa-provides-update-on-artemis-iii-moon-landing-regions/
+  announced: "2024-10-28"
+  approximate: true
+  coordinate_status: not_published_by_nasa
+  note: >
+    NASA named nine candidate regions and did not publish centre coordinates
+    on nasa.gov. Geometry is null until coordinates are confirmed. The 2022
+    thirteen-region release described ~15 km × 15 km boxes; the 2024 page
+    does not repeat that size.
+  regions:
+    - Peak near Cabeus B
+    - Haworth
+    - Malapert Massif
+    - Mons Mouton Plateau
+    - Mons Mouton
+    - Nobile Rim 1
+    - Nobile Rim 2
+    - de Gerlache Rim 2
+    - Slater Plain

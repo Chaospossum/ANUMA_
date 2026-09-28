@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anuma"
+version = "0.1.0"
+description = "Landing-site decision support for the lunar south pole (MAGPIE / Neospace 2026)."
+requires-python = ">=3.11"
+dependencies = [
+  "numpy",
+  "rasterio",
+  "pyproj",
+  "matplotlib",
+  "pyyaml",
+  "scipy",
+  "affine",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+serve = ["fastapi", "uvicorn"]
+
+[tool.setuptools.packages.find]
+include = ["anuma*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
