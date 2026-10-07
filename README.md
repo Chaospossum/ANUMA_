@@ -2,7 +2,8 @@
 
 Landing-site decision support for the lunar south pole. Demo case: ispace-EUROPE MAGPIE (ESA, 2029), Neospace Challenge 2026.
 
-Phases 1–4 are in this tree: ingest, scoring, FastAPI, and the map UI at `http://localhost:8000`. Static figures are Phase 5.
+Phases 1–5 are in this tree: ingest, scoring, FastAPI, the map UI at
+`http://localhost:8000`, and static figure export.
 
 ## Install
 
@@ -17,13 +18,17 @@ python3 -m pip install -r requirements.txt
 ```bash
 python3 -m anuma.ingest
 python3 -m uvicorn anuma.api:app --host 127.0.0.1 --port 8000
-python3 -m anuma.render_static --weights config/demo_weights.yaml  # Phase 5, not implemented yet
+python3 -m anuma.render_static --weights config/demo_weights.yaml
 ```
+
+The static export reads the ingested `.npy` grids and writes `score.png` plus
+one normalized criterion PNG per configured weight to `out/static/`. Use
+`--grid-dir` and `--output-dir` to select other input and output directories.
 
 Unit tests use constructed arrays and `--synthetic` ingest only:
 
 ```bash
-python3 -m pytest tests/test_ingest.py tests/test_score.py tests/test_api.py
+python3 -m pytest tests/test_ingest.py tests/test_score.py tests/test_api.py tests/test_render_static.py
 python3 -m anuma.ingest --synthetic --data-dir /tmp/anuma-test
 ```
 

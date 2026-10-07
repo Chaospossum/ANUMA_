@@ -1,0 +1,5 @@
+# Demonstration weights mirror the public defaults in config/layers.yaml.
+weights:
+  illumination: 0.5
+  hydrogen: 0.3
+  earth_visibility: 0.2
