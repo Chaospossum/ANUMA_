@@ -1,5 +1,9 @@
 # HPC Use
 
+## How HPC relates to the submitted paper
+
+The submitted 28 September paper does not mention HPC because MeluXina access came later. The team is adding HPC now. It does not replace the paper. It checks whether the ranking described by the paper still holds at 20 m. The mission case remains open.
+
 ## How the hours are used
 
 The allocation is 300 CPU node-hours and 1 TB. The planned spend is about 80 node-hours. About 220 node-hours stay unused on purpose.
