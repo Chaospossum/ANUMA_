@@ -5,6 +5,12 @@ Landing-site decision support for the lunar south pole. Demo case: ispace-EUROPE
 Phases 1–5 are in this tree: ingest, scoring, FastAPI, the map UI at
 `http://localhost:8000`, and static figure export.
 
+Project documentation:
+
+- [Team and delivery facts](docs/TEAM.md)
+- [Winning strategy](docs/winning-strategy.md)
+- [Short ispace meeting guide](docs/ispace-meeting.md)
+
 ## Install
 
 Run all commands from the repository root. Python 3.11 or newer is required;
