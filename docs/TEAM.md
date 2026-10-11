@@ -8,3 +8,4 @@
 - MeluXina has 1 TB reserved. 300 CPU node-hours were accepted as enough; planned use is about 80 node-hours: a 2-hour smoke test, a 40-hour 20 m vs 240 m check, and 40-hour statistical tests. About 220 node-hours are held.
 - No cluster job will run until accounts work.
 - This is screening, not landing clearance.
+- [HPC use plan](hpc-use.md)

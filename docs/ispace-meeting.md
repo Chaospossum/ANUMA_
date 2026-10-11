@@ -3,7 +3,7 @@
 
 ## Opening
 
-> ANUMA converts lunar mission requirements into constraints, ranked candidate regions, and explainable recommendations. Our MAGPIE-inspired demo uses public data and synthetic assumptions. We are not requesting confidential mission information.
+> ANUMA converts lunar mission requirements into constraints, ranked candidate regions, and explainable recommendations. The mission case is still open. We are not requesting confidential mission information.
 
 ## 12 Questions
 

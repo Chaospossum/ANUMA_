@@ -1,6 +1,6 @@
 # ANUMA
 
-Landing-site decision support for the lunar south pole. Demo case: ispace-EUROPE MAGPIE (ESA, 2029), Neospace Challenge 2026.
+Landing-site decision support for the lunar south pole. The mission case is still open.
 
 Phases 1–5 are in this tree: ingest, scoring, FastAPI, the map UI at
 `http://localhost:8000`, and static figure export.
@@ -8,6 +8,7 @@ Phases 1–5 are in this tree: ingest, scoring, FastAPI, the map UI at
 Project documentation:
 
 - [Team and delivery facts](docs/TEAM.md)
+- [HPC use plan](docs/hpc-use.md)
 - [Winning strategy](docs/winning-strategy.md)
 - [Short ispace meeting guide](docs/ispace-meeting.md)
 
