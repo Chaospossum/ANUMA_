@@ -25,8 +25,14 @@ The tests answer two questions:
 
 The tests are not a way to consume 300 hours. Most tests run on the 240 m grid. A 20 m rerun happens only for a case that already changed the ranking.
 
-## Proposed bounded Monte Carlo
+## Possible studies
 
-The mission case is still open. A bounded Monte Carlo is a possible use of the held node-hours, not a way to spend them for show. The proposed simulation would draw many weight sets and slope limits on the cheap 240 m grid and record how often each site remains in the top ten. It would rerun at 20 m only for sites that are unstable. That is the simulation. It would show ispace which sites survive requirement changes. This is proposed and has not been done; it becomes a useful portfolio line only after jobs actually run.
+The mission case remains open, and none of these possible studies has been done. They are optional uses of the held node-hours, not work to run for show or describe as a portfolio result before jobs actually run:
 
-The mission case is still undecided. The tests wait until the team chooses the requirements.
+- Possible, not done: Weight Monte Carlo on the 240 m grid, measuring how often a site stays in the top ten.
+- Possible, not done: Slope-limit sweep, including the paper's 5° goal and 8° threshold.
+- Possible, not done: 20 m versus 240 m agreement map.
+- Possible, not done: Ellipse check, where a site counts only if a small neighborhood around it also passes.
+- Possible, not done: A few 20 m reruns with elevation noise, only for sites that look unstable.
+
+The 300 CPU node-hours cover these studies if every full-cap job keeps a walltime cap. A homemade illumination model over many dates is not on the list.

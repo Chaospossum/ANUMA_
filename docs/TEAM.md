@@ -9,6 +9,4 @@
 - MeluXina has 1 TB reserved. 300 CPU node-hours were accepted as enough; planned use is about 80 node-hours: a 2-hour smoke test, a 40-hour 20 m vs 240 m check, and 40-hour statistical tests. About 220 node-hours are held.
 - No cluster job will run until accounts work.
 - This is screening, not landing clearance.
-- [HPC use plan](hpc-use.md)
-
-The mission case is still open. A bounded Monte Carlo is a possible use of the held node-hours, not a way to spend them for show. The proposed simulation would draw many weight sets and slope limits on the cheap 240 m grid and record how often each site remains in the top ten. It would rerun at 20 m only for sites that are unstable. That is the simulation. It would show ispace which sites survive requirement changes. This is proposed and has not been done; it becomes a useful portfolio line only after jobs actually run.
+- [Possible studies](hpc-use.md#possible-studies) are optional and unrun; the mission case remains open.
