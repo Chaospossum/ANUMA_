@@ -25,4 +25,8 @@ The tests answer two questions:
 
 The tests are not a way to consume 300 hours. Most tests run on the 240 m grid. A 20 m rerun happens only for a case that already changed the ranking.
 
+## Proposed bounded Monte Carlo
+
+The mission case is still open. A bounded Monte Carlo is a possible use of the held node-hours, not a way to spend them for show. The proposed simulation would draw many weight sets and slope limits on the cheap 240 m grid and record how often each site remains in the top ten. It would rerun at 20 m only for sites that are unstable. That is the simulation. It would show ispace which sites survive requirement changes. This is proposed and has not been done; it becomes a useful portfolio line only after jobs actually run.
+
 The mission case is still undecided. The tests wait until the team chooses the requirements.
