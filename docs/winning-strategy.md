@@ -1,6 +1,8 @@
 
 # Winning Strategy
 
+The team has not chosen the mission case yet.
+
 ## Executive Summary
 
 ANUMA wins if judges believe three things at once:
