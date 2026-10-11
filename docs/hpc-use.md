@@ -34,5 +34,6 @@ The mission case remains open, and none of these possible studies has been done.
 - Possible, not done: 20 m versus 240 m agreement map.
 - Possible, not done: Ellipse check, where a site counts only if a small neighborhood around it also passes.
 - Possible, not done: A few 20 m reruns with elevation noise, only for sites that look unstable.
+- Possible, not done: Bounded homemade sun model. It can fit the allocation if the horizon is computed once from the DEM and later dates only compare the sun's elevation to that horizon; a fresh ray-march for every pixel and every date does not fit. Prove it on the 240 m grid against the published 2016 average-illumination map before any 20 m run. Do not claim a mission-duration percentage until the team chooses dates. The case stays open. The published map remains the measured layer; the model is a scenario tool.
 
-The 300 CPU node-hours cover these studies if every full-cap job keeps a walltime cap. A homemade illumination model over many dates is not on the list.
+The 300 CPU node-hours cover these studies if every full-cap job keeps a walltime cap.
