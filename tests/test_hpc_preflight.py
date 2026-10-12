@@ -118,8 +118,21 @@ def test_preflight_rejects_unknown_qos(tmp_path, monkeypatch):
 def test_preflight_rejects_dev_qos_for_batch_smoke(tmp_path, monkeypatch):
     _configured_environment(tmp_path, monkeypatch)
     monkeypatch.setenv("ANUMA_QOS", "dev")
-    with pytest.raises(RuntimeError, match="requires the official test QOS"):
+    with pytest.raises(RuntimeError, match="requires QOS 'test'"):
         preflight.run_preflight(tmp_path / "receipt.json")
+
+
+def test_full_monte_carlo_requires_default_qos_and_four_hour_cap(
+    tmp_path, monkeypatch
+):
+    _configured_environment(tmp_path, monkeypatch)
+    monkeypatch.setenv("ANUMA_JOB_PROFILE", "monte-carlo-full")
+    monkeypatch.setenv("ANUMA_QOS", "default")
+    receipt = preflight.run_preflight(tmp_path / "receipt.json")
+    assert receipt["job_profile"] == "monte-carlo-full"
+    assert receipt["qos"] == "default"
+    assert receipt["job_walltime"] == "04:00:00"
+    assert receipt["job_node_hours_cap"] == 4.0
 
 
 def test_preflight_refuses_to_overwrite_receipt(tmp_path, monkeypatch):
@@ -136,6 +149,7 @@ def test_preflight_refuses_to_overwrite_receipt(tmp_path, monkeypatch):
         "hpc/bootstrap.sh",
         "hpc/discover-software.sh",
         "hpc/slurm/smoke-240m.sbatch",
+        "hpc/slurm/monte-carlo.sbatch",
     ),
 )
 def test_staging_module_regex_uses_one_literal_dot_escape(path):

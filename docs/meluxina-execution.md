@@ -106,7 +106,10 @@ account from unrelated example commands.
 - `hpc/preflight.py`: read-only Slurm, allocation, quota, path, and data checks.
 - `hpc/submit-smoke.sh`: accepts only a preflight receipt less than 24 hours old.
 - `hpc/slurm/smoke-240m.sbatch`: bounded job with a second receipt check.
+- `hpc/submit-monte-carlo.sh`: guarded pilot/full study submission wrapper.
+- `hpc/slurm/monte-carlo.sbatch`: one-node study job with mode-specific caps.
 - `anuma/hpc_smoke.py`: validates inputs, scores, and writes output lineage.
+- `anuma/hpc_monte_carlo.py`: deterministic 240 m clip-and-weight study.
 
 ## Stop conditions
 
@@ -344,3 +347,64 @@ under the declared resources. It does not validate the scientific model, prove
 After the job exits, use documented MeluXina accounting commands to record
 elapsed time, CPU time, and peak memory. Do not schedule a 20 m run until the
 240 m outputs and accounting record have been reviewed.
+
+## First study: 240 m clip-and-weight Monte Carlo
+
+This study is prepared but has not been run. It compares three declared
+policies from `config/layers.yaml`:
+
+1. `legacy_global_2_98`: the former global 2nd/98th percentile policy,
+   retained only as a comparison;
+2. `decided_per_layer`: illumination valid-pixel min–max, slope min–max only
+   after the 8° hard mask, hydrogen 2nd/98th clipping, and Earth visibility
+   2nd/98th clipping;
+3. `all_min_max`: valid-pixel min–max for every layer.
+
+The same seeded weight draws are paired across policies. Configuration fixes
+the seed (`20261012`), pilot/full counts (8/500), weight ranges around the
+documented 0.5/0.3/0.2 demo weights, and normalization-to-one. Outputs are:
+
+- top-ten membership count and frequency per site and policy;
+- exact-pixel winner frequencies and most-frequent-winner stability;
+- paired legacy-clipped versus decided-unclipped winner-class changes, where
+  a class is defined by the configured 10 km radius;
+- per-draw JSON Lines and a checksum output manifest.
+
+No latitude or site is hard-coded as the expected winner. The study refuses
+synthetic input, missing ingest provenance, and any illumination ingest whose
+`illumination_affine_revision` is not `pds3-pixel-center-v2`.
+
+### Tiny pilot
+
+Create a fresh preflight receipt from the compute allocation:
+
+```bash
+export ANUMA_JOB_PROFILE=monte-carlo-pilot
+export ANUMA_QOS=test
+.venv-hpc/bin/python hpc/preflight.py \
+  --receipt "$HOME/anuma-mc-pilot-$(date -u +%Y%m%dT%H%M%SZ).json"
+export ANUMA_PREFLIGHT_RECEIPT="$HOME/<the-new-pilot-receipt>.json"
+bash hpc/submit-monte-carlo.sh pilot
+```
+
+The wrapper repeats one node, four CPU cores, 16 GiB, `test`, and 30 minutes on
+the `sbatch` command line. It captures `myquota` before submission; the job
+captures it after every started workload and deletes job-local scratch.
+
+### Bounded full draw
+
+Only after reviewing a successful pilot, create a new receipt:
+
+```bash
+export ANUMA_JOB_PROFILE=monte-carlo-full
+export ANUMA_QOS=default
+.venv-hpc/bin/python hpc/preflight.py \
+  --receipt "$HOME/anuma-mc-full-$(date -u +%Y%m%dT%H%M%SZ).json"
+export ANUMA_PREFLIGHT_RECEIPT="$HOME/<the-new-full-receipt>.json"
+bash hpc/submit-monte-carlo.sh full
+```
+
+The full job is still one node and four CPU cores, with 32 GiB and a four-hour
+walltime (at most four node-hours), far below the held allocation. Both wrapper
+and job reject a mismatched QOS, mode, walltime, memory, receipt, manifest,
+commit, or affine provenance. Neither path downloads data or submits itself.

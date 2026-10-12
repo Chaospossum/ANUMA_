@@ -8,7 +8,7 @@ The submitted 28 September paper does not mention HPC because MeluXina access ca
 
 The confirmed `p201619` allocation is 300 CPU node-hours for the current month, with 0 used when checked. Shared project and scratch storage are 10 TB each; personal home is 100 GB. There is no GPU, FPGA, or large-memory allocation. The planned spend remains about 80 node-hours, leaving about 220 node-hours unused on purpose if that plan is approved and run.
 
-The first execution is the [guarded 240 m scoring smoke test](meluxina-execution.md): one node, four CPU cores, and a 30-minute walltime, or 2 core-hours and at most 0.5 CPU node-hours. It runs only after current allocation, quota, account, partition, QOS, and staged paths pass preflight. A later small-tile slope benchmark and any full-cap 20 m job require separate review. The proposed full-cap job remains bounded at 40 hours and would compare 20 m results with the 240 m ranking. Statistical tests remain capped at 40 hours.
+The first study is the [guarded 240 m clip-and-weight Monte Carlo](meluxina-execution.md#first-study-240-m-clip-and-weight-monte-carlo), before any 20 m job. Its tiny pilot is one CPU node under `test`, capped at 30 minutes. The full 500-draw study is one CPU node under `default`, capped at 4 hours. Both run only after allocation, quota, account, QOS, affine-fix provenance, and staged paths pass preflight. A 20 m job remains a separate later decision.
 
 ## How the work is implemented
 
@@ -33,11 +33,17 @@ The tests answer two questions:
 
 The tests are not a way to consume 300 hours. Most tests run on the 240 m grid. A 20 m rerun happens only for a case that already changed the ranking.
 
+The normalization decision is fixed in `config/layers.yaml`: illumination uses
+valid-pixel min–max; slope keeps the 8° hard mask and uses min–max only inside
+that mask; hydrogen retains 2nd/98th percentile clipping; Earth visibility
+retains 2nd/98th clipping. The former global 2/98 policy and an all-min–max
+policy remain comparison cases, not defaults.
+
 ## Possible studies
 
 The mission case remains open, and none of these possible studies has been done. They are optional uses of the held node-hours, not work to run for show or describe as a portfolio result before jobs actually run:
 
-- Possible, not done: Weight Monte Carlo on the 240 m grid, measuring how often a site stays in the top ten.
+- Prepared, not run: Clip-and-weight Monte Carlo on the 240 m grid, reporting top-ten membership frequency, winner stability, and paired clipped-versus-unclipped winner-class changes.
 - Possible, not done: Slope-limit sweep, including the paper's 5° goal and 8° threshold.
 - Possible, not done: 20 m versus 240 m agreement map.
 - Possible, not done: Ellipse check, where a site counts only if a small neighborhood around it also passes.

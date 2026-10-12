@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from xml.etree import ElementTree
@@ -126,13 +127,17 @@ def test_npy_and_grid_json(synthetic_root: Path):
     cfg = load_config()
     gdir = synthetic_root / cfg["paths"]["grid"]
     assert (gdir / "grid.json").is_file()
+    ingest_manifest = json.loads((gdir / "ingest-manifest.json").read_text())
+    assert ingest_manifest["synthetic"] is True
+    assert (
+        ingest_manifest["illumination_affine_revision"]
+        == cfg["provenance"]["illumination_affine_revision"]
+    )
     for name in ("dem", "slope", "illumination", "hydrogen", "earth_visibility"):
         assert (gdir / f"{name}.npy").is_file()
 
 
 def test_artemis_geojson_has_nine_named_regions(synthetic_root: Path):
-    import json
-
     cfg = load_config()
     path = synthetic_root / cfg["paths"]["artemis_geojson"]
     data = json.loads(path.read_text())

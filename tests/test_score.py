@@ -55,14 +55,76 @@ def test_hard_mask_slope_and_nodata(cfg):
 
 def test_normalize_higher_and_lower(cfg):
     layer = np.arange(100, dtype=np.float32).reshape(10, 10)
-    high = normalize(layer, "higher_better", cfg=cfg)
-    low = normalize(layer, "lower_better", cfg=cfg)
+    high = normalize(
+        layer,
+        "higher_better",
+        layer_name="illumination",
+        policy="legacy_global_2_98",
+        cfg=cfg,
+    )
+    low = normalize(
+        layer,
+        "lower_better",
+        layer_name="illumination",
+        policy="legacy_global_2_98",
+        cfg=cfg,
+    )
     assert 0.0 <= float(np.nanmin(high)) <= float(np.nanmax(high)) <= 1.0
     assert high[0, 0] < high[5, 0] < high[-1, -1]
     assert float(high[-1, -1]) == 1.0
     assert float(low[-1, -1]) == 0.0
     assert float(low[0, 0]) == 1.0
     np.testing.assert_allclose(high + low, 1.0, atol=1e-6)
+
+
+def test_decided_policy_preserves_illumination_bright_tail(cfg):
+    illumination = np.array([0.0, 0.1, 0.49, 0.93], dtype=np.float32)
+    decided = normalize(
+        illumination,
+        "higher_better",
+        layer_name="illumination",
+        policy="decided_per_layer",
+        cfg=cfg,
+    )
+    legacy = normalize(
+        illumination,
+        "higher_better",
+        layer_name="illumination",
+        policy="legacy_global_2_98",
+        cfg=cfg,
+    )
+    assert decided[-1] == 1.0
+    assert decided[-2] < 1.0
+    assert legacy[-2] > decided[-2]
+
+
+def test_decided_slope_min_max_uses_only_hard_mask(cfg):
+    slope = np.array([0.0, 4.0, 8.0, 40.0], dtype=np.float32)
+    mask = hard_mask(slope, cfg=cfg)
+    normalized = normalize(
+        slope,
+        "lower_better",
+        layer_name="slope",
+        policy="decided_per_layer",
+        valid_mask=mask,
+        cfg=cfg,
+    )
+    np.testing.assert_allclose(normalized[:3], [1.0, 0.5, 0.0])
+    assert np.isnan(normalized[3])
+
+
+def test_decided_hydrogen_retains_percentile_clipping(cfg):
+    hydrogen = np.arange(101, dtype=np.float32)
+    hydrogen[-1] = 10_000.0
+    normalized = normalize(
+        hydrogen,
+        "higher_better",
+        layer_name="hydrogen",
+        policy="decided_per_layer",
+        cfg=cfg,
+    )
+    assert normalized[-1] == 1.0
+    assert normalized[-2] == 1.0
 
 
 def test_rank_sites_finds_known_optima_and_separation(grid, cfg):
@@ -140,6 +202,7 @@ def test_rank_ties_use_slope_then_raw_illumination(cfg):
         {"max_slope_deg": 8.0},
         grid=small_grid,
         cfg=small_cfg,
+        normalization_policy="legacy_global_2_98",
     )
     sites = rank_sites(result, n=1)
     assert (sites[0]["row"], sites[0]["col"]) == lower_slope
@@ -153,6 +216,7 @@ def test_rank_ties_use_slope_then_raw_illumination(cfg):
         {"max_slope_deg": 8.0},
         grid=small_grid,
         cfg=small_cfg,
+        normalization_policy="legacy_global_2_98",
     )
     sites = rank_sites(result, n=1)
     highest_raw = np.unravel_index(illumination.size - 1, shape)

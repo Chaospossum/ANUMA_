@@ -13,6 +13,7 @@ from anuma.config import load_config, repo_root
 
 GRID_FILES = (
     "grid.json",
+    "ingest-manifest.json",
     "dem.npy",
     "slope.npy",
     "illumination.npy",

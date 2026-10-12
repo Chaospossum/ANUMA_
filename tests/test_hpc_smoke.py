@@ -29,10 +29,28 @@ def _fixture_manifest(tmp_path):
     grid.write_text(
         json.dumps({"resolution_m": 240.0, "height": 2, "width": 3}) + "\n"
     )
+    ingest_manifest = tmp_path / "ingest-manifest.json"
+    ingest_manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "synthetic": False,
+                "illumination_affine_revision": "pds3-pixel-center-v2",
+                "resolution_m": 240.0,
+            }
+        )
+        + "\n"
+    )
     names = ("dem", "slope", "illumination", "hydrogen", "earth_visibility")
     for index, name in enumerate(names):
         np.save(tmp_path / f"{name}.npy", np.full((2, 3), index, dtype=np.float32))
-    files = {"grid": {"path": "grid.json", "sha256": _sha(grid)}}
+    files = {
+        "grid": {"path": "grid.json", "sha256": _sha(grid)},
+        "ingest_manifest": {
+            "path": ingest_manifest.name,
+            "sha256": _sha(ingest_manifest),
+        },
+    }
     for name in names:
         path = tmp_path / f"{name}.npy"
         files[name] = {"path": path.name, "sha256": _sha(path)}
@@ -72,6 +90,19 @@ def test_manifest_path_cannot_escape_manifest_directory(tmp_path):
     body["files"]["slope"]["path"] = "../slope.npy"
     manifest.write_text(json.dumps(body))
     with pytest.raises(ValueError, match="escapes its directory"):
+        hpc_smoke.validate_input_manifest(manifest)
+
+
+def test_manifest_rejects_pre_affine_fix_grid(tmp_path):
+    manifest = _fixture_manifest(tmp_path)
+    ingest = tmp_path / "ingest-manifest.json"
+    body = json.loads(ingest.read_text())
+    body["illumination_affine_revision"] = "legacy-offset"
+    ingest.write_text(json.dumps(body))
+    manifest_body = json.loads(manifest.read_text())
+    manifest_body["files"]["ingest_manifest"]["sha256"] = _sha(ingest)
+    manifest.write_text(json.dumps(manifest_body))
+    with pytest.raises(ValueError, match="predates the affine fix"):
         hpc_smoke.validate_input_manifest(manifest)
 
 
