@@ -240,7 +240,7 @@ def test_projection_scales_waves_and_epochs_without_moving_the_cap():
     assert over["fits_production_cap"] is False
     cfg = load_sun_config()
     assert cfg["pilot"]["azimuth_count"] == 4
-    assert cfg["pilot"]["epoch_count"] == 16
+    assert cfg["pilot"]["epoch_count"] == 256
     assert cfg["validation"]["stop_rmse"] == 0.05
     assert (
         cfg["execution"]["pilot_node_hours"] + cfg["execution"]["production_node_hours"]

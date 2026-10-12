@@ -67,7 +67,9 @@ execution:
   maximum_workers: 128
   accelerators: false
   # Save the sunlight accumulators this often so a walltime kill keeps them.
-  checkpoint_every_epochs: 16
+  # Each chunk sends the accumulators to the row-tile workers and back, so
+  # small chunks spend more time on transfer than on epochs.
+  checkpoint_every_epochs: 256
   pilot_node_hours: 0.5
   production_node_hours: 14.5
   stage_node_hour_cap: 15
@@ -75,4 +77,6 @@ execution:
 # Pilot sample on the full grid. Not the RMSE gate and not a scored map.
 pilot:
   azimuth_count: 4
-  epoch_count: 16
+  # One full checkpoint chunk, so pool start-up is not scaled 10,000 times
+  # in the projection.
+  epoch_count: 256

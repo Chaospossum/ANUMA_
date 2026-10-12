@@ -1,5 +1,6 @@
 #!/bin/bash -l
-# One CPU node, 128 workers, no accelerators.
+# One CPU node, 128 workers, no accelerators. 240G is the partition limit
+# of 1920 MB per CPU times 128 CPUs; a node has 480 GB usable, not 512.
 # Resource caps are repeated and enforced by submit-sun-validation.sh.
 # Pilot is QOS test and at most 30 minutes. Production is 14:30 so the
 # pilot plus production stays within 15 node-hours.
@@ -41,12 +42,12 @@ case "${ANUMA_STUDY_MODE}" in
   pilot)
     expected_qos="test"
     expected_time="00:30:00"
-    expected_memory_mb="524288"
+    expected_memory_mb="245760"
     ;;
   production)
     expected_qos="default"
     expected_time="14:30:00"
-    expected_memory_mb="524288"
+    expected_memory_mb="245760"
     ;;
   *)
     echo "invalid study mode" >&2

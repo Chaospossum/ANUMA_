@@ -390,13 +390,15 @@ def _advance_sunlight_block(
     return total, current_dark, longest_dark
 
 
+# Read-only arrays for row-tile workers. Set before the fork pool starts so
+# each worker inherits them instead of receiving a pickled copy per chunk.
+_TILE_SHARED: dict[str, np.ndarray] | None = None
+
+
 def _advance_sunlight_tile(task: tuple) -> tuple[int, int, np.ndarray, np.ndarray, np.ndarray]:
     (
         row0,
         row1,
-        horizons,
-        longitude,
-        latitude,
         vectors,
         total,
         current_dark,
@@ -404,10 +406,13 @@ def _advance_sunlight_tile(task: tuple) -> tuple[int, int, np.ndarray, np.ndarra
         disk_radius_deg,
         azimuth_origin_deg,
     ) = task
+    shared = _TILE_SHARED
+    if shared is None:
+        raise RuntimeError("row-tile worker started without shared arrays")
     advanced = _advance_sunlight_block(
-        horizons,
-        longitude,
-        latitude,
+        np.ascontiguousarray(shared["horizons"][:, row0:row1, :]),
+        np.ascontiguousarray(shared["longitude"][row0:row1, :]),
+        np.ascontiguousarray(shared["latitude"][row0:row1, :]),
         vectors,
         total,
         current_dark,
@@ -416,6 +421,23 @@ def _advance_sunlight_tile(task: tuple) -> tuple[int, int, np.ndarray, np.ndarra
         azimuth_origin_deg=azimuth_origin_deg,
     )
     return (row0, row1, *advanced)
+
+
+def _start_tile_pool(
+    horizons: np.ndarray,
+    longitude: np.ndarray,
+    latitude: np.ndarray,
+    workers: int,
+):
+    """Fork one worker pool that shares the read-only arrays for the whole run."""
+    global _TILE_SHARED
+    _TILE_SHARED = {
+        "horizons": horizons,
+        "longitude": longitude,
+        "latitude": latitude,
+    }
+    processes = len(_row_blocks(longitude.shape[0], workers))
+    return get_context("fork").Pool(processes=processes)
 
 
 def _advance_sunlight(
@@ -430,6 +452,7 @@ def _advance_sunlight(
     workers: int,
     disk_radius_deg: float,
     azimuth_origin_deg: float,
+    pool=None,
 ) -> None:
     if len(vectors) == 0:
         return
@@ -455,9 +478,6 @@ def _advance_sunlight(
             (
                 row0,
                 row1,
-                np.ascontiguousarray(horizons[:, row0:row1, :]),
-                np.ascontiguousarray(longitude[row0:row1, :]),
-                np.ascontiguousarray(latitude[row0:row1, :]),
                 np.ascontiguousarray(vectors),
                 np.ascontiguousarray(total[row0:row1, :]),
                 np.ascontiguousarray(current_dark[row0:row1, :]),
@@ -466,13 +486,20 @@ def _advance_sunlight(
                 float(azimuth_origin_deg),
             )
         )
-    with get_context("fork").Pool(processes=len(tasks)) as pool:
+    owned = pool is None
+    if owned:
+        pool = _start_tile_pool(horizons, longitude, latitude, workers)
+    try:
         for row0, row1, tile_total, tile_current, tile_longest in pool.imap_unordered(
             _advance_sunlight_tile, tasks
         ):
             total[row0:row1, :] = tile_total
             current_dark[row0:row1, :] = tile_current
             longest_dark[row0:row1, :] = tile_longest
+    finally:
+        if owned:
+            pool.close()
+            pool.join()
 
 
 def _checkpoint_paths(checkpoint_dir: Path) -> tuple[Path, Path]:
@@ -580,34 +607,42 @@ def evaluate_sunlight(
         longitude.shape,
         epoch_count,
     )
-    while next_epoch < epoch_count:
-        stop = min(epoch_count, next_epoch + int(checkpoint_every))
-        _advance_sunlight(
-            horizons,
-            longitude,
-            latitude,
-            vectors[next_epoch:stop],
-            total,
-            current_dark,
-            longest_dark,
-            workers=workers,
-            disk_radius_deg=disk_radius_deg,
-            azimuth_origin_deg=azimuth_origin_deg,
-        )
-        next_epoch = stop
-        if checkpoint_dir is not None:
-            _save_sunlight_checkpoint(
-                Path(checkpoint_dir),
+    parallel = workers > 1 and longitude.shape[0] > 1 and next_epoch < epoch_count
+    pool = _start_tile_pool(horizons, longitude, latitude, workers) if parallel else None
+    try:
+        while next_epoch < epoch_count:
+            stop = min(epoch_count, next_epoch + int(checkpoint_every))
+            _advance_sunlight(
+                horizons,
+                longitude,
+                latitude,
+                vectors[next_epoch:stop],
                 total,
                 current_dark,
                 longest_dark,
-                next_epoch,
-                epoch_count,
+                workers=workers,
+                disk_radius_deg=disk_radius_deg,
+                azimuth_origin_deg=azimuth_origin_deg,
+                pool=pool,
             )
-            _log_progress(
-                f"sunlight epochs {next_epoch}/{epoch_count} checkpointed",
-                log_path,
-            )
+            next_epoch = stop
+            if checkpoint_dir is not None:
+                _save_sunlight_checkpoint(
+                    Path(checkpoint_dir),
+                    total,
+                    current_dark,
+                    longest_dark,
+                    next_epoch,
+                    epoch_count,
+                )
+                _log_progress(
+                    f"sunlight epochs {next_epoch}/{epoch_count} checkpointed",
+                    log_path,
+                )
+    finally:
+        if pool is not None:
+            pool.close()
+            pool.join()
 
     percent_time_lit = (100.0 * total / epoch_count).astype(np.float32)
     invalid = (

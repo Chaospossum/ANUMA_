@@ -10,7 +10,7 @@ case "${mode}" in
     profile="sun-validation-pilot"
     qos="test"
     walltime="00:30:00"
-    memory="512G"
+    memory="240G"
     node_hours="0.5"
     core_hours="64.0"
     ;;
@@ -18,7 +18,7 @@ case "${mode}" in
     profile="sun-validation"
     qos="default"
     walltime="14:30:00"
-    memory="512G"
+    memory="240G"
     node_hours="14.5"
     core_hours="1856.0"
     ;;

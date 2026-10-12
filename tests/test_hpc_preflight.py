@@ -132,8 +132,8 @@ def test_sun_validation_profiles_fit_one_node_and_fifteen_hours():
     assert production["qos"] == "default"
     assert production["walltime"] == "14:30:00"
     assert production["cpus"] == 128
-    assert pilot["memory"] == "512G"
-    assert production["memory"] == "512G"
+    assert pilot["memory"] == "240G"
+    assert production["memory"] == "240G"
     assert pilot["node_hours"] + production["node_hours"] <= 15
     script = (REPO_ROOT / "hpc" / "slurm" / "sun-validation.sbatch").read_text()
     wrapper = (REPO_ROOT / "hpc" / "submit-sun-validation.sh").read_text()

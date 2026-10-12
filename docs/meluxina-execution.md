@@ -17,7 +17,7 @@ The 12 October `myquota` facts for project/account `p201619` are:
 
 - 300 CPU node-hours for the current month, with about 1 used when confirmed;
 - no GPU, FPGA, or large-memory allocation;
-- CPU nodes have 128 cores and 512 GB RAM;
+- CPU nodes have 128 cores and 512 GB RAM (480 GB usable; the `cpu` partition allows 1920 MB per CPU, so 128 CPUs can request at most 240G);
 - `/project/home/p201619` and `/project/scratch/p201619` each have 10 TB;
 - the repository is at `/project/home/p201619/ANUMA_`;
 - personal home has 100 GB.
@@ -245,7 +245,7 @@ Both modes go through preflight and the receipt: account `p201619`, input and
 kernel manifest checksums, affine revision `pds3-pixel-center-v2`, and the
 frozen epoch file. One CPU node, 128 workers, no accelerators. Pilot mode
 uses QOS `test` and at most 30 minutes. It is a measurement, not the full
-window: 4 horizon azimuths and 16 epochs on the full grid. It writes timings
+window: 4 horizon azimuths and 256 epochs on the full grid. It writes timings
 and a projected node-hour cost to `pilot-measurement.json` and does not apply
 the RMSE gate. Production uses QOS `default` and 14:30. Sunlight evaluation
 is split across row-tile processes. The job logs progress and checkpoints

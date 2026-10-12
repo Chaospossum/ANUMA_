@@ -120,7 +120,7 @@ tool, not a replacement measurement.
 ### Resources
 
 - Pilot on one CPU node, QOS `test`, at most 00:30 (0.5 node-hours), 128
-  workers, no accelerators. It times 4 horizon azimuths and 16 epochs on the
+  workers, no accelerators. It times 4 horizon azimuths and 256 epochs on the
   full grid, then writes `pilot-measurement.json` with a projected one-node
   cost. It does not apply the RMSE gate.
 - Production on one CPU node, QOS `default`, hard walltime 14:30 (14.5
