@@ -9,10 +9,13 @@ import pytest
 
 from anuma.config import repo_root
 from anuma.sun import (
+    _advance_sunlight,
+    _save_sunlight_checkpoint,
     compute_horizons,
     evaluate_sunlight,
     horizon_for_azimuth,
     load_sun_config,
+    project_one_node_hours,
     sun_disk_visible_fraction,
     sun_vectors_from_spice,
     validation_metrics,
@@ -116,6 +119,133 @@ def test_synthetic_flat_horizon_outputs_expected_metrics():
         result["longest_continuous_darkness_hours"], [[2.0]]
     )
     assert not result["passes_80_percent"][0, 0]
+
+
+def _sunlight_fixture():
+    generator = np.random.default_rng(4)
+    horizons = generator.normal(size=(6, 9, 5)).astype(np.float32)
+    longitude = generator.uniform(-180.0, 180.0, size=(9, 5))
+    latitude = generator.uniform(-90.0, -80.0, size=(9, 5))
+    vectors = generator.normal(size=(5, 3))
+    vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
+    return horizons, longitude, latitude, vectors
+
+
+def test_parallel_sunlight_tiles_match_serial_bits():
+    horizons, longitude, latitude, vectors = _sunlight_fixture()
+    serial = evaluate_sunlight(
+        horizons,
+        longitude,
+        latitude,
+        vectors,
+        cadence_hours=1.0,
+        workers=1,
+        checkpoint_every=2,
+    )
+    parallel = evaluate_sunlight(
+        horizons,
+        longitude,
+        latitude,
+        vectors,
+        cadence_hours=1.0,
+        workers=4,
+        checkpoint_every=2,
+    )
+    for key, serial_array in serial.items():
+        assert np.array_equal(serial_array, parallel[key])
+
+
+def test_sunlight_checkpoint_resume_matches_serial(tmp_path):
+    horizons, longitude, latitude, vectors = _sunlight_fixture()
+    total = np.zeros(longitude.shape, dtype=np.float64)
+    current_dark = np.zeros(longitude.shape, dtype=np.int64)
+    longest_dark = np.zeros(longitude.shape, dtype=np.int64)
+    _advance_sunlight(
+        horizons,
+        longitude,
+        latitude,
+        vectors[:2],
+        total,
+        current_dark,
+        longest_dark,
+        workers=1,
+        disk_radius_deg=0.27,
+        azimuth_origin_deg=0.0,
+    )
+    _save_sunlight_checkpoint(tmp_path, total, current_dark, longest_dark, 2, len(vectors))
+    resumed = evaluate_sunlight(
+        horizons,
+        longitude,
+        latitude,
+        vectors,
+        cadence_hours=1.5,
+        workers=3,
+        checkpoint_dir=tmp_path,
+        checkpoint_every=2,
+    )
+    serial = evaluate_sunlight(
+        horizons,
+        longitude,
+        latitude,
+        vectors,
+        cadence_hours=1.5,
+        workers=1,
+    )
+    for key, serial_array in serial.items():
+        assert np.array_equal(serial_array, resumed[key])
+
+
+def test_horizon_checkpoint_matches_serial(tmp_path):
+    dem = np.arange(16, dtype=np.float32).reshape(4, 4)
+    serial = compute_horizons(dem, 240.0, azimuth_count=4, workers=1)
+    saved = compute_horizons(
+        dem, 240.0, azimuth_count=4, workers=2, checkpoint_dir=tmp_path
+    )
+    resumed = compute_horizons(
+        dem, 240.0, azimuth_count=4, workers=1, checkpoint_dir=tmp_path
+    )
+    assert np.array_equal(serial, saved)
+    assert np.array_equal(serial, resumed)
+
+
+def test_projection_scales_waves_and_epochs_without_moving_the_cap():
+    projected = project_one_node_hours(
+        horizon_seconds=10.0,
+        pilot_azimuths=4,
+        full_azimuths=8,
+        horizon_workers=2,
+        eval_seconds=4.0,
+        pilot_epochs=2,
+        full_epochs=10,
+        spice_seconds=1.0,
+    )
+    assert projected["projected_horizon_seconds"] == 20.0
+    assert projected["projected_eval_seconds"] == 20.0
+    assert projected["projected_spice_seconds"] == 5.0
+    assert projected["projected_wall_seconds"] == 45.0
+    assert projected["projected_node_hours"] == 45.0 / 3600.0
+    assert projected["fits_production_cap"] is True
+    assert projected["production_node_hours"] == 14.5
+    assert projected["stage_node_hour_cap"] == 15.0
+    over = project_one_node_hours(
+        horizon_seconds=14.5 * 3600.0,
+        pilot_azimuths=4,
+        full_azimuths=360,
+        horizon_workers=128,
+        eval_seconds=0.0,
+        pilot_epochs=16,
+        full_epochs=16,
+        spice_seconds=0.0,
+    )
+    assert over["fits_production_cap"] is False
+    cfg = load_sun_config()
+    assert cfg["pilot"]["azimuth_count"] == 4
+    assert cfg["pilot"]["epoch_count"] == 16
+    assert cfg["validation"]["stop_rmse"] == 0.05
+    assert (
+        cfg["execution"]["pilot_node_hours"] + cfg["execution"]["production_node_hours"]
+        <= cfg["execution"]["stage_node_hour_cap"]
+    )
 
 
 def test_validation_gate_reports_fixed_metrics():

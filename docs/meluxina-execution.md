@@ -244,9 +244,19 @@ The receipt rejects a bad epoch file or a raised RMSE limit.
 Both modes go through preflight and the receipt: account `p201619`, input and
 kernel manifest checksums, affine revision `pds3-pixel-center-v2`, and the
 frozen epoch file. One CPU node, 128 workers, no accelerators. Pilot mode
-uses QOS `test` and at most 30 minutes. Production uses QOS `default` and
-14:30. Those two walltimes add up to 15 node-hours. This document does not
-submit the job.
+uses QOS `test` and at most 30 minutes. It is a measurement, not the full
+window: 4 horizon azimuths and 16 epochs on the full grid. It writes timings
+and a projected node-hour cost to `pilot-measurement.json` and does not apply
+the RMSE gate. Production uses QOS `default` and 14:30. Sunlight evaluation
+is split across row-tile processes. The job logs progress and checkpoints
+finished horizon azimuths and sunlight accumulators. A timeout leaves those
+files in the job directory. Those two walltimes add up to 15 node-hours.
+`stop_rmse` stays 0.05. This document does not submit the job.
+
+A laptop timing scaled to a 2534² grid was about 0.9 s per epoch in the
+serial loop and about 195 s per horizon azimuth. That serial loop is why the
+pilot is a sample and why production evaluates row tiles instead of one core.
+Those figures are not a MeluXina result and not the RMSE gate.
 
 ```bash
 export ANUMA_JOB_PROFILE=sun-validation-pilot
