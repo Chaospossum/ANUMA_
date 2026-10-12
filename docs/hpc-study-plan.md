@@ -146,6 +146,18 @@ stop: stages B–D do not start. Do not tune the threshold after seeing output.
 The scenario default is calendar year 2029, but it does not substitute for the
 published map's validation interval. The mission case remains open.
 
+### Operator status, 12 October 2026
+
+MeluXina project `p201619` reports that
+`/project/home/p201619/spice-kernels/kernel-manifest.json` is the kernel pin.
+Roles `DE440`, `moon_pa_de440_200625`, `moon_de440_250416.tf`, and `naif0012`
+are present and were SHA-256 verified twice. Digests stay in that manifest.
+`.venv-hpc-sun` is built. An operator-reported geometry sanity check says
+south-pole Sun elevation over calendar 2029 stays within ±1.53°. No Slurm job
+id was supplied for that check. It is not the AVGVISIB validation gate and not
+a scored illumination result. The RMSE 0.05 gate against
+`avgvisib_65s_240m_201608` remains unrun and blocking.
+
 ## Stage B — full-cap 20 m slope and ranking comparison
 
 Stage B asks only whether the 240 m ranking survives the full-cap 20 m slope

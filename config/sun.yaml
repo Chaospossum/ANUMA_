@@ -15,14 +15,28 @@ sun:
   aberration_correction: LT+S
   observer: MOON
   target: SUN
-  # Kernel files are externally supplied, checksummed scientific inputs.
-  # The job manifest must name and hash DE440, lunar orientation/frame, and
-  # leap-second kernels before spiceypy is invoked.
+  # MeluXina project p201619, operator report 12 October 2026.
+  # SHA-256 pins stay in this manifest. Do not copy them into the repository.
+  kernel_manifest: /project/home/p201619/spice-kernels/kernel-manifest.json
+  # Roles the operator reported present and SHA-256 verified twice.
+  # The job refuses to run if any of these roles is missing.
   required_kernel_roles:
-    - de440_ephemeris
-    - lunar_orientation
-    - lunar_frame
-    - leap_seconds
+    - DE440
+    - moon_pa_de440_200625
+    - moon_de440_250416.tf
+    - naif0012
+
+# Operator-reported geometry sanity check. Not the AVGVISIB validation
+# gate and not a scored illumination result. No Slurm job id was supplied.
+geometry_sanity:
+  reported_on: "2026-10-12"
+  project: p201619
+  environment: .venv-hpc-sun
+  environment_built: true
+  check: south-pole Sun elevation over calendar 2029
+  result: within ±1.53°
+  slurm_job_id: null
+  kind: operator_reported_geometry_sanity_check
 
 scenario:
   default_start_utc: "2029-01-01T00:00:00Z"
@@ -44,6 +58,9 @@ validation:
   stop_rmse: 0.05
   tune_threshold_after_run: false
   report_directory: out/sun-validation
+  # RMSE 0.05 against avgvisib_65s_240m_201608 has not been run.
+  status: unrun
+  blocking: true
 
 execution:
   nodes: 1

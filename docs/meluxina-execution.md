@@ -114,6 +114,8 @@ account from unrelated example commands.
 - `anuma/hpc_monte_carlo.py`: deterministic 240 m clip-and-weight study.
 - `config/sun.yaml`: separate horizon, DE440, date, output, and fixed
   validation-gate settings; it does not modify `config/layers.yaml`.
+  The kernel pin is `/project/home/p201619/spice-kernels/kernel-manifest.json`.
+  Digests stay in that file.
 - `anuma/sun.py` and `anuma/sun_validation.py`: reusable terrain horizons,
   SPICE-only Sun directions, disk visibility, darkness outputs, and Stage-A
   RMSE/bias/scatter validation.
@@ -203,9 +205,12 @@ regenerated and reviewed. Do not switch to staging or guess package names.
 ### Supported Sun-model environment
 
 Inside a reviewed compute allocation, build the separate hash-pinned SPICE
-environment with OS Python 3.12. Kernel files are not downloaded by bootstrap:
-DE440, lunar orientation/frame, and leap-second kernels are externally staged
-and listed with SHA-256 digests in a job-specific kernel manifest.
+environment with OS Python 3.12. Kernel files are not downloaded by bootstrap.
+The job reads `/project/home/p201619/spice-kernels/kernel-manifest.json` and
+verifies each listed file's SHA-256 before it imports or calls `spiceypy`.
+It refuses to run if any required role is missing. The required roles are
+`DE440`, `moon_pa_de440_200625`, `moon_de440_250416.tf`, and `naif0012`.
+The manifest on MeluXina is the pin; this repository does not copy the digests.
 
 ```bash
 export ANUMA_ENVIRONMENT=sun
@@ -214,11 +219,38 @@ export ANUMA_VENV=/project/home/p201619/ANUMA_/.venv-hpc-sun
 bash hpc/bootstrap.sh
 ```
 
+Pass that manifest explicitly, or omit `--kernel-manifest` so the job uses
+`sun.kernel_manifest` from `config/sun.yaml`:
+
+```bash
+.venv-hpc-sun/bin/python -m anuma.sun_validation \
+  --kernel-manifest /project/home/p201619/spice-kernels/kernel-manifest.json \
+  --input-manifest /project/home/p201619/ANUMA_/data/input-manifest.json \
+  --epoch-manifest "$ANUMA_EPOCH_MANIFEST" \
+  --output-dir /project/home/p201619/ANUMA_/out/sun-validation \
+  --workers 1
+```
+
+`ANUMA_EPOCH_MANIFEST` must name a reviewed epoch file. This operator report
+did not supply one.
+
+#### Operator report, 12 October 2026
+
+Project `p201619`:
+
+- `.venv-hpc-sun` is built.
+- Roles `DE440`, `moon_pa_de440_200625`, `moon_de440_250416.tf`, and
+  `naif0012` are present in the manifest above and were SHA-256 verified twice.
+- Operator-reported geometry sanity check: south-pole Sun elevation over
+  calendar 2029 stays within ±1.53°. No Slurm job id was supplied. This is
+  not the AVGVISIB validation gate and not a scored illumination result.
+
 Stage A also requires a reviewed epoch manifest containing the published
 `avgvisib_65s_240m_201608` temporal definition and explicit UTC epochs.
 `anuma.sun_validation` refuses an empty definition. Its real-data destination
 is `out/sun-validation/`; no report is committed here. The fixed gate is RMSE
-0.05, accompanied by bias and residual scatter. Its calendar-year-2029
+0.05, accompanied by bias and residual scatter. That gate against
+`avgvisib_65s_240m_201608` remains unrun and blocking. The calendar-year-2029
 scenario default remains configurable and is not a mission interval.
 
 ## Ingest, transfer, and pin the 240 m inputs

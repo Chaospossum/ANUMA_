@@ -24,6 +24,15 @@ def load_sun_config(path: Path | None = None) -> dict:
         return yaml.safe_load(handle)
 
 
+def configured_kernel_manifest(cfg: dict | None = None) -> Path:
+    """Return the external kernel manifest path. Digests are not in this repo."""
+    cfg = cfg if cfg is not None else load_sun_config()
+    raw = cfg["sun"].get("kernel_manifest")
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("sun.kernel_manifest is required")
+    return Path(raw)
+
+
 def _ray_offsets(
     shape: tuple[int, int], azimuth_deg: float
 ) -> list[tuple[int, int]]:
@@ -133,6 +142,66 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def verify_kernel_manifest(
+    kernel_manifest: Path, required_roles: Iterable[str]
+) -> list[Path]:
+    """Read the manifest and verify every listed kernel before SPICE is called.
+
+    The MeluXina manifest is the pin. This function does not embed digests.
+    A missing required role, a repeated role, a missing file, or a SHA-256
+    mismatch raises ValueError and does not import spiceypy.
+    """
+    manifest_path = Path(kernel_manifest).resolve()
+    manifest = json.loads(manifest_path.read_text())
+    entries = manifest.get("kernels")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("kernel manifest must contain a kernels list")
+
+    by_role: dict[str, dict] = {}
+    listed: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("kernel manifest entry must be an object")
+        role = entry.get("role")
+        if not isinstance(role, str) or not role.strip():
+            raise ValueError("kernel manifest entry is missing a role")
+        if role in by_role:
+            raise ValueError(f"kernel manifest repeats role {role}")
+        by_role[role] = entry
+        listed.append(role)
+
+    required = [str(role) for role in required_roles]
+    missing = [role for role in required if role not in by_role]
+    if missing:
+        raise ValueError(
+            "kernel manifest is missing roles: " + ", ".join(missing)
+        )
+
+    order = required + [role for role in listed if role not in required]
+    verified: dict[str, Path] = {}
+    for role in order:
+        entry = by_role[role]
+        raw_path = entry.get("path")
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            raise ValueError(f"kernel path missing for role {role}")
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = manifest_path.parent / path
+        path = path.resolve()
+        if not path.is_file():
+            raise ValueError(f"kernel file missing for role {role}")
+        expected = str(entry.get("sha256", "")).strip().lower()
+        actual = _sha256(path)
+        if (
+            len(expected) != 64
+            or any(char not in "0123456789abcdef" for char in expected)
+            or actual != expected
+        ):
+            raise ValueError(f"kernel checksum mismatch for role {role}")
+        verified[role] = path
+    return [verified[role] for role in required]
+
+
 def sun_vectors_from_spice(
     utc_epochs: Sequence[str],
     kernel_manifest: Path,
@@ -142,31 +211,11 @@ def sun_vectors_from_spice(
     aberration_correction: str = "LT+S",
 ) -> np.ndarray:
     """Return unit Moon-to-Sun vectors from checksummed SPICE kernels."""
+    paths = verify_kernel_manifest(kernel_manifest, required_roles)
     try:
         import spiceypy as spice
     except ImportError as exc:  # pragma: no cover - depends on HPC environment
         raise RuntimeError("spiceypy is required for DE440 Sun directions") from exc
-
-    manifest_path = Path(kernel_manifest).resolve()
-    manifest = json.loads(manifest_path.read_text())
-    entries = manifest.get("kernels")
-    if not isinstance(entries, list):
-        raise ValueError("kernel manifest must contain a kernels list")
-    by_role = {entry.get("role"): entry for entry in entries}
-    missing = sorted(set(required_roles) - set(by_role))
-    if missing:
-        raise ValueError(f"kernel manifest is missing roles: {', '.join(missing)}")
-
-    paths: list[Path] = []
-    for role in required_roles:
-        entry = by_role[role]
-        path = Path(entry["path"])
-        if not path.is_absolute():
-            path = (manifest_path.parent / path).resolve()
-        expected = str(entry.get("sha256", "")).lower()
-        if len(expected) != 64 or _sha256(path) != expected:
-            raise ValueError(f"kernel checksum mismatch for role {role}")
-        paths.append(path)
 
     spice.kclear()
     try:
