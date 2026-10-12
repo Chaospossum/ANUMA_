@@ -75,8 +75,28 @@ JOB_PROFILES = {
         "node_hours": 14.5,
         "core_hours": 1856.0,
     },
+    # Pilot 0.5 + production 6.0 stays under the Stage B 40 node-hour cap.
+    "stage-b-pilot": {
+        "qos": "test",
+        "walltime": "00:30:00",
+        "walltime_minutes": 30,
+        "cpus": 128,
+        "memory": "240G",
+        "node_hours": 0.5,
+        "core_hours": 64.0,
+    },
+    "stage-b": {
+        "qos": "default",
+        "walltime": "06:00:00",
+        "walltime_minutes": 6 * 60,
+        "cpus": 128,
+        "memory": "240G",
+        "node_hours": 6.0,
+        "core_hours": 768.0,
+    },
 }
 SUN_PROFILES = frozenset({"sun-validation-pilot", "sun-validation"})
+STAGE_B_PROFILES = frozenset({"stage-b-pilot", "stage-b"})
 QOS_MAX_WALL_MINUTES = {
     "dev": 6 * 60,
     "test": 30,
@@ -261,6 +281,53 @@ def run_preflight(receipt_path: Path) -> dict:
         except ValueError as exc:
             fail(str(exc))
 
+    stage_b_pin: dict = {}
+    if job_profile in STAGE_B_PROFILES:
+        if account != "p201619":
+            fail("Stage B requires account p201619")
+        dem = Path(
+            os.environ.get(
+                "ANUMA_DEM",
+                str(repo_root / "data" / "raw" / "LDEM_80S_20MPP_ADJ.TIF"),
+            )
+        ).resolve()
+        if not dem.is_file():
+            fail(f"Stage B 20 m DEM is missing: {dem}")
+        stage_b_pin = {
+            "dem_path": str(dem),
+            "dem_sha256": sha256_file(dem),
+            "accelerators": False,
+        }
+        # Production refuses to mint a receipt without a passed Stage A record.
+        # The pilot may measure tiles before Stage A finishes, but it cannot
+        # authorize production.
+        if job_profile == "stage-b":
+            from anuma.stage_b import FROZEN_STOP_RMSE, require_stage_a_acceptance
+
+            acceptance = Path(
+                os.environ.get(
+                    "ANUMA_STAGE_A_ACCEPTANCE",
+                    str(repo_root / "out" / "sun-validation" / "validation-report.json"),
+                )
+            )
+            try:
+                report = require_stage_a_acceptance(acceptance)
+            except ValueError as exc:
+                fail(str(exc))
+            stage_b_pin.update(
+                {
+                    "stage_a_acceptance": str(acceptance.resolve()),
+                    "stage_a_acceptance_sha256": sha256_file(acceptance.resolve()),
+                    "stage_a_status": report.get("status"),
+                    "stage_a_stop_rmse": FROZEN_STOP_RMSE,
+                    "stage_a_rmse": float(report["metrics"]["rmse"]),
+                }
+            )
+        else:
+            stage_b_pin["stage_a_gate"] = (
+                "not required for pilot; production refuses without a pass"
+            )
+
     receipt = {
         "schema_version": 1,
         "verified_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -286,6 +353,7 @@ def run_preflight(receipt_path: Path) -> dict:
         "job_cpus": profile["cpus"],
         "job_memory": profile["memory"],
         **sun_pin,
+        **stage_b_pin,
     }
     canonical = json.dumps(receipt, sort_keys=True).encode()
     receipt["receipt_sha256"] = hashlib.sha256(canonical).hexdigest()

@@ -142,6 +142,27 @@ def test_sun_validation_profiles_fit_one_node_and_fifteen_hours():
     assert "p201619" in wrapper
 
 
+def test_stage_b_profiles_fit_one_node_and_forty_hours():
+    pilot = preflight.JOB_PROFILES["stage-b-pilot"]
+    production = preflight.JOB_PROFILES["stage-b"]
+    assert pilot["qos"] == "test"
+    assert pilot["walltime"] == "00:30:00"
+    assert pilot["walltime_minutes"] <= 30
+    assert pilot["cpus"] == 128
+    assert production["qos"] == "default"
+    assert production["walltime"] == "06:00:00"
+    assert production["cpus"] == 128
+    assert pilot["memory"] == production["memory"] == "240G"
+    assert pilot["node_hours"] + production["node_hours"] <= 40
+    script = (REPO_ROOT / "hpc" / "slurm" / "stage-b.sbatch").read_text()
+    wrapper = (REPO_ROOT / "hpc" / "submit-stage-b.sh").read_text()
+    assert "--gpu" not in script.lower()
+    assert "--gpu" not in wrapper.lower()
+    assert "p201619" in wrapper
+    assert "ANUMA_STAGE_A_ACCEPTANCE" in wrapper
+    assert "require_stage_a_acceptance" in wrapper
+
+
 def test_full_monte_carlo_requires_default_qos_and_four_hour_cap(
     tmp_path, monkeypatch
 ):
@@ -171,9 +192,70 @@ def test_preflight_refuses_to_overwrite_receipt(tmp_path, monkeypatch):
         "hpc/slurm/smoke-240m.sbatch",
         "hpc/slurm/monte-carlo.sbatch",
         "hpc/slurm/sun-validation.sbatch",
+        "hpc/slurm/stage-b.sbatch",
     ),
 )
 def test_staging_module_regex_uses_one_literal_dot_escape(path):
     text = (REPO_ROOT / path).read_text()
     assert "'env/staging/2025\\.1'" in text
     assert "'env/staging/2025\\\\.1'" not in text
+
+
+def test_stage_b_production_preflight_requires_stage_a_pass(tmp_path, monkeypatch):
+    _configured_environment(tmp_path, monkeypatch, remaining=10.0)
+    monkeypatch.setenv("ANUMA_JOB_PROFILE", "stage-b")
+    monkeypatch.setenv("ANUMA_QOS", "default")
+    monkeypatch.setenv("ANUMA_ACCOUNT", "p201619")
+    captured = datetime.now(timezone.utc).isoformat()
+    _write_evidence(
+        Path(os.environ["ANUMA_ALLOCATION_EVIDENCE_FILE"]),
+        {
+            "source": "test fixture",
+            "captured_at_utc": captured,
+            "account": "p201619",
+            "remaining_cpu_node_hours": 10.0,
+        },
+    )
+    dem = tmp_path / "dem.tif"
+    dem.write_bytes(b"fake-dem")
+    monkeypatch.setenv("ANUMA_DEM", str(dem))
+    acceptance = tmp_path / "validation-report.json"
+    acceptance.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "metrics": {"rmse": 0.04, "stop_rmse": 0.05, "passed": True},
+            }
+        )
+    )
+    monkeypatch.setenv("ANUMA_STAGE_A_ACCEPTANCE", str(acceptance))
+
+    def fake_command(command):
+        joined = " ".join(str(item) for item in command)
+        if "show assoc" in joined:
+            return "cluster|p201619|tester|cpu|default\n"
+        if "show qos" in joined:
+            return "default|48:00:00|\n"
+        if "status --porcelain" in joined:
+            return ""
+        if "rev-parse HEAD" in joined:
+            return "a" * 40 + "\n"
+        return "ok\n"
+
+    monkeypatch.setattr(preflight, "run_checked", fake_command)
+    receipt = preflight.run_preflight(tmp_path / "receipt-stage-b.json")
+    assert receipt["job_profile"] == "stage-b"
+    assert receipt["stage_a_status"] == "passed"
+    assert receipt["stage_a_stop_rmse"] == 0.05
+    assert receipt["accelerators"] is False
+
+    acceptance.write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "metrics": {"rmse": 0.09, "stop_rmse": 0.05, "passed": False},
+            }
+        )
+    )
+    with pytest.raises(RuntimeError, match="has not passed"):
+        preflight.run_preflight(tmp_path / "receipt-stage-b-fail.json")
