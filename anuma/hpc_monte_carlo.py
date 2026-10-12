@@ -281,17 +281,19 @@ def run_from_manifest(
         },
         "execution": {
             "workers": workers,
-            key: value
-            for key, value in os.environ.items()
-            if key
-            in {
-                "SLURM_JOB_ID",
-                "SLURM_JOB_ACCOUNT",
-                "SLURM_JOB_PARTITION",
-                "SLURM_JOB_QOS",
-                "SLURM_CPUS_PER_TASK",
-                "SLURM_JOB_NUM_NODES",
-            }
+            **{
+                key: value
+                for key, value in os.environ.items()
+                if key
+                in {
+                    "SLURM_JOB_ID",
+                    "SLURM_JOB_ACCOUNT",
+                    "SLURM_JOB_PARTITION",
+                    "SLURM_JOB_QOS",
+                    "SLURM_CPUS_PER_TASK",
+                    "SLURM_JOB_NUM_NODES",
+                }
+            },
         },
         "outputs": {
             path.name: {"sha256": sha256_file(path), "bytes": path.stat().st_size}
