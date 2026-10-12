@@ -6,7 +6,7 @@ The submitted 28 September paper does not mention HPC because MeluXina access ca
 
 ## How the hours are used
 
-The confirmed `p201619` allocation is 300 CPU node-hours for the current month, with 0 used when checked. Shared project and scratch storage are 10 TB each; personal home is 100 GB. There is no GPU, FPGA, or large-memory allocation. The planned spend remains about 80 node-hours, leaving about 220 node-hours unused on purpose if that plan is approved and run.
+The confirmed `p201619` allocation is 300 CPU node-hours for the current month, with 0 used when checked. Shared project and scratch storage are 10 TB each; personal home is 100 GB. There is no GPU, FPGA, or large-memory allocation. The [bounded study plan](hpc-study-plan.md) places a separate 220-node-hour ceiling on the precursor and stages A–D. Its committed caps total 88.5 node-hours, leaving at least 131.5 of that ceiling held.
 
 The first study is the [guarded 240 m clip-and-weight Monte Carlo](meluxina-execution.md#first-study-240-m-clip-and-weight-monte-carlo), before any 20 m job. Its tiny pilot is one CPU node under `test`, capped at 30 minutes. The full 500-draw study is one CPU node under `default`, capped at 4 hours. Both run only after allocation, quota, account, QOS, affine-fix provenance, and staged paths pass preflight. A 20 m job remains a separate later decision.
 
