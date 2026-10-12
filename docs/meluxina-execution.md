@@ -42,14 +42,14 @@ ceilings, not evidence that ANUMA benefits from or is allowed to use a
 
 - Host: `login.lxp.lu`
 - Port: `8822`
-- User: `u104905`
 - Repository: `/project/home/p201619/ANUMA_`
 - Confirmed clone `main`: `e86e2cc2d684af44e0543c777b8bee42593f3e50`
 
-Connect with `ssh -p 8822 u104905@login.lxp.lu`. Authentication uses the
-approved SSH credential provisioned outside this repository. Never copy,
-commit, print, or request private-key material. Verify the host fingerprint
-out of band before accepting it.
+Connect with `ssh -p 8822 <assigned-user>@login.lxp.lu`; keep the assigned
+personal username out of public documentation. Authentication uses the approved
+SSH credential provisioned outside this repository. Never copy, commit, print,
+or request private-key material. Verify the host fingerprint out of band before
+accepting it.
 
 The login nodes are for SSH access, Git/file management, `myquota`, job
 submission, and monitoring only. Official policy forbids computationally
@@ -100,6 +100,8 @@ account from unrelated example commands.
 - `hpc/discover-software.sh`: records stable-release module discovery.
 - `hpc/requirements-hpc.lock`: exact core versions and Python 3.12 Linux-wheel
   hashes; bootstrap installs it with `--require-hashes`.
+- `hpc/requirements-ingest.lock`: exact Python 3.12 Linux-wheel hashes for the
+  compute-node ingest runtime, including Rasterio/GDAL, SciPy, and Matplotlib.
 - `hpc/build-input-manifest.py`: checksums an existing 240 m grid.
 - `hpc/preflight.py`: read-only Slurm, allocation, quota, path, and data checks.
 - `hpc/submit-smoke.sh`: accepts only a preflight receipt less than 24 hours old.
@@ -162,6 +164,27 @@ document that package in `ANUMA_STAGING_JUSTIFICATION` before using staging.
 The environment record preserves that justification. The guarded smoke job
 itself rejects staging modules.
 
+### Supported compute-node ingest environment
+
+If discovery confirms stable-release Python 3.12 on the CPU compute node, use
+the committed hash-pinned ingest profile; do not guess or hard-code MeluXina
+GDAL/PROJ module names:
+
+```bash
+export ANUMA_ENVIRONMENT=ingest
+export ANUMA_BOOTSTRAP_PYTHON=/absolute/path/from-module-discovery/python3
+export ANUMA_VENV=/project/home/p201619/ANUMA_/.venv-hpc-ingest
+bash hpc/bootstrap.sh
+```
+
+This runs only inside a compute allocation, installs pinned Linux wheels for
+Rasterio (including its GDAL runtime), PyProj/PROJ, SciPy, and Matplotlib,
+runs `pip check`, imports the ingest stack, prints the Rasterio/GDAL versions,
+and records modules/packages in `anuma-environment.json`. If stable-release
+Python 3.12 or a compatible pinned wheel is unavailable, stop: the supported
+fallback is approved-workstation ingest until the lock is deliberately
+regenerated and reviewed. Do not switch to staging or guess package names.
+
 ## Ingest, transfer, and pin the 240 m inputs
 
 The required derived files are `grid.json`, `dem.npy`, `slope.npy`,
@@ -200,8 +223,10 @@ There are two approved production paths:
    manifest, and re-ingest on that approved machine. Generate both post-ingest
    manifests, transfer `data/raw/`, `data/grid/`, and the manifests to
    `/project/home/p201619/ANUMA_/data/`, then rerun the full check inside a
-   `cpudev` compute allocation. The before/after raw hashes and transferred
-   manifest SHA-256 values must match.
+   `cpudev` compute allocation. Compare per-file digests:
+   `sources.<name>.actual_sha256` and `derived.<name>.sha256` must match across
+   machines. Do not compare the whole manifest file hash because absolute root
+   paths and capture metadata legitimately differ.
 2. **MeluXina compute job:** use a separately reviewed, bounded one-node CPU
    job (normally `default` QOS) to validate the existing project raw directory
    and re-ingest directly into project storage. It downloads only a source that
@@ -213,12 +238,12 @@ illumination ingest identified by the audit. The data chain remains blocked
 until that correction is merged and its ingest test passes. The guarded smoke
 job remains download-free and accepts only the verified staged outputs.
 
-From the approved full ingest environment (not the minimal smoke-test venv),
-run:
+From the approved workstation environment or the supported
+`.venv-hpc-ingest` inside the separately reviewed one-node compute job, run:
 
 ```bash
-python -m anuma.ingest
-python -m anuma.hpc_data_check --root "$PWD" --require-ready \
+"${ANUMA_VENV}/bin/python" -m anuma.ingest
+"${ANUMA_VENV}/bin/python" -m anuma.hpc_data_check --root "$PWD" --require-ready \
   --manifest-output data/data-after-reingest.json
 
 .venv-hpc/bin/python hpc/build-input-manifest.py \

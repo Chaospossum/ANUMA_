@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 MODULE_PATH = Path(__file__).parents[1] / "hpc" / "preflight.py"
+REPO_ROOT = Path(__file__).parents[1]
 SPEC = importlib.util.spec_from_file_location("anuma_hpc_preflight", MODULE_PATH)
 assert SPEC and SPEC.loader
 preflight = importlib.util.module_from_spec(SPEC)
@@ -127,3 +128,17 @@ def test_preflight_refuses_to_overwrite_receipt(tmp_path, monkeypatch):
     receipt_path.write_text("keep")
     with pytest.raises(FileExistsError):
         preflight.run_preflight(receipt_path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "hpc/bootstrap.sh",
+        "hpc/discover-software.sh",
+        "hpc/slurm/smoke-240m.sbatch",
+    ),
+)
+def test_staging_module_regex_uses_one_literal_dot_escape(path):
+    text = (REPO_ROOT / path).read_text()
+    assert "'env/staging/2025\\.1'" in text
+    assert "'env/staging/2025\\\\.1'" not in text

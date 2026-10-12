@@ -3,7 +3,22 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bootstrap_python="${ANUMA_BOOTSTRAP_PYTHON:-python3}"
-venv="${ANUMA_VENV:-${repo_root}/.venv-hpc}"
+profile="${ANUMA_ENVIRONMENT:-smoke}"
+case "${profile}" in
+  smoke)
+    lock="${repo_root}/hpc/requirements-hpc.lock"
+    default_venv="${repo_root}/.venv-hpc"
+    ;;
+  ingest)
+    lock="${repo_root}/hpc/requirements-ingest.lock"
+    default_venv="${repo_root}/.venv-hpc-ingest"
+    ;;
+  *)
+    echo "ANUMA_ENVIRONMENT must be smoke or ingest" >&2
+    exit 2
+    ;;
+esac
+venv="${ANUMA_VENV:-${default_venv}}"
 
 : "${SLURM_JOB_ID:?run bootstrap inside a MeluXina compute allocation}"
 command -v module >/dev/null 2>&1 || {
@@ -13,7 +28,7 @@ command -v module >/dev/null 2>&1 || {
 module_record="$(mktemp)"
 trap 'rm -f -- "${module_record}"' EXIT
 module -t list > "${module_record}" 2>&1
-if grep -q 'env/staging/2025\\.1' "${module_record}" \
+if grep -q 'env/staging/2025\.1' "${module_record}" \
   && [[ -z "${ANUMA_STAGING_JUSTIFICATION:-}" ]]; then
   echo "Refusing staging modules without ANUMA_STAGING_JUSTIFICATION naming the missing release package" >&2
   exit 2
@@ -34,12 +49,26 @@ PY
 "${bootstrap_python}" -m venv "${venv}"
 "${venv}/bin/python" -m pip install --disable-pip-version-check \
   --only-binary=:all: --require-hashes \
-  --requirement "${repo_root}/hpc/requirements-hpc.lock"
+  --requirement "${lock}"
 "${venv}/bin/python" -m pip install --disable-pip-version-check \
   --no-index --no-build-isolation --no-deps --editable "${repo_root}"
 "${venv}/bin/python" -m pip check
+if [[ "${profile}" == "ingest" ]]; then
+  "${venv}/bin/python" - <<'PY'
+import matplotlib
+import rasterio
+import scipy
 
-"${venv}/bin/python" - "${repo_root}" "${venv}" "${module_record}" <<'PY'
+print(
+    "Verified ingest runtime: "
+    f"rasterio={rasterio.__version__} GDAL={rasterio.__gdal_version__} "
+    f"scipy={scipy.__version__} matplotlib={matplotlib.__version__}"
+)
+PY
+fi
+
+"${venv}/bin/python" - \
+  "${repo_root}" "${venv}" "${module_record}" "${lock}" "${profile}" <<'PY'
 import hashlib
 import json
 import os
@@ -52,13 +81,15 @@ from pathlib import Path
 repo = Path(sys.argv[1])
 venv = Path(sys.argv[2])
 module_record = Path(sys.argv[3])
-lock = repo / "hpc" / "requirements-hpc.lock"
+lock = Path(sys.argv[4])
+profile = sys.argv[5]
 record = {
     "schema_version": 1,
     "created_at_utc": datetime.now(timezone.utc).isoformat(),
     "python": platform.python_version(),
     "platform": platform.platform(),
     "slurm_job_id": os.environ["SLURM_JOB_ID"],
+    "profile": profile,
     "modules": module_record.read_text().splitlines(),
     "staging_justification": os.environ.get("ANUMA_STAGING_JUSTIFICATION"),
     "lock_sha256": hashlib.sha256(lock.read_bytes()).hexdigest(),

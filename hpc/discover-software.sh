@@ -25,7 +25,7 @@ loaded_modules="$(module -t list 2>&1)"
 } > "${output}"
 
 printf '%s\n' "${output}"
-if grep -q 'env/staging/2025\\.1' <<<"${loaded_modules}"; then
+if grep -q 'env/staging/2025\.1' <<<"${loaded_modules}"; then
   echo "staging is loaded; prefer env/release/2025.1 for discovery" >&2
   exit 2
 fi

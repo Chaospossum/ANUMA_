@@ -64,7 +64,7 @@ command -v module >/dev/null 2>&1 || {
   exit 2
 }
 module -t list > "${job_tmp}/module-list.txt" 2>&1
-if grep -q 'env/staging/2025\\.1' "${job_tmp}/module-list.txt"; then
+if grep -q 'env/staging/2025\.1' "${job_tmp}/module-list.txt"; then
   echo "Smoke job requires stable env/release/2025.1 modules, not staging" >&2
   exit 2
 fi

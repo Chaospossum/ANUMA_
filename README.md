@@ -62,7 +62,11 @@ python3 -m anuma.hpc_data_check --root "$PWD" --require-raw-ready \
 A passing check means re-ingest must reuse the existing sources. A missing,
 wrong-sized, or checksum-invalid source is the only reason to download its
 replacement. Re-ingest and post-ingest manifest capture remain compute-node or
-approved-workstation work.
+approved-workstation work. On MeluXina, first use module discovery to identify
+stable-release Python 3.12, then create the supported hash-pinned Rasterio
+environment with `ANUMA_ENVIRONMENT=ingest bash hpc/bootstrap.sh` from a
+compute allocation. Compare cross-machine transfer manifests by each file's
+SHA-256, not by the whole manifest hash, because absolute paths differ.
 
 ## Serve the UI
 
