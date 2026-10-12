@@ -16,6 +16,7 @@ umask 027
 : "${ANUMA_OUTPUT_ROOT:?missing output root}"
 : "${ANUMA_SCRATCH_DIR:?missing scratch directory}"
 : "${ANUMA_PYTHON:?missing pinned environment interpreter}"
+: "${ANUMA_MYQUOTA_BEFORE:?missing pre-submission myquota snapshot}"
 : "${SLURM_JOB_ID:?this script must run under Slurm}"
 : "${SLURM_JOB_ACCOUNT:?Slurm did not provide an account}"
 : "${SLURM_JOB_PARTITION:?Slurm did not provide a partition}"
@@ -37,10 +38,22 @@ repo_root="${SLURM_SUBMIT_DIR:?Slurm submit directory is unavailable}"
 output_dir="${ANUMA_OUTPUT_ROOT}/smoke-240m-${SLURM_JOB_ID}"
 job_tmp="${ANUMA_SCRATCH_DIR}/anuma-smoke-${SLURM_JOB_ID}"
 
-cleanup() {
+finish() {
+  status=$?
+  trap - EXIT
+  set +e
+  mkdir -p -- "${output_dir}"
+  cp -- "${ANUMA_MYQUOTA_BEFORE}" "${output_dir}/myquota-before.txt"
+  {
+    printf 'captured_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'command=myquota\n'
+    myquota
+    printf 'myquota_exit_code=%s\n' "$?"
+  } > "${output_dir}/myquota-after.txt"
   rm -rf -- "${job_tmp}"
+  exit "${status}"
 }
-trap cleanup EXIT
+trap finish EXIT
 mkdir -p -- "${job_tmp}"
 export TMPDIR="${job_tmp}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"

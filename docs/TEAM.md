@@ -6,7 +6,7 @@
 - ispace is the customer the team is talking to, not a frozen mission scenario.
 - Actual data used: `LDEM_80S_20MPP_ADJ`, `AVGVISIB_65S_240M_201608`, and Lunar Prospector `hydrogenhd`.
 - Artemis III geometries are null.
-- MeluXina has 1 TB reserved. 300 CPU node-hours were accepted as enough; planned use is about 80 node-hours: a 2-hour smoke test, a 40-hour 20 m vs 240 m check, and 40-hour statistical tests. About 220 node-hours are held.
+- MeluXina project `p201619` has 300 CPU node-hours this month (0 used when confirmed), plus 10 TB each at `/project/home/p201619` and `/project/scratch/p201619`; personal home is 100 GB. There is no GPU, FPGA, or large-memory allocation. The first guarded smoke test is capped at one CPU node and 30 minutes, with `myquota` captured before and after. Later one-node work remains separately reviewed and bounded; QOS limits are not a reason to claim 100-node scaling.
 - No cluster job will run until accounts work.
 - This is screening, not landing clearance.
 - [Possible studies](hpc-use.md#possible-studies) are optional and unrun; the mission case remains open.

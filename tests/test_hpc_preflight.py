@@ -38,7 +38,7 @@ def _configured_environment(tmp_path, monkeypatch, remaining=10.0):
             "source": "test fixture",
             "captured_at_utc": captured,
             "account": "project-account",
-            "remaining_cpu_hours": remaining,
+            "remaining_cpu_node_hours": remaining,
         },
     )
     _write_evidence(
@@ -90,6 +90,7 @@ def test_preflight_writes_private_receipt_with_test_qos(tmp_path, monkeypatch):
     receipt = preflight.run_preflight(receipt_path)
     assert receipt["qos"] == "test"
     assert receipt["job_walltime"] == "00:30:00"
+    assert receipt["job_node_hours_cap"] == 0.5
     assert receipt["input_manifest_sha256"]
     assert receipt_path.stat().st_mode & 0o777 == 0o600
 

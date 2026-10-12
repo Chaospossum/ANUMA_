@@ -3,14 +3,13 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 : "${ANUMA_PREFLIGHT_RECEIPT:?set ANUMA_PREFLIGHT_RECEIPT to a successful preflight receipt}"
-: "${ANUMA_ACCOUNT:?set ANUMA_ACCOUNT}"
-: "${ANUMA_PARTITION:?set ANUMA_PARTITION}"
+ANUMA_ACCOUNT="${ANUMA_ACCOUNT:-p201619}"
+ANUMA_PARTITION="${ANUMA_PARTITION:-cpu}"
 ANUMA_QOS="${ANUMA_QOS:-test}"
-: "${ANUMA_QOS:?set ANUMA_QOS}"
-export ANUMA_QOS
 : "${ANUMA_INPUT_MANIFEST:?set ANUMA_INPUT_MANIFEST}"
 : "${ANUMA_OUTPUT_ROOT:?set ANUMA_OUTPUT_ROOT}"
-: "${ANUMA_SCRATCH_DIR:?set ANUMA_SCRATCH_DIR}"
+ANUMA_SCRATCH_DIR="${ANUMA_SCRATCH_DIR:-/project/scratch/p201619}"
+export ANUMA_ACCOUNT ANUMA_PARTITION ANUMA_QOS ANUMA_SCRATCH_DIR
 
 ANUMA_PYTHON="${ANUMA_PYTHON:-${repo_root}/.venv-hpc/bin/python}"
 export ANUMA_PYTHON
@@ -49,7 +48,10 @@ expected = {
 for key, value in expected.items():
     if receipt.get(key) != value:
         raise SystemExit(f"preflight receipt {key} does not match current environment")
-if float(receipt.get("job_cpu_hours_cap", -1)) != 2.0:
+if (
+    float(receipt.get("job_node_hours_cap", -1)) != 0.5
+    or float(receipt.get("job_core_hours", -1)) != 2.0
+):
     raise SystemExit("preflight receipt does not authorize the bounded smoke job")
 manifest = Path(os.environ["ANUMA_INPUT_MANIFEST"])
 if hashlib.sha256(manifest.read_bytes()).hexdigest() != receipt["input_manifest_sha256"]:
@@ -66,6 +68,22 @@ if [[ ! -x "${ANUMA_PYTHON}" ]]; then
   echo "ANUMA_PYTHON is not executable: ${ANUMA_PYTHON}" >&2
   exit 2
 fi
+command -v myquota >/dev/null || {
+  echo "myquota is required for before/after accounting snapshots" >&2
+  exit 2
+}
+
+umask 077
+quota_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+ANUMA_MYQUOTA_BEFORE="${ANUMA_OUTPUT_ROOT}/myquota-before-${quota_stamp}-$$.txt"
+quota_tmp="${ANUMA_MYQUOTA_BEFORE}.tmp"
+{
+  printf 'captured_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf 'command=myquota\n'
+  myquota
+} > "${quota_tmp}"
+mv -- "${quota_tmp}" "${ANUMA_MYQUOTA_BEFORE}"
+export ANUMA_MYQUOTA_BEFORE
 
 unset "${!SBATCH_@}"
 sbatch \
@@ -81,5 +99,5 @@ sbatch \
   --output="${ANUMA_OUTPUT_ROOT}/slurm-%x-%j.out" \
   --error="${ANUMA_OUTPUT_ROOT}/slurm-%x-%j.err" \
   --chdir="${repo_root}" \
-  --export=ANUMA_PREFLIGHT_RECEIPT,ANUMA_INPUT_MANIFEST,ANUMA_OUTPUT_ROOT,ANUMA_SCRATCH_DIR,ANUMA_PYTHON \
+  --export=ANUMA_PREFLIGHT_RECEIPT,ANUMA_INPUT_MANIFEST,ANUMA_OUTPUT_ROOT,ANUMA_SCRATCH_DIR,ANUMA_PYTHON,ANUMA_MYQUOTA_BEFORE \
   "${repo_root}/hpc/slurm/smoke-240m.sbatch"

@@ -25,7 +25,8 @@ REQUIRED_ENV = (
     "ANUMA_ALLOCATION_EVIDENCE_FILE",
     "ANUMA_STORAGE_EVIDENCE_FILE",
 )
-JOB_CPU_HOURS = 2.0  # 4 CPUs * 30 minutes
+JOB_NODE_HOURS = 0.5  # 1 node * 30 minutes (conservative allocation bound)
+JOB_CORE_HOURS = 2.0  # 4 requested CPU cores * 30 minutes
 OUTPUT_HEADROOM_BYTES = 100 * 1024 * 1024
 QOS_MAX_WALL_MINUTES = {
     "dev": 6 * 60,
@@ -36,6 +37,12 @@ QOS_MAX_WALL_MINUTES = {
     "long": 144 * 60,
     "large": 24 * 60,
     "urgent": 6 * 60,
+}
+DEFAULT_ENV = {
+    "ANUMA_ACCOUNT": "p201619",
+    "ANUMA_PARTITION": "cpu",
+    "ANUMA_QOS": "test",
+    "ANUMA_SCRATCH_DIR": "/project/scratch/p201619",
 }
 
 
@@ -93,10 +100,12 @@ def _load_fresh_evidence(path: Path, required: tuple[str, ...]) -> dict:
 
 
 def run_preflight(receipt_path: Path) -> dict:
+    for name, value in DEFAULT_ENV.items():
+        os.environ.setdefault(name, value)
     missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
     if missing:
         fail("missing required environment variables: " + ", ".join(missing))
-    for command in ("sbatch", "sacctmgr", "scontrol"):
+    for command in ("myquota", "sbatch", "sacctmgr", "scontrol"):
         if shutil.which(command) is None:
             fail(f"required Slurm command is unavailable: {command}")
 
@@ -128,13 +137,16 @@ def run_preflight(receipt_path: Path) -> dict:
 
     allocation = _load_fresh_evidence(
         Path(os.environ["ANUMA_ALLOCATION_EVIDENCE_FILE"]),
-        ("source", "captured_at_utc", "account", "remaining_cpu_hours"),
+        ("source", "captured_at_utc", "account", "remaining_cpu_node_hours"),
     )
     if allocation["account"] != account:
         fail("allocation evidence account does not match ANUMA_ACCOUNT")
-    remaining = float(allocation["remaining_cpu_hours"])
-    if not math.isfinite(remaining) or remaining < JOB_CPU_HOURS:
-        fail(f"remaining allocation {remaining} CPU-hours is below required {JOB_CPU_HOURS}")
+    remaining = float(allocation["remaining_cpu_node_hours"])
+    if not math.isfinite(remaining) or remaining < JOB_NODE_HOURS:
+        fail(
+            f"remaining allocation {remaining} CPU node-hours is below "
+            f"required {JOB_NODE_HOURS}"
+        )
     storage = _load_fresh_evidence(
         Path(os.environ["ANUMA_STORAGE_EVIDENCE_FILE"]),
         ("source", "captured_at_utc", "quota_bytes", "used_bytes"),
@@ -174,13 +186,14 @@ def run_preflight(receipt_path: Path) -> dict:
         "input_manifest_sha256": sha256_file(input_manifest),
         "output_root": str(output_root),
         "scratch_dir": str(scratch),
-        "remaining_cpu_hours": remaining,
+        "remaining_cpu_node_hours": remaining,
         "storage_quota_bytes": quota,
         "storage_used_bytes": used,
         "allocation_evidence": allocation,
         "storage_evidence": storage,
         "git_commit": git_commit,
-        "job_cpu_hours_cap": JOB_CPU_HOURS,
+        "job_node_hours_cap": JOB_NODE_HOURS,
+        "job_core_hours": JOB_CORE_HOURS,
         "job_walltime": "00:30:00",
         "job_cpus": 4,
     }
