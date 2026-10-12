@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import numpy as np
 import pytest
 
@@ -109,6 +111,52 @@ def test_contributions_sum_to_total(grid, cfg):
     np.testing.assert_allclose(
         sum(site["contributions"].values()), site["total"], atol=1e-5
     )
+
+
+def test_negative_weight_is_rejected(grid, cfg):
+    row, col = _pixel(grid, 10.0, -86.0)
+    layers = _peak_layers(grid, [(row, col, 50.0, 2.0)])
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        score(layers, {"illumination": -0.01}, grid=grid, cfg=cfg)
+
+
+def test_rank_ties_use_slope_then_raw_illumination(cfg):
+    small_cfg = deepcopy(cfg)
+    small_cfg["projection"]["resolution_m"] = 2000.0
+    small_cfg["projection"]["lat_max"] = -88.0
+    small_grid = Grid(small_cfg)
+    shape = (small_grid.height, small_grid.width)
+    illumination = np.arange(np.prod(shape), dtype=np.float32).reshape(shape)
+    slope = np.ones(shape, dtype=np.float32)
+    layers = {"slope": slope, "illumination": illumination}
+
+    # Percentile clipping makes many high-valued pixels share score 1. Lower
+    # raw slope must win even when another tied pixel has higher illumination.
+    lower_slope = np.unravel_index(illumination.size - 2, shape)
+    slope[lower_slope] = 0.5
+    result = score(
+        layers,
+        {"illumination": 1.0},
+        {"max_slope_deg": 8.0},
+        grid=small_grid,
+        cfg=small_cfg,
+    )
+    sites = rank_sites(result, n=1)
+    assert (sites[0]["row"], sites[0]["col"]) == lower_slope
+
+    # With equal slopes, higher un-clipped illumination is the secondary key,
+    # so selection is independent of the first tied array index.
+    slope[lower_slope] = 1.0
+    result = score(
+        layers,
+        {"illumination": 1.0},
+        {"max_slope_deg": 8.0},
+        grid=small_grid,
+        cfg=small_cfg,
+    )
+    sites = rank_sites(result, n=1)
+    highest_raw = np.unravel_index(illumination.size - 1, shape)
+    assert (sites[0]["row"], sites[0]["col"]) == highest_raw
 
 
 def _box_around(grid: Grid, x: float, y: float, half_m: float = 7500.0) -> list[list[float]]:

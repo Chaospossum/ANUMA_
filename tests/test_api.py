@@ -183,6 +183,13 @@ def test_unknown_layer_is_404(client_ingested: TestClient):
     assert response.status_code == 404
 
 
+def test_negative_weight_is_rejected(client_ingested: TestClient):
+    response = client_ingested.post(
+        "/score", json={"weights": {"illumination": -0.01}}
+    )
+    assert response.status_code == 422
+
+
 def test_layers_ingested_flag(client_ingested: TestClient):
     response = client_ingested.get("/layers")
     assert response.status_code == 200

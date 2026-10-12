@@ -27,6 +27,7 @@ class ScoreResult:
     weights: dict[str, float]
     grid: Grid
     cfg: dict = field(repr=False)
+    ranking_inputs: dict[str, np.ndarray] = field(repr=False)
 
 
 def _cfg(cfg: dict | None = None) -> dict:
@@ -93,6 +94,13 @@ def score(
         grid = Grid(cfg)
     if "slope" not in layers:
         raise KeyError("layers must include 'slope' for the hard mask")
+    validated_weights: dict[str, float] = {}
+    for name, weight in weights.items():
+        value = float(weight)
+        if not np.isfinite(value) or value < 0.0:
+            raise ValueError(f"weight for {name!r} must be finite and non-negative")
+        validated_weights[name] = value
+    weights = validated_weights
     mask = hard_mask(layers["slope"], hard.get("max_slope_deg"), cfg=cfg)
     normalized: dict[str, np.ndarray] = {}
     combined = np.zeros(layers["slope"].shape, dtype=np.float64)
@@ -112,6 +120,11 @@ def score(
         weights={k: float(v) for k, v in weights.items()},
         grid=grid,
         cfg=cfg,
+        ranking_inputs={
+            name: layers[name]
+            for name in ("slope", "illumination")
+            if name in layers
+        },
     )
 
 
@@ -124,7 +137,12 @@ def rank_sites(
     n: int | None = None,
     min_separation_km: float | None = None,
 ) -> list[dict]:
-    """Greedy non-maximum suppression on the masked score."""
+    """Greedy NMS with explicit, reproducible scientific tie-breakers.
+
+    Equal combined scores prefer lower raw slope, then higher raw
+    illumination. Exact residual ties use row/column order only as a stable
+    final fallback.
+    """
     cfg = result.cfg
     if n is None:
         n = int(cfg["scoring"]["n_sites"])
@@ -137,7 +155,22 @@ def rank_sites(
     for _ in range(int(n)):
         if not np.isfinite(remaining).any():
             break
-        flat = int(np.nanargmax(remaining))
+        best_score = float(np.nanmax(remaining))
+        candidates = np.isfinite(remaining) & (remaining == best_score)
+
+        slope = result.ranking_inputs.get("slope")
+        if slope is not None:
+            candidate_slopes = np.where(candidates, slope, np.nan)
+            if np.isfinite(candidate_slopes).any():
+                candidates &= slope == float(np.nanmin(candidate_slopes))
+
+        illumination = result.ranking_inputs.get("illumination")
+        if illumination is not None:
+            candidate_illumination = np.where(candidates, illumination, np.nan)
+            if np.isfinite(candidate_illumination).any():
+                candidates &= illumination == float(np.nanmax(candidate_illumination))
+
+        flat = int(np.flatnonzero(candidates)[0])
         row, col = np.unravel_index(flat, remaining.shape)
         row_i, col_i = int(row), int(col)
         total = float(remaining[row_i, col_i])

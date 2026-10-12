@@ -41,13 +41,18 @@ def _paths(cfg: dict, root: Path) -> dict[str, Path]:
 
 
 def _illumination_affine(georef: dict) -> Affine:
-    """PDS polar label → GDAL affine (UL corner of pixel 1,1)."""
+    """Convert PDS3 projection offsets to a GDAL pixel-corner affine.
+
+    PDS3 offsets locate the projection origin relative to the centre of the
+    one-based first pixel.  Thus pixel (1, 1) has centre coordinates
+    ``(-sample_offset * scale, line_offset * scale)``.
+    """
     scale = float(georef["pixel_m"])
     s_off = float(georef["sample_projection_offset"])
     l_off = float(georef["line_projection_offset"])
-    x_c = (1.0 - s_off) * scale
-    y_c = (l_off - 1.0) * scale
-    return Affine(scale, 0.0, x_c - 0.5 * scale, 0.0, -scale, y_c + 0.5 * scale)
+    ul_x = -(s_off + 0.5) * scale
+    ul_y = (l_off + 0.5) * scale
+    return Affine(scale, 0.0, ul_x, 0.0, -scale, ul_y)
 
 
 def warp_to_grid(
