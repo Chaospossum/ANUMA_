@@ -69,3 +69,16 @@ def test_tiny_monte_carlo_is_deterministic():
     assert 0.0 <= comparison["changed_frequency"] <= 1.0
     for result in first["policies"].values():
         assert result["winner_stability"]["most_frequent_winner"]["count"] >= 1
+
+
+def test_parallel_draws_are_bit_identical_to_serial():
+    cfg = deepcopy(load_config())
+    cfg["scoring"]["n_sites"] = 3
+    cfg["scoring"]["min_separation_km"] = 0.24
+    serial = run_study(
+        _layers(), TinyGrid(), cfg, mode="pilot", draw_count=6, workers=1
+    )
+    parallel = run_study(
+        _layers(), TinyGrid(), cfg, mode="pilot", draw_count=6, workers=3
+    )
+    assert serial == parallel

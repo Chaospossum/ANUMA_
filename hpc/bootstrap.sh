@@ -13,8 +13,12 @@ case "${profile}" in
     lock="${repo_root}/hpc/requirements-ingest.lock"
     default_venv="${repo_root}/.venv-hpc-ingest"
     ;;
+  sun)
+    lock="${repo_root}/hpc/requirements-sun.lock"
+    default_venv="${repo_root}/.venv-hpc-sun"
+    ;;
   *)
-    echo "ANUMA_ENVIRONMENT must be smoke or ingest" >&2
+    echo "ANUMA_ENVIRONMENT must be smoke, ingest, or sun" >&2
     exit 2
     ;;
 esac
@@ -64,6 +68,12 @@ print(
     f"rasterio={rasterio.__version__} GDAL={rasterio.__gdal_version__} "
     f"scipy={scipy.__version__} matplotlib={matplotlib.__version__}"
 )
+PY
+elif [[ "${profile}" == "sun" ]]; then
+  "${venv}/bin/python" - <<'PY'
+import spiceypy
+
+print(f"Verified Sun runtime: spiceypy={spiceypy.__version__}")
 PY
 fi
 

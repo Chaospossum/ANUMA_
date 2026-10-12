@@ -6,23 +6,33 @@ The submitted 28 September paper does not mention HPC because MeluXina access ca
 
 ## How the hours are used
 
-The confirmed `p201619` allocation is 300 CPU node-hours for the current month, with 0 used when checked. Shared project and scratch storage are 10 TB each; personal home is 100 GB. There is no GPU, FPGA, or large-memory allocation. The [bounded study plan](hpc-study-plan.md) places a separate 220-node-hour ceiling on the precursor and stages A–D. Its committed caps total 88.5 node-hours, leaving at least 131.5 of that ceiling held.
+The confirmed `p201619` allocation is 300 CPU node-hours for the current
+month, with about 1 used on 12 October. Shared project and scratch storage are
+10 TB each; personal home is 100 GB. There is no GPU, FPGA, or large-memory
+allocation. The [revised bounded study plan](hpc-study-plan.md) caps stages
+A–D at 165 node-hours within a 220-node-hour ceiling, holds 55 hours, and
+keeps at least 80 allocation hours in reserve.
 
-The first study is the [guarded 240 m clip-and-weight Monte Carlo](meluxina-execution.md#first-study-240-m-clip-and-weight-monte-carlo), before any 20 m job. Its tiny pilot is one CPU node under `test`, capped at 30 minutes. The full 500-draw study is one CPU node under `default`, capped at 4 hours. Both run only after allocation, quota, account, QOS, affine-fix provenance, and staged paths pass preflight. A 20 m job remains a separate later decision.
+The 240 m 500-draw precursor already exists as job `5332991` and must not be
+rerun. The [execution guide](meluxina-execution.md) and
+[study plan](hpc-study-plan.md) define the blocking Sun-model validation and
+later 20 m gates.
 
 ## How the work is implemented
 
 First, prove the code on a laptop tile. Only then run it on MeluXina. Run one one-node CPU/memory job at a time, cap every walltime, and capture `myquota` before and after every submission. CPU nodes provide 128 cores and 512 GB RAM, but requests must follow measured need. QOS percentage limits do not justify multi-node or 100-node scaling.
 
-Keep the rank table and agreement map. Delete scratch data. Do not add a sun model or a new dataset.
+Keep declared outputs and accounting evidence, then delete job-local scratch.
+The Sun model uses the existing DEM and measured illumination product plus
+externally staged, checksummed DE440/frame kernels; it downloads no dataset.
 
 On MeluXina, `login.lxp.lu:8822` is for access, Git/file management,
 submission, and monitoring—not ingest, checksumming, environment creation, or
 other heavy work. Use the official CPU development allocation
 `--reservation=cpudev -q dev` for interactive setup and preflight, then the
-guarded batch smoke under `-q test` without a reservation. Prefer
-`env/release/2025.1`, record module versions, and use `env/staging/2025.1` only
-when module discovery proves a required package is missing from release.
+guarded batch smoke under `-q test` without a reservation. Record module
+versions; release/2025.1 has Python 3.13.1, while Python 3.12.3 is available
+only under release/2024.1. Never use staging without a documented gap.
 
 ## Why the statistical tests exist
 
@@ -43,11 +53,12 @@ policy remain comparison cases, not defaults.
 
 The mission case remains open, and none of these possible studies has been done. They are optional uses of the held node-hours, not work to run for show or describe as a portfolio result before jobs actually run:
 
-- Prepared, not run: Clip-and-weight Monte Carlo on the 240 m grid, reporting top-ten membership frequency, winner stability, and paired clipped-versus-unclipped winner-class changes.
+- Completed precursor: job `5332991`, the 500-draw clip-and-weight Monte Carlo.
 - Possible, not done: Slope-limit sweep, including the paper's 5° goal and 8° threshold.
 - Possible, not done: 20 m versus 240 m agreement map.
 - Possible, not done: Ellipse check, where a site counts only if a small neighborhood around it also passes.
 - Possible, not done: A few 20 m reruns with elevation noise, only for sites that look unstable.
 - Possible, not done: Bounded homemade sun model. It can fit the allocation if the horizon is computed once from the DEM and later dates only compare the sun's elevation to that horizon; a fresh ray-march for every pixel and every date does not fit. Prove it on the 240 m grid against the published 2016 average-illumination map before any 20 m run. Do not claim a mission-duration percentage until the team chooses dates. The case stays open. The published map remains the measured layer; the model is a scenario tool.
 
-The 300 CPU node-hours cover these studies if every full-cap job keeps a walltime cap.
+No statement here guarantees that every study will fit. Each stage requires a
+pilot, measured cost estimate, preflight, hard walltime, and passing prior gate.

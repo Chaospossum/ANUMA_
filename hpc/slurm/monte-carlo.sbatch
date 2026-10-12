@@ -91,9 +91,9 @@ if grep -q 'env/staging/2025\.1' "${job_tmp}/module-list.txt"; then
   echo "Monte Carlo requires stable release modules, not staging" >&2
   exit 2
 fi
-export OMP_NUM_THREADS=4
-export OPENBLAS_NUM_THREADS=4
-export MKL_NUM_THREADS=4
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
 
 "${ANUMA_PYTHON}" - \
   "${ANUMA_PREFLIGHT_RECEIPT}" "${ANUMA_STUDY_MODE}" "${expected_qos}" \
@@ -146,4 +146,5 @@ srun --ntasks=1 --cpus-per-task=4 \
   "${ANUMA_PYTHON}" -m anuma.hpc_monte_carlo \
   --input-manifest "${ANUMA_INPUT_MANIFEST}" \
   --output-dir "${output_dir}" \
-  --mode "${ANUMA_STUDY_MODE}"
+  --mode "${ANUMA_STUDY_MODE}" \
+  --workers "${SLURM_CPUS_PER_TASK}"
