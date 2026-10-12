@@ -66,3 +66,13 @@ execution:
   nodes: 1
   maximum_workers: 128
   accelerators: false
+  # Save the sunlight accumulators this often so a walltime kill keeps them.
+  checkpoint_every_epochs: 16
+  pilot_node_hours: 0.5
+  production_node_hours: 14.5
+  stage_node_hour_cap: 15
+
+# Pilot sample on the full grid. Not the RMSE gate and not a scored map.
+pilot:
+  azimuth_count: 4
+  epoch_count: 16

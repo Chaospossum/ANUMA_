@@ -146,6 +146,7 @@ test ! -e "${output_dir}"
 cd "${repo_root}"
 srun --ntasks=1 --cpus-per-task=128 \
   "${ANUMA_PYTHON}" -m anuma.sun_validation \
+  --mode "${ANUMA_STUDY_MODE}" \
   --input-manifest "${ANUMA_INPUT_MANIFEST}" \
   --kernel-manifest "${ANUMA_KERNEL_MANIFEST}" \
   --epoch-manifest "${ANUMA_EPOCH_MANIFEST}" \
