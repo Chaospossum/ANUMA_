@@ -63,7 +63,13 @@ record = {
     "staging_justification": os.environ.get("ANUMA_STAGING_JUSTIFICATION"),
     "lock_sha256": hashlib.sha256(lock.read_bytes()).hexdigest(),
     "packages": subprocess.check_output(
-        [str(venv / "bin" / "python"), "-m", "pip", "freeze", "--all"],
+        [
+            str(venv / "bin" / "python"),
+            "-m",
+            "pip",
+            "list",
+            "--format=freeze",
+        ],
         text=True,
     ).splitlines(),
 }
