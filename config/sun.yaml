@@ -20,11 +20,13 @@ sun:
   kernel_manifest: /project/home/p201619/spice-kernels/kernel-manifest.json
   # Roles the operator reported present and SHA-256 verified twice.
   # The job refuses to run if any of these roles is missing.
+  # Role names exactly as the manifest writes them:
+  # de440.bsp, moon_pa_de440_200625.bpc, moon_de440_250416.tf, naif0012.tls.
   required_kernel_roles:
-    - DE440
-    - moon_pa_de440_200625
-    - moon_de440_250416.tf
-    - naif0012
+    - de440_ephemeris
+    - lunar_orientation
+    - lunar_frame
+    - leap_seconds
 
 # Operator-reported geometry sanity check. Not the AVGVISIB validation
 # gate and not a scored illumination result. No Slurm job id was supplied.

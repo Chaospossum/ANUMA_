@@ -266,10 +266,10 @@ def test_sun_config_pins_manifest_and_keeps_rmse_gate_unrun():
         == "/project/home/p201619/spice-kernels/kernel-manifest.json"
     )
     assert cfg["sun"]["required_kernel_roles"] == [
-        "DE440",
-        "moon_pa_de440_200625",
-        "moon_de440_250416.tf",
-        "naif0012",
+        "de440_ephemeris",
+        "lunar_orientation",
+        "lunar_frame",
+        "leap_seconds",
     ]
     sanity = cfg["geometry_sanity"]
     assert sanity["kind"] == "operator_reported_geometry_sanity_check"
