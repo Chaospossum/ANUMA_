@@ -105,8 +105,9 @@ Stage A is a blocking method-validation stage, capped at 15 node-hours.
 ### Method
 
 Compute the terrain horizon once per pixel from the 240 m DEM at 360 azimuths,
-including far terrain. Reuse that horizon at every epoch. Compare the Sun disk
-(centre ±0.27°) against the horizon. Sun direction must come from the
+including far terrain. Reuse that horizon at every epoch. A timestep is lit
+when any fraction of the solar disc is above the horizon. Do not average the
+visible-disc area. The disc radius stays ±0.27°. Sun direction must come from the
 hash-pinned `spiceypy` DE440 path in `hpc/requirements-sun.lock` and externally
 checksummed kernels; there is no hand-written orbital approximation. A fresh
 whole-cap ray march for every date is explicitly out of budget.
@@ -118,18 +119,25 @@ tool, not a replacement measurement.
 
 ### Resources
 
-- Pilot on one node with `test` and ≤00:30. Use it to measure throughput,
-  memory, and a full-run cost; stop if the estimate cannot fit 15 node-hours.
-- Production on one node with `default`, hard walltime ≤15:00, ≤15 node-hours.
-- Increase `cpus-per-task` only to the pilot-measured need, never above 128.
+- Pilot on one CPU node, QOS `test`, at most 00:30 (0.5 node-hours), 128
+  workers, no accelerators.
+- Production on one CPU node, QOS `default`, hard walltime 14:30 (14.5
+  node-hours), 128 workers, no accelerators.
+- The production walltime plus the pilot stays at or below 15 node-hours.
 - No downstream job may overlap it.
 
 ### Inputs
 
 - Corrected 240 m DEM and affine-fix manifest.
 - Published `AVGVISIB` 2016 map and metadata.
-- Frozen `config/sun.yaml`, projection, horizon algorithm, DE440 kernel
-  manifest, published temporal definition/epochs, and environment.
+- Frozen `config/sun.yaml`, `config/sun-epoch.yaml`, projection, horizon
+  algorithm, DE440 kernel manifest, and environment.
+- The validation gate uses the primary window, which starts at
+  2000-01-01T00:00:00Z because that start is ANUMA's choice. NASA publishes
+  no start or end for `AVGVISIB_65S_240M_201608`, and the filename is not a
+  date. 18.6 years means 18.6 × 365.25 days, sampled hourly. The sensitivity
+  window starts 9.3 × 365.25 days later, is reported separately, and cannot
+  be used to pick a passing start.
 
 ### Outputs
 
@@ -143,6 +151,9 @@ tool, not a replacement measurement.
 
 The proposed and fixed stop threshold is RMSE **0.05**. If RMSE exceeds it,
 stop: stages B–D do not start. Do not tune the threshold after seeing output.
+`stop_rmse` stays 0.05 and `tune_threshold_after_run` stays false. The job
+refuses a changed RMSE threshold.
+
 The scenario default is calendar year 2029, but it does not substitute for the
 published map's validation interval. The mission case remains open.
 

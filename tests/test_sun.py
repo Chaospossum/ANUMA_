@@ -41,6 +41,54 @@ def test_parallel_horizon_is_bit_identical_to_serial():
     assert np.array_equal(serial, parallel)
 
 
+def _south_pole_vector(elevation_deg: float) -> np.ndarray:
+    """Unit vector whose elevation is elevation_deg at lon 0, lat -90."""
+    z_component = -np.sin(np.deg2rad(elevation_deg))
+    x_component = np.sqrt(max(0.0, 1.0 - z_component * z_component))
+    return np.array([x_component, 0.0, z_component], dtype=np.float64)
+
+
+def test_any_disc_fraction_counts_timestep_as_lit():
+    horizon = np.zeros((1, 1, 1), dtype=np.float32)
+    lon = np.array([[0.0]])
+    lat = np.array([[-90.0]])
+    partial = _south_pole_vector(-0.26)
+    hidden = _south_pole_vector(-0.28)
+    fraction = sun_disk_visible_fraction(np.array([-0.26]), np.zeros(1), 0.27)
+    assert 0.0 < float(fraction[0]) < 1.0
+    one_step = evaluate_sunlight(
+        horizon,
+        lon,
+        lat,
+        partial.reshape(1, 3),
+        cadence_hours=1.0,
+        disk_radius_deg=0.27,
+    )
+    np.testing.assert_allclose(one_step["percent_time_lit"], [[100.0]])
+    both = evaluate_sunlight(
+        horizon,
+        lon,
+        lat,
+        np.stack([partial, hidden]),
+        cadence_hours=1.0,
+        disk_radius_deg=0.27,
+    )
+    np.testing.assert_allclose(both["percent_time_lit"], [[50.0]])
+    hidden_fraction = sun_disk_visible_fraction(
+        np.array([-0.27]), np.zeros(1), 0.27
+    )
+    assert float(hidden_fraction[0]) == 0.0
+    dark = evaluate_sunlight(
+        horizon,
+        lon,
+        lat,
+        hidden.reshape(1, 3),
+        cadence_hours=1.0,
+        disk_radius_deg=0.27,
+    )
+    np.testing.assert_allclose(dark["percent_time_lit"], [[0.0]])
+
+
 def test_sun_disk_fraction_handles_full_partial_and_dark():
     visible = sun_disk_visible_fraction(
         np.array([-0.28, 0.0, 0.28]), np.zeros(3), 0.27
@@ -52,7 +100,8 @@ def test_synthetic_flat_horizon_outputs_expected_metrics():
     horizon = np.zeros((4, 1, 1), dtype=np.float32)
     lon = np.array([[0.0]])
     lat = np.array([[-90.0]])
-    # At the south pole +X is local north on the horizon; +Z is fully below it.
+    # At the south pole +X is on the horizon, so half the disc is visible and
+    # the timestep counts as lit. +Z is fully below the horizon.
     vectors = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
     result = evaluate_sunlight(
         horizon,
@@ -62,7 +111,7 @@ def test_synthetic_flat_horizon_outputs_expected_metrics():
         cadence_hours=2.0,
         disk_radius_deg=0.27,
     )
-    np.testing.assert_allclose(result["percent_time_lit"], [[25.0]])
+    np.testing.assert_allclose(result["percent_time_lit"], [[50.0]])
     np.testing.assert_allclose(
         result["longest_continuous_darkness_hours"], [[2.0]]
     )

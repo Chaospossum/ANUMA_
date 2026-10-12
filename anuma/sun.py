@@ -262,7 +262,11 @@ def evaluate_sunlight(
     pass_threshold: float = 0.80,
     azimuth_origin_deg: float = 0.0,
 ) -> dict[str, np.ndarray]:
-    """Evaluate illumination and longest complete darkness over fixed epochs."""
+    """Evaluate illumination and longest complete darkness over fixed epochs.
+
+    Percent time lit is the share of timesteps in which any positive fraction
+    of the solar disc is above the horizon. The disc radius stays ±0.27°.
+    """
     horizons = np.asarray(horizons_deg)
     longitude = np.asarray(lon_deg, dtype=np.float64)
     latitude = np.asarray(lat_deg, dtype=np.float64)
@@ -304,9 +308,14 @@ def evaluate_sunlight(
         ).astype(np.int64) % azimuth_count
         terrain = np.take_along_axis(horizons, index[None, ...], axis=0)[0]
         elevation = np.rad2deg(np.arcsin(np.clip(up_component, -1.0, 1.0)))
-        visible = sun_disk_visible_fraction(elevation, terrain, disk_radius_deg)
-        total += visible
-        dark = visible == 0.0
+        # PDS AVGVISIB: a timestep is lit when any fraction of the solar disc
+        # is above the horizon. Do not average the visible-disc area.
+        visible_fraction = sun_disk_visible_fraction(
+            elevation, terrain, disk_radius_deg
+        )
+        lit = visible_fraction > 0.0
+        total += lit
+        dark = ~lit
         current_dark = np.where(dark, current_dark + 1, 0)
         longest_dark = np.maximum(longest_dark, current_dark)
 

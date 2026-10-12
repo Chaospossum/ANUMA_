@@ -56,7 +56,27 @@ JOB_PROFILES = {
         "node_hours": 4.0,
         "core_hours": 16.0,
     },
+    # Pilot 0.5 node-hours plus production 14.5 node-hours is the 15-hour cap.
+    "sun-validation-pilot": {
+        "qos": "test",
+        "walltime": "00:30:00",
+        "walltime_minutes": 30,
+        "cpus": 128,
+        "memory": "512G",
+        "node_hours": 0.5,
+        "core_hours": 64.0,
+    },
+    "sun-validation": {
+        "qos": "default",
+        "walltime": "14:30:00",
+        "walltime_minutes": 14 * 60 + 30,
+        "cpus": 128,
+        "memory": "512G",
+        "node_hours": 14.5,
+        "core_hours": 1856.0,
+    },
 }
+SUN_PROFILES = frozenset({"sun-validation-pilot", "sun-validation"})
 QOS_MAX_WALL_MINUTES = {
     "dev": 6 * 60,
     "test": 30,
@@ -220,6 +240,27 @@ def run_preflight(receipt_path: Path) -> dict:
         ["git", "-C", str(repo_root), "rev-parse", "HEAD"]
     ).strip()
 
+    sun_pin: dict = {}
+    if job_profile in SUN_PROFILES:
+        if account != "p201619":
+            fail("sun validation requires account p201619")
+        from anuma.sun import load_sun_config
+        from anuma.sun_epochs import receipt_pin
+
+        sun_cfg = load_sun_config()
+        kernel_manifest = Path(
+            os.environ.get("ANUMA_KERNEL_MANIFEST", sun_cfg["sun"]["kernel_manifest"])
+        )
+        epoch_manifest = repo_root / str(sun_cfg["validation"]["epoch_manifest"])
+        try:
+            sun_pin = receipt_pin(
+                input_manifest=input_manifest,
+                kernel_manifest=kernel_manifest,
+                epoch_manifest=epoch_manifest,
+            )
+        except ValueError as exc:
+            fail(str(exc))
+
     receipt = {
         "schema_version": 1,
         "verified_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -244,6 +285,7 @@ def run_preflight(receipt_path: Path) -> dict:
         "job_walltime": profile["walltime"],
         "job_cpus": profile["cpus"],
         "job_memory": profile["memory"],
+        **sun_pin,
     }
     canonical = json.dumps(receipt, sort_keys=True).encode()
     receipt["receipt_sha256"] = hashlib.sha256(canonical).hexdigest()
