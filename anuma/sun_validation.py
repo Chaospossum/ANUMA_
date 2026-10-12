@@ -21,19 +21,12 @@ from anuma.sun import (
     validation_metrics,
     verify_kernel_manifest,
 )
-
-
-def _load_epoch_manifest(path: Path) -> tuple[dict, list[str]]:
-    manifest = json.loads(path.read_text())
-    definition = manifest.get("published_temporal_definition")
-    epochs = manifest.get("utc_epochs")
-    if not isinstance(definition, str) or not definition.strip():
-        raise ValueError("published temporal definition must be supplied")
-    if not isinstance(epochs, list) or not epochs or not all(
-        isinstance(value, str) and value.strip() for value in epochs
-    ):
-        raise ValueError("epoch manifest must contain non-empty utc_epochs")
-    return manifest, epochs
+from anuma.sun_epochs import (
+    assert_frozen_rmse,
+    describe_windows,
+    gate_epochs,
+    load_epoch_manifest,
+)
 
 
 def run_validation(
@@ -47,7 +40,10 @@ def run_validation(
     """Compute horizons, model the declared epochs, and apply the fixed gate."""
     input_meta, files = validate_input_manifest(input_manifest)
     cfg = load_sun_config()
-    epoch_meta, epochs = _load_epoch_manifest(epoch_manifest)
+    assert_frozen_rmse(cfg)
+    epoch_meta = load_epoch_manifest(epoch_manifest)
+    epochs = gate_epochs(epoch_meta)
+    windows = describe_windows(epoch_meta)
     sun_cfg = cfg["sun"]
     # Refuse before horizon work. sun_vectors_from_spice verifies again
     # immediately before importing spiceypy.
@@ -119,6 +115,8 @@ def run_validation(
             "published_temporal_definition"
         ],
         "epoch_count": len(epochs),
+        "gate_window": "primary",
+        "windows": windows,
         "metrics": metrics,
         "gate": "stages B-D stop unless passed is true",
         "inputs": {

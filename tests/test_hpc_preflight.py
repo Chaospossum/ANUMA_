@@ -122,6 +122,26 @@ def test_preflight_rejects_dev_qos_for_batch_smoke(tmp_path, monkeypatch):
         preflight.run_preflight(tmp_path / "receipt.json")
 
 
+def test_sun_validation_profiles_fit_one_node_and_fifteen_hours():
+    pilot = preflight.JOB_PROFILES["sun-validation-pilot"]
+    production = preflight.JOB_PROFILES["sun-validation"]
+    assert pilot["qos"] == "test"
+    assert pilot["walltime"] == "00:30:00"
+    assert pilot["walltime_minutes"] <= 30
+    assert pilot["cpus"] == 128
+    assert production["qos"] == "default"
+    assert production["walltime"] == "14:30:00"
+    assert production["cpus"] == 128
+    assert pilot["memory"] == "512G"
+    assert production["memory"] == "512G"
+    assert pilot["node_hours"] + production["node_hours"] <= 15
+    script = (REPO_ROOT / "hpc" / "slurm" / "sun-validation.sbatch").read_text()
+    wrapper = (REPO_ROOT / "hpc" / "submit-sun-validation.sh").read_text()
+    assert "--gpu" not in script.lower()
+    assert "--gpu" not in wrapper.lower()
+    assert "p201619" in wrapper
+
+
 def test_full_monte_carlo_requires_default_qos_and_four_hour_cap(
     tmp_path, monkeypatch
 ):
@@ -150,6 +170,7 @@ def test_preflight_refuses_to_overwrite_receipt(tmp_path, monkeypatch):
         "hpc/discover-software.sh",
         "hpc/slurm/smoke-240m.sbatch",
         "hpc/slurm/monte-carlo.sbatch",
+        "hpc/slurm/sun-validation.sbatch",
     ),
 )
 def test_staging_module_regex_uses_one_literal_dot_escape(path):

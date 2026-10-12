@@ -1,0 +1,24 @@
+# Frozen AVGVISIB comparison windows. NASA publishes no start or end.
+# The filename is not a date. The sensitivity window cannot choose a passing start.
+
+measured_layer: AVGVISIB_65S_240M_201608
+published_temporal_definition: >-
+  PGDA product 69 (https://pgda.gsfc.nasa.gov/products/69) averages the
+  illumination products over hourly timesteps spanning 18.6 years.
+  Mazarico et al. 2011, NTRS 20120010094, used several 18.6-year cycles
+  at 6 h. PGDA says the products were updated after 2011. NASA publishes
+  no start or end for AVGVISIB_65S_240M_201608. Do not infer dates from
+  the filename.
+year_length_days: "365.25"
+span_years: "18.6"
+cadence_hours: 1
+gate_window: primary
+primary:
+  role: validation_gate
+  start_utc: "2000-01-01T00:00:00Z"
+  start_label: "ANUMA's choice because no published start exists"
+sensitivity:
+  role: reported_separately
+  offset_years: "9.3"
+  offset_rule: "9.3 × 365.25 days after the primary start"
+  cannot_select_passing_start: true

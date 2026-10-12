@@ -110,6 +110,12 @@ account from unrelated example commands.
 - `hpc/slurm/smoke-240m.sbatch`: bounded job with a second receipt check.
 - `hpc/submit-monte-carlo.sh`: guarded pilot/full study submission wrapper.
 - `hpc/slurm/monte-carlo.sbatch`: one-node study job with mode-specific caps.
+- `hpc/submit-sun-validation.sh`: guarded pilot/production wrapper. It does
+  not submit itself.
+- `hpc/slurm/sun-validation.sbatch`: one CPU node, 128 workers, no
+  accelerators. Pilot is QOS `test` and at most 30 minutes. Production is
+  14:30 so the two modes stay within 15 node-hours.
+- `config/sun-epoch.yaml`: frozen hourly windows for the 2016 comparison.
 - `anuma/hpc_smoke.py`: validates inputs, scores, and writes output lineage.
 - `anuma/hpc_monte_carlo.py`: deterministic 240 m clip-and-weight study.
 - `config/sun.yaml`: separate horizon, DE440, date, output, and fixed
@@ -219,20 +225,43 @@ export ANUMA_VENV=/project/home/p201619/ANUMA_/.venv-hpc-sun
 bash hpc/bootstrap.sh
 ```
 
-Pass that manifest explicitly, or omit `--kernel-manifest` so the job uses
-`sun.kernel_manifest` from `config/sun.yaml`:
+The frozen epoch file is `config/sun-epoch.yaml`. PGDA product 69
+(https://pgda.gsfc.nasa.gov/products/69) averages hourly timesteps spanning
+18.6 years, defined here as 18.6 × 365.25 days. Mazarico et al. 2011, NTRS
+20120010094, used several 18.6-year cycles at 6 h, and PGDA says the products
+were updated after 2011. NASA publishes no start or end for
+`AVGVISIB_65S_240M_201608`. The filename is not a date. The validation gate
+uses the primary window, starting 2000-01-01T00:00:00Z, labeled as ANUMA's
+choice because no published start exists. The sensitivity window starts
+9.3 × 365.25 days later. It is reported separately and cannot be used to pick
+a passing start.
+
+A timestep in that comparison is lit when any fraction of the solar disc is
+above the horizon. The disc radius stays ±0.27°. The visible-disc area is not
+averaged. `stop_rmse` stays 0.05 and `tune_threshold_after_run` stays false.
+The receipt rejects a bad epoch file or a raised RMSE limit.
+
+Both modes go through preflight and the receipt: account `p201619`, input and
+kernel manifest checksums, affine revision `pds3-pixel-center-v2`, and the
+frozen epoch file. One CPU node, 128 workers, no accelerators. Pilot mode
+uses QOS `test` and at most 30 minutes. Production uses QOS `default` and
+14:30. Those two walltimes add up to 15 node-hours. This document does not
+submit the job.
 
 ```bash
-.venv-hpc-sun/bin/python -m anuma.sun_validation \
-  --kernel-manifest /project/home/p201619/spice-kernels/kernel-manifest.json \
-  --input-manifest /project/home/p201619/ANUMA_/data/input-manifest.json \
-  --epoch-manifest "$ANUMA_EPOCH_MANIFEST" \
-  --output-dir /project/home/p201619/ANUMA_/out/sun-validation \
-  --workers 1
+export ANUMA_JOB_PROFILE=sun-validation-pilot
+export ANUMA_QOS=test
+export ANUMA_ACCOUNT=p201619
+export ANUMA_KERNEL_MANIFEST=/project/home/p201619/spice-kernels/kernel-manifest.json
+export ANUMA_EPOCH_MANIFEST="$PWD/config/sun-epoch.yaml"
+.venv-hpc-sun/bin/python hpc/preflight.py \
+  --receipt "$HOME/anuma-sun-pilot-$(date -u +%Y%m%dT%H%M%SZ).json"
+export ANUMA_PREFLIGHT_RECEIPT="$HOME/<the-new-pilot-receipt>.json"
+bash hpc/submit-sun-validation.sh pilot
 ```
 
-`ANUMA_EPOCH_MANIFEST` must name a reviewed epoch file. This operator report
-did not supply one.
+Production repeats that sequence with `ANUMA_JOB_PROFILE=sun-validation`,
+`ANUMA_QOS=default`, and `bash hpc/submit-sun-validation.sh production`.
 
 #### Operator report, 12 October 2026
 
@@ -245,11 +274,8 @@ Project `p201619`:
   calendar 2029 stays within ±1.53°. No Slurm job id was supplied. This is
   not the AVGVISIB validation gate and not a scored illumination result.
 
-Stage A also requires a reviewed epoch manifest containing the published
-`avgvisib_65s_240m_201608` temporal definition and explicit UTC epochs.
-`anuma.sun_validation` refuses an empty definition. Its real-data destination
-is `out/sun-validation/`; no report is committed here. The fixed gate is RMSE
-0.05, accompanied by bias and residual scatter. That gate against
+Stage A writes `out/sun-validation/`; no report is committed here. The fixed
+gate is RMSE 0.05, accompanied by bias and residual scatter. That gate against
 `avgvisib_65s_240m_201608` remains unrun and blocking. The calendar-year-2029
 scenario default remains configurable and is not a mission interval.
 

@@ -48,9 +48,9 @@ scenario:
 
 validation:
   measured_layer: avgvisib_65s_240m_201608
-  # This must be filled from the product's documented averaging interval,
-  # not inferred from the filename.
-  published_temporal_definition: null
+  # Citation, hourly 18.6-year windows, and the two labeled starts live here.
+  # NASA publishes no start or end; do not infer dates from the filename.
+  epoch_manifest: config/sun-epoch.yaml
   metrics:
     - rmse
     - bias
