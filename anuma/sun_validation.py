@@ -14,10 +14,12 @@ from anuma.grid import Grid
 from anuma.hpc_smoke import sha256_file, validate_input_manifest
 from anuma.sun import (
     compute_horizons,
+    configured_kernel_manifest,
     evaluate_sunlight,
     load_sun_config,
     sun_vectors_from_spice,
     validation_metrics,
+    verify_kernel_manifest,
 )
 
 
@@ -46,6 +48,10 @@ def run_validation(
     input_meta, files = validate_input_manifest(input_manifest)
     cfg = load_sun_config()
     epoch_meta, epochs = _load_epoch_manifest(epoch_manifest)
+    sun_cfg = cfg["sun"]
+    # Refuse before horizon work. sun_vectors_from_spice verifies again
+    # immediately before importing spiceypy.
+    verify_kernel_manifest(kernel_manifest, sun_cfg["required_kernel_roles"])
     output_dir = output_dir.resolve()
     if output_dir.exists() and any(output_dir.iterdir()):
         raise ValueError(f"output directory is not empty: {output_dir}")
@@ -55,7 +61,6 @@ def run_validation(
     dem = np.load(files["dem"], mmap_mode="r", allow_pickle=False)
     measured = np.load(files["illumination"], mmap_mode="r", allow_pickle=False)
     horizon_cfg = cfg["horizon"]
-    sun_cfg = cfg["sun"]
     scenario_cfg = cfg["scenario"]
     validation_cfg = cfg["validation"]
     started = datetime.now(timezone.utc).isoformat()
@@ -153,15 +158,21 @@ def run_validation(
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-manifest", type=Path, required=True)
-    parser.add_argument("--kernel-manifest", type=Path, required=True)
+    parser.add_argument(
+        "--kernel-manifest",
+        type=Path,
+        default=None,
+        help="Defaults to sun.kernel_manifest in config/sun.yaml.",
+    )
     parser.add_argument("--epoch-manifest", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--workers", type=int, required=True)
     args = parser.parse_args(argv)
+    kernel_manifest = args.kernel_manifest or configured_kernel_manifest()
     try:
         report = run_validation(
             args.input_manifest,
-            args.kernel_manifest,
+            kernel_manifest,
             args.epoch_manifest,
             args.output_dir,
             workers=args.workers,

@@ -1,12 +1,20 @@
 """Deterministic tests for terrain horizons and Sun-disk metrics."""
 
-import numpy as np
+import hashlib
+import json
+import sys
 
+import numpy as np
+import pytest
+
+from anuma.config import repo_root
 from anuma.sun import (
     compute_horizons,
     evaluate_sunlight,
     horizon_for_azimuth,
+    load_sun_config,
     sun_disk_visible_fraction,
+    sun_vectors_from_spice,
     validation_metrics,
 )
 
@@ -68,3 +76,73 @@ def test_validation_gate_reports_fixed_metrics():
     assert metrics["valid_pixels"] == 3
     assert metrics["rmse"] > 0.05
     assert metrics["passed"] is False
+
+
+def test_sun_config_pins_manifest_and_keeps_rmse_gate_unrun():
+    cfg = load_sun_config()
+    text = (repo_root() / "config" / "sun.yaml").read_text()
+    assert "sha256" not in text.lower()
+    assert (
+        cfg["sun"]["kernel_manifest"]
+        == "/project/home/p201619/spice-kernels/kernel-manifest.json"
+    )
+    assert cfg["sun"]["required_kernel_roles"] == [
+        "DE440",
+        "moon_pa_de440_200625",
+        "moon_de440_250416.tf",
+        "naif0012",
+    ]
+    sanity = cfg["geometry_sanity"]
+    assert sanity["kind"] == "operator_reported_geometry_sanity_check"
+    assert sanity["result"] == "within ±1.53°"
+    assert sanity["slurm_job_id"] is None
+    assert sanity["environment"] == ".venv-hpc-sun"
+    assert sanity["environment_built"] is True
+    assert cfg["validation"]["measured_layer"] == "avgvisib_65s_240m_201608"
+    assert cfg["validation"]["stop_rmse"] == 0.05
+    assert cfg["validation"]["status"] == "unrun"
+    assert cfg["validation"]["blocking"] is True
+
+
+def _fake_manifest(tmp_path, roles, *, drop_role=None, bad_role=None):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    entries = []
+    for role in roles:
+        if role == drop_role:
+            continue
+        path = tmp_path / role
+        path.write_bytes(f"fake-kernel-{role}".encode())
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if role == bad_role:
+            digest = "0" * 64
+        entries.append({"role": role, "path": path.name, "sha256": digest})
+    manifest = tmp_path / "kernel-manifest.json"
+    manifest.write_text(json.dumps({"kernels": entries}))
+    return manifest
+
+
+def test_missing_role_or_checksum_mismatch_refuses_before_spiceypy(
+    tmp_path, monkeypatch
+):
+    class _SpiceGuard:
+        def __getattr__(self, name):
+            raise AssertionError(f"spiceypy.{name} was called")
+
+    monkeypatch.setitem(sys.modules, "spiceypy", _SpiceGuard())
+    roles = load_sun_config()["sun"]["required_kernel_roles"]
+
+    missing = _fake_manifest(tmp_path / "missing", roles, drop_role=roles[0])
+    with pytest.raises(ValueError, match="missing roles"):
+        sun_vectors_from_spice(
+            ["2029-01-01T00:00:00"],
+            missing,
+            required_roles=roles,
+        )
+
+    mismatched = _fake_manifest(tmp_path / "mismatch", roles, bad_role=roles[-1])
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        sun_vectors_from_spice(
+            ["2029-01-01T00:00:00"],
+            mismatched,
+            required_roles=roles,
+        )
