@@ -125,7 +125,8 @@ def run_preflight(receipt_path: Path) -> dict:
             "-nP",
             "show",
             "assoc",
-            f"where user={os.environ['USER']}",
+            "where",
+            f"user={os.environ['USER']}",
             f"account={account}",
             "format=Cluster,Account,User,Partition,QOS",
         ]
