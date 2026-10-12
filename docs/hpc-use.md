@@ -16,6 +16,14 @@ First, prove the code on a laptop tile. Only then run it on MeluXina. Run one on
 
 Keep the rank table and agreement map. Delete scratch data. Do not add a sun model or a new dataset.
 
+On MeluXina, `login.lxp.lu:8822` is for access, Git/file management,
+submission, and monitoring—not ingest, checksumming, environment creation, or
+other heavy work. Use the official CPU development allocation
+`--reservation=cpudev -q dev` for interactive setup and preflight, then the
+guarded batch smoke under `-q test` without a reservation. Prefer
+`env/release/2025.1`, record module versions, and use `env/staging/2025.1` only
+when module discovery proves a required package is missing from release.
+
 ## Why the statistical tests exist
 
 The tests answer two questions:
