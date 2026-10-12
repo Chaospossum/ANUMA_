@@ -170,41 +170,57 @@ must live in the grid directory or one of its parents; paths outside the
 manifest tree are rejected.
 
 Source rasters and derived arrays are deliberately ignored by Git. A fresh
-clone therefore is not score-ready. On a compute allocation, check presence:
+clone therefore is not score-ready. The source rasters are confirmed at
+`data/raw` on the approved local machine and at
+`/project/home/p201619/ANUMA_/data/raw` on MeluXina. Their presence does not
+make the old derived grids valid: after the relevant PRs merge, validate the
+existing raw files first, then re-ingest. On a compute allocation, capture the
+pre-ingest raw manifest:
 
 ```bash
 cd /project/home/p201619/ANUMA_
-python -m anuma.hpc_data_check --root "$PWD"
-python -m anuma.hpc_data_check --root "$PWD" --require-ready \
-  --manifest-output data/data-presence-manifest.json
+python -m anuma.hpc_data_check --root "$PWD" --require-raw-ready \
+  --manifest-output data/raw-before-reingest.json
 ```
 
-The first command reports every required raw and derived file. The second
-fails until the source rasters have been ingested, configured source sizes and
-known publisher-file hashes match, all derived grids exist, and no raw/grid
-data is tracked by Git. It writes SHA-256 for every raw and derived file; the
-DEM currently has no configured upstream digest, so its recorded digest is a
+This hashes every existing source. It fails on a missing file, wrong configured
+size, wrong known publisher-file hash, or tracked raw/grid data. The DEM
+currently has no configured upstream digest, so its recorded digest is a
 transfer-integrity pin, not publisher authentication.
+
+If raw validation passes, do not redownload. `anuma.ingest` reuses each existing
+file only when its configured size and available SHA-256 pass. If validation
+fails, record the failing filename and allow re-ingest to replace only the
+missing or invalid source via its `.part`/rename path.
 
 There are two approved production paths:
 
-1. **Approved workstation:** after the illumination-registration correction is
-   merged, ingest on a machine allowed to download and process the 2.5 GiB DEM.
-   Generate both manifests, transfer `data/raw/`, `data/grid/`, and the
-   manifests to `/project/home/p201619/ANUMA_/data/`, then rerun
-   `hpc_data_check --require-ready` inside a `cpudev` compute allocation. The
-   before/after manifest SHA-256 values must match.
+1. **Approved workstation:** after all ingest corrections merge, run
+   `--require-raw-ready` against local `data/raw`, preserve the resulting raw
+   manifest, and re-ingest on that approved machine. Generate both post-ingest
+   manifests, transfer `data/raw/`, `data/grid/`, and the manifests to
+   `/project/home/p201619/ANUMA_/data/`, then rerun the full check inside a
+   `cpudev` compute allocation. The before/after raw hashes and transferred
+   manifest SHA-256 values must match.
 2. **MeluXina compute job:** use a separately reviewed, bounded one-node CPU
-   job (normally `default` QOS) to download and ingest directly into project
-   storage, then generate both manifests. Do not perform downloads, raster
-   processing, hashing, or environment installation on a login node.
+   job (normally `default` QOS) to validate the existing project raw directory
+   and re-ingest directly into project storage. It downloads only a source that
+   failed validation. Do not perform downloads, raster processing, hashing, or
+   environment installation on a login node.
 
 Do not create the reference manifest from the current misregistered
 illumination ingest identified by the audit. The data chain remains blocked
 until that correction is merged and its ingest test passes. The guarded smoke
 job remains download-free and accepts only the verified staged outputs.
 
+From the approved full ingest environment (not the minimal smoke-test venv),
+run:
+
 ```bash
+python -m anuma.ingest
+python -m anuma.hpc_data_check --root "$PWD" --require-ready \
+  --manifest-output data/data-after-reingest.json
+
 .venv-hpc/bin/python hpc/build-input-manifest.py \
   --grid-dir /project/home/p201619/ANUMA_/data/grid \
   --output /project/home/p201619/ANUMA_/data/input-manifest.json \

@@ -50,6 +50,20 @@ hashing, and environment installation are not login-node work. Do not stage a
 reference grid until the illumination-registration correction documented by
 the HPC audit is merged and verified.
 
+Existing raw sources are confirmed at local `data/raw` and MeluXina
+`/project/home/p201619/ANUMA_/data/raw`. After the ingest fixes merge, validate
+them before re-ingest:
+
+```bash
+python3 -m anuma.hpc_data_check --root "$PWD" --require-raw-ready \
+  --manifest-output data/raw-before-reingest.json
+```
+
+A passing check means re-ingest must reuse the existing sources. A missing,
+wrong-sized, or checksum-invalid source is the only reason to download its
+replacement. Re-ingest and post-ingest manifest capture remain compute-node or
+approved-workstation work.
+
 ## Serve the UI
 
 After ingest completes, start the API and static UI:

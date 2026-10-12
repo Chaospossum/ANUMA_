@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 
 from anuma.hpc_data_check import GRID_FILES, check_data
@@ -11,7 +12,11 @@ def _cfg():
     return {
         "paths": {"raw": "data/raw", "grid": "data/grid"},
         "layers": {
-            "dem": {"filename": "dem.tif", "expected_bytes": 3},
+            "dem": {
+                "filename": "dem.tif",
+                "expected_bytes": 3,
+                "sha256": hashlib.sha256(b"dem").hexdigest(),
+            },
             "illumination": {
                 "filename": "illum.jp2",
                 "expected_bytes": 4,
@@ -33,6 +38,7 @@ def test_missing_sources_and_grids_are_not_ready(tmp_path):
     root = _repo(tmp_path)
     result = check_data(root, cfg=_cfg())
     assert result["ready"] is False
+    assert result["raw_ready"] is False
     assert result["git_tracked_data_files"] == []
     assert "absent from Git" in result["message"]
 
@@ -52,6 +58,21 @@ def test_complete_untracked_dataset_is_ready(tmp_path):
         (grid / name).write_bytes(b"derived")
     result = check_data(root, cfg=_cfg())
     assert result["ready"] is True
+    assert result["raw_ready"] is True
+    assert result["grid_ready"] is True
+
+
+def test_wrong_source_hash_is_not_raw_ready(tmp_path):
+    root = _repo(tmp_path)
+    raw = root / "data" / "raw"
+    (raw / "dem.tif").write_bytes(b"bad")
+    (raw / "illum.jp2").write_bytes(b"moon")
+    (raw / "illum.lbl").write_bytes(b"label")
+    (raw / "hydrogen.dat").write_bytes(b"h2")
+    result = check_data(root, cfg=_cfg())
+    assert result["sources"]["dem.tif"]["size_matches"] is True
+    assert result["sources"]["dem.tif"]["hash_matches"] is False
+    assert result["raw_ready"] is False
 
 
 def test_tracked_source_data_is_rejected(tmp_path):

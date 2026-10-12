@@ -112,6 +112,8 @@ def check_data(root: Path, cfg: dict | None = None) -> dict[str, Any]:
         "git_tracked_data_files": tracked,
         "sources": sources,
         "derived": derived,
+        "raw_ready": source_ready and not tracked,
+        "grid_ready": grid_ready and not tracked,
         "ready": source_ready and grid_ready and not tracked,
         "message": (
             "Source rasters are intentionally absent from Git. Ingest and verify "
@@ -123,6 +125,11 @@ def check_data(root: Path, cfg: dict | None = None) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=repo_root())
+    parser.add_argument(
+        "--require-raw-ready",
+        action="store_true",
+        help="Exit nonzero unless existing source rasters pass size/hash checks.",
+    )
     parser.add_argument(
         "--require-ready",
         action="store_true",
@@ -143,6 +150,11 @@ def main(argv: list[str] | None = None) -> None:
     if args.manifest_output:
         args.manifest_output.parent.mkdir(parents=True, exist_ok=True)
         args.manifest_output.write_text(rendered)
+    if args.require_raw_ready and not result["raw_ready"]:
+        parser.exit(
+            2,
+            "data check failed: existing raw sources are missing or invalid\n",
+        )
     if args.require_ready and not result["ready"]:
         parser.exit(2, "data check failed: ingest and verification are required\n")
 
