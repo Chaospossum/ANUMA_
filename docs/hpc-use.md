@@ -8,7 +8,7 @@ The submitted 28 September paper does not mention HPC because MeluXina access ca
 
 The allocation is 300 CPU node-hours and 1 TB. The planned spend is about 80 node-hours. About 220 node-hours stay unused on purpose.
 
-A 2-hour smoke job reads the DEM and writes slope for a small tile. One full-cap job, with walltime capped at 40 hours, computes 20 m slope and the same score as the demo. It then compares that result with the 240 m ranking. Statistical tests are capped at 40 hours.
+The first execution is the [guarded 240 m scoring smoke test](meluxina-execution.md): one node, four CPUs, and a 30-minute walltime, or at most 2 CPU-hours. It runs only after current allocation, quota, account, partition, and staged paths pass preflight. A later small-tile slope benchmark and any full-cap 20 m job require separate review. The proposed full-cap job remains bounded at 40 hours and would compare 20 m results with the 240 m ranking. Statistical tests remain capped at 40 hours.
 
 ## How the work is implemented
 

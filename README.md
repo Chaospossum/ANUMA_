@@ -9,6 +9,7 @@ Project documentation:
 
 - [Team and delivery facts](docs/TEAM.md)
 - [HPC use plan](docs/hpc-use.md)
+- [Guarded MeluXina 240 m execution](docs/meluxina-execution.md)
 - [Winning strategy](docs/winning-strategy.md)
 - [Short ispace meeting guide](docs/ispace-meeting.md)
 
@@ -76,7 +77,7 @@ the normalized criterion used by scoring. It prints every written path. Use
 Unit tests use constructed arrays and `--synthetic` ingest only:
 
 ```bash
-python3 -m pytest tests/test_ingest.py tests/test_score.py tests/test_api.py tests/test_render_static.py
+python3 -m pytest
 python3 -m anuma.ingest --synthetic --data-dir /tmp/anuma-test
 ```
 
