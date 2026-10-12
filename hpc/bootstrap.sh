@@ -11,6 +11,11 @@ if sys.version_info < (3, 11):
     raise SystemExit("ANUMA requires Python 3.11 or newer")
 print(f"Bootstrapping with Python {sys.version.split()[0]}")
 PY
+"${bootstrap_python}" -m ensurepip --version >/dev/null 2>&1 || {
+  echo "The selected Python cannot create a venv (ensurepip is unavailable)." >&2
+  echo "Choose a cluster-supported Python 3.11+ with venv support; do not install system packages on a login node." >&2
+  exit 2
+}
 
 "${bootstrap_python}" -m venv "${venv}"
 "${venv}/bin/python" -m pip install --disable-pip-version-check \
