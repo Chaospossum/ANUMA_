@@ -1,9 +1,23 @@
-#!/usr/bin/env bash
+#!/bin/bash -l
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bootstrap_python="${ANUMA_BOOTSTRAP_PYTHON:-python3}"
 venv="${ANUMA_VENV:-${repo_root}/.venv-hpc}"
+
+: "${SLURM_JOB_ID:?run bootstrap inside a MeluXina compute allocation}"
+command -v module >/dev/null 2>&1 || {
+  echo "Environment Modules is unavailable in this compute allocation" >&2
+  exit 2
+}
+module_record="$(mktemp)"
+trap 'rm -f -- "${module_record}"' EXIT
+module -t list > "${module_record}" 2>&1
+if grep -q 'env/staging/2025\\.1' "${module_record}" \
+  && [[ -z "${ANUMA_STAGING_JUSTIFICATION:-}" ]]; then
+  echo "Refusing staging modules without ANUMA_STAGING_JUSTIFICATION naming the missing release package" >&2
+  exit 2
+fi
 
 "${bootstrap_python}" - <<'PY'
 import sys
@@ -24,9 +38,10 @@ PY
   --no-deps --editable "${repo_root}"
 "${venv}/bin/python" -m pip check
 
-"${venv}/bin/python" - "${repo_root}" "${venv}" <<'PY'
+"${venv}/bin/python" - "${repo_root}" "${venv}" "${module_record}" <<'PY'
 import hashlib
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -35,12 +50,16 @@ from pathlib import Path
 
 repo = Path(sys.argv[1])
 venv = Path(sys.argv[2])
+module_record = Path(sys.argv[3])
 lock = repo / "hpc" / "requirements-hpc.lock"
 record = {
     "schema_version": 1,
     "created_at_utc": datetime.now(timezone.utc).isoformat(),
     "python": platform.python_version(),
     "platform": platform.platform(),
+    "slurm_job_id": os.environ["SLURM_JOB_ID"],
+    "modules": module_record.read_text().splitlines(),
+    "staging_justification": os.environ.get("ANUMA_STAGING_JUSTIFICATION"),
     "lock_sha256": hashlib.sha256(lock.read_bytes()).hexdigest(),
     "packages": subprocess.check_output(
         [str(venv / "bin" / "python"), "-m", "pip", "freeze", "--all"],

@@ -55,6 +55,7 @@ def _configured_environment(tmp_path, monkeypatch, remaining=10.0):
         "ANUMA_ACCOUNT": "project-account",
         "ANUMA_PARTITION": "cpu",
         "ANUMA_QOS": "test",
+        "ANUMA_DATA_ROOT": str(tmp_path),
         "ANUMA_INPUT_MANIFEST": str(manifest),
         "ANUMA_OUTPUT_ROOT": str(output),
         "ANUMA_SCRATCH_DIR": str(scratch),
@@ -68,6 +69,11 @@ def _configured_environment(tmp_path, monkeypatch, remaining=10.0):
         preflight.shutil, "disk_usage", lambda path: type("Usage", (), {"free": 1_000_000_000})()
     )
     monkeypatch.setattr(preflight, "run_smoke", lambda *args, **kwargs: {"status": "validated"})
+    monkeypatch.setattr(
+        preflight,
+        "check_data",
+        lambda root: {"ready": True, "message": "ready"},
+    )
 
     def fake_command(command):
         joined = " ".join(str(item) for item in command)
@@ -105,6 +111,13 @@ def test_preflight_rejects_unknown_qos(tmp_path, monkeypatch):
     _configured_environment(tmp_path, monkeypatch)
     monkeypatch.setenv("ANUMA_QOS", "made-up")
     with pytest.raises(RuntimeError, match="unknown ANUMA_QOS"):
+        preflight.run_preflight(tmp_path / "receipt.json")
+
+
+def test_preflight_rejects_dev_qos_for_batch_smoke(tmp_path, monkeypatch):
+    _configured_environment(tmp_path, monkeypatch)
+    monkeypatch.setenv("ANUMA_QOS", "dev")
+    with pytest.raises(RuntimeError, match="requires the official test QOS"):
         preflight.run_preflight(tmp_path / "receipt.json")
 
 

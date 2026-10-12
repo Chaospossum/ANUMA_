@@ -13,6 +13,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from anuma.hpc_data_check import check_data
 from anuma.hpc_smoke import run_smoke, sha256_file
 
 REQUIRED_ENV = (
@@ -20,6 +21,7 @@ REQUIRED_ENV = (
     "ANUMA_PARTITION",
     "ANUMA_QOS",
     "ANUMA_INPUT_MANIFEST",
+    "ANUMA_DATA_ROOT",
     "ANUMA_OUTPUT_ROOT",
     "ANUMA_SCRATCH_DIR",
     "ANUMA_ALLOCATION_EVIDENCE_FILE",
@@ -43,6 +45,7 @@ DEFAULT_ENV = {
     "ANUMA_PARTITION": "cpu",
     "ANUMA_QOS": "test",
     "ANUMA_SCRATCH_DIR": "/project/scratch/p201619",
+    "ANUMA_DATA_ROOT": "/project/home/p201619/ANUMA_",
 }
 
 
@@ -114,8 +117,8 @@ def run_preflight(receipt_path: Path) -> dict:
     qos = os.environ["ANUMA_QOS"]
     if qos not in QOS_MAX_WALL_MINUTES:
         fail(f"unknown ANUMA_QOS {qos!r}; use a documented MeluXina QOS")
-    if QOS_MAX_WALL_MINUTES[qos] < 30:
-        fail(f"ANUMA_QOS {qos!r} cannot accommodate the 30-minute smoke job")
+    if qos != "test":
+        fail("the guarded 30-minute batch smoke job requires the official test QOS")
     association = run_checked(
         [
             "sacctmgr",
@@ -167,6 +170,14 @@ def run_preflight(receipt_path: Path) -> dict:
         fail("output filesystem has less than 100 MiB free")
 
     input_manifest = Path(os.environ["ANUMA_INPUT_MANIFEST"]).resolve()
+    data_root = Path(os.environ["ANUMA_DATA_ROOT"]).resolve()
+    try:
+        input_manifest.relative_to(data_root)
+    except ValueError:
+        fail("ANUMA_INPUT_MANIFEST must be within ANUMA_DATA_ROOT")
+    presence = check_data(data_root)
+    if not presence["ready"]:
+        fail(presence["message"])
     run_smoke(input_manifest, output_root / ".anuma-check-only", check_only=True)
     repo_root = Path(__file__).resolve().parents[1]
     if run_checked(["git", "-C", str(repo_root), "status", "--porcelain"]).strip():
@@ -184,6 +195,7 @@ def run_preflight(receipt_path: Path) -> dict:
         "qos": qos,
         "input_manifest": str(input_manifest),
         "input_manifest_sha256": sha256_file(input_manifest),
+        "data_root": str(data_root),
         "output_root": str(output_root),
         "scratch_dir": str(scratch),
         "remaining_cpu_node_hours": remaining,

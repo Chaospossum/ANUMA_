@@ -116,6 +116,21 @@ def _slurm_metadata() -> dict[str, str]:
     return {name: os.environ[name] for name in names if name in os.environ}
 
 
+def _module_metadata() -> dict[str, Any]:
+    record = os.environ.get("ANUMA_MODULE_LIST_FILE")
+    if record and Path(record).is_file():
+        return {
+            "source": str(Path(record).resolve()),
+            "entries": Path(record).read_text().splitlines(),
+        }
+    return {
+        "source": "LOADEDMODULES",
+        "entries": [
+            item for item in os.environ.get("LOADEDMODULES", "").split(":") if item
+        ],
+    }
+
+
 def run_smoke(input_manifest: Path, output_dir: Path, check_only: bool = False) -> dict:
     manifest, files = validate_input_manifest(input_manifest)
     grid_meta = json.loads(files["grid"].read_text())
@@ -167,6 +182,7 @@ def run_smoke(input_manifest: Path, output_dir: Path, check_only: bool = False) 
             "python": platform.python_version(),
             "numpy": np.__version__,
             "config_sha256": sha256_file(repo_root() / "config" / "layers.yaml"),
+            "modules": _module_metadata(),
         },
         "execution": {
             "hostname": socket.gethostname(),

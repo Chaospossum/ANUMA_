@@ -38,6 +38,28 @@ large-memory nodes, or multiple nodes. QOS percentage limits are scheduler
 ceilings, not evidence that ANUMA benefits from or is allowed to use a
 100-node-scale job.
 
+## Confirmed connection and clone
+
+- Host: `login.lxp.lu`
+- Port: `8822`
+- User: `u104905`
+- Repository: `/project/home/p201619/ANUMA_`
+- Confirmed clone `main`: `e86e2cc2d684af44e0543c777b8bee42593f3e50`
+
+Connect with `ssh -p 8822 u104905@login.lxp.lu`. Authentication uses the
+approved SSH credential provisioned outside this repository. Never copy,
+commit, print, or request private-key material. Verify the host fingerprint
+out of band before accepting it.
+
+The login nodes are for SSH access, Git/file management, `myquota`, job
+submission, and monitoring only. Official policy forbids computationally
+intensive, long-running, and data-intensive work there:
+
+- [Platform usage policy](https://docs.lxp.lu/access/PoliciesSummary/)
+- [Quick start](https://docs.lxp.lu/first-steps/quick_start/)
+- [Handling jobs](https://docs.lxp.lu/first-steps/handling_jobs/)
+- [Managing data](https://docs.lxp.lu/first-steps/managing_data/)
+
 ## MeluXina QOS policy
 
 | QOS | Maximum walltime | Node limit | Scheduling note |
@@ -52,9 +74,20 @@ ceilings, not evidence that ANUMA benefits from or is allowed to use a
 | `urgent` | 06:00 | 5% | special arrangement |
 
 Use `test` for this first 30-minute smoke job unless the verified account
-policy requires another eligible QOS. Use `default` for later bounded
-production unless account policy requires otherwise. `large` and `urgent`
-require a special arrangement; this slice does not request one.
+policy changes. The guarded batch script enforces `test`. Use `default` for
+later bounded production unless account policy requires otherwise. `large`
+and `urgent` require a special arrangement; this slice does not request one.
+
+The official `dev` path is different from the batch smoke path. Interactive
+development must use the CPU development reservation:
+
+```bash
+salloc -A p201619 -p cpu --reservation=cpudev -q dev -N 1 -t 02:00:00
+```
+
+Run environment creation, package discovery, checksumming, and preflight
+inside that compute allocation. Exit it before deliberately submitting the
+guarded batch smoke under `-q test`; the smoke has no reservation flag.
 
 MeluXina syntax is of the form
 `salloc -A p201619 -p cpu --qos default -t 00:30:00`.
@@ -64,6 +97,7 @@ account from unrelated example commands.
 ## Files
 
 - `hpc/bootstrap.sh`: creates the minimal pinned Python environment.
+- `hpc/discover-software.sh`: records stable-release module discovery.
 - `hpc/requirements-hpc.lock`: exact direct and transitive versions.
 - `hpc/build-input-manifest.py`: checksums an existing 240 m grid.
 - `hpc/preflight.py`: read-only Slurm, allocation, quota, path, and data checks.
@@ -87,28 +121,64 @@ current MeluXina account or project portal:
 Never put a private key, token, password, or secret in this repository, an
 environment variable shown in a log, or a preflight evidence field.
 
-## Reproducible setup on the login node
+## Stable software stack and reproducible setup
 
-Use the cluster-supported Python 3.11+ interpreter explicitly. Do not guess a
-module name in a script.
+MeluXina's current stable default is `env/release/2025.1`. Updates are exposed
+under `env/staging/2025.1`, but staging must not be used unless a required
+package is absent from release and that exception is documented. Never guess
+module names. From the `cpudev` compute allocation, discover Python, GDAL,
+PROJ, and geospatial dependencies:
+
+```bash
+module list
+bash hpc/discover-software.sh \
+  /project/home/p201619/ANUMA_/out/hpc/software-discovery.txt
+```
+
+The discovery script uses `module spider` and does not load staging or install
+anything. Select a stable-release Python 3.11+ interpreter from the recorded
+results, then create the project-local fallback environment on project storage:
 
 ```bash
 export ANUMA_BOOTSTRAP_PYTHON=/absolute/path/to/python3
+export ANUMA_VENV=/project/home/p201619/ANUMA_/.venv-hpc
 bash hpc/bootstrap.sh
-cat .venv-hpc/anuma-environment.json
+cat "$ANUMA_VENV/anuma-environment.json"
 ```
 
 The lock fixes package versions. The generated environment record captures the
-actual interpreter, platform, lock checksum, and installed distributions.
-Keep that record with the job outputs. Wheels are selected for the current
-platform, so this is version-reproducible rather than bit-identical across
-different operating systems or CPU architectures.
+actual interpreter, platform, stable module list/versions, lock checksum, and
+installed distributions. Bootstrap refuses to run without a SLURM compute
+allocation. It does not install system packages. Wheels are selected for the
+current platform, so this is version-reproducible rather than bit-identical
+across different operating systems or CPU architectures.
+
+If and only if discovery proves a required package is absent from release,
+document that package in `ANUMA_STAGING_JUSTIFICATION` before using staging.
+The environment record preserves that justification. The guarded smoke job
+itself rejects staging modules.
 
 ## Stage and pin the 240 m inputs
 
 The required files are `grid.json`, `slope.npy`, `illumination.npy`,
 `hydrogen.npy`, and `earth_visibility.npy`. The manifest must live in the grid
 directory or one of its parents; paths outside the manifest tree are rejected.
+
+Source rasters and derived arrays are deliberately ignored by Git. A fresh
+clone therefore is not score-ready. On a compute allocation, check presence:
+
+```bash
+cd /project/home/p201619/ANUMA_
+python -m anuma.hpc_data_check --root "$PWD"
+python -m anuma.hpc_data_check --root "$PWD" --require-ready
+```
+
+The first command reports every required raw and derived file. The second
+fails until the source rasters have been ingested, expected source sizes match,
+all derived grids exist, and no raw/grid data is tracked by Git. Ingest is
+data-intensive and must run as a separately reviewed compute job—not directly
+on a login node. The scoring preflight repeats this gate and then verifies
+checksums and shapes from the input manifest.
 
 ```bash
 .venv-hpc/bin/python hpc/build-input-manifest.py \
@@ -148,6 +218,7 @@ current account evidence; do not treat the original award as remaining quota.
 export ANUMA_ACCOUNT='p201619'
 export ANUMA_PARTITION='cpu'
 export ANUMA_QOS='test'
+export ANUMA_DATA_ROOT='/project/home/p201619/ANUMA_'
 export ANUMA_INPUT_MANIFEST='/project/home/p201619/ANUMA_/data/input-manifest.json'
 export ANUMA_OUTPUT_ROOT='/project/home/p201619/ANUMA_/out/hpc'
 export ANUMA_SCRATCH_DIR='/project/scratch/p201619'
@@ -159,12 +230,13 @@ chmod 600 "$ANUMA_ALLOCATION_EVIDENCE_FILE" "$ANUMA_STORAGE_EVIDENCE_FILE"
   --receipt "$HOME/anuma-preflight-$(date -u +%Y%m%dT%H%M%SZ).json"
 ```
 
-Preflight fails closed if Slurm commands are missing, the account association,
+Run preflight inside the `cpudev` compute allocation because it hashes the
+staged arrays. Preflight fails closed if Slurm commands are missing, the account association,
 partition, or selected QOS cannot be queried, evidence is stale or unsafe,
 fewer than 0.5 CPU node-hours remain, project quota or filesystem free space
 leaves less than 100 MiB, `myquota` is unavailable, paths are not writable, the
-repository is dirty, or an input checksum/shape is wrong. It does not call
-`sbatch`.
+repository is dirty, source/derived data is absent, or an input checksum/shape
+is wrong. It does not call `sbatch`.
 
 ## Deliberate submission
 
@@ -192,9 +264,11 @@ Successful computation writes:
 
 - `ranking.json`: the 240 m ranked sites from the existing ANUMA scoring code;
 - `output-manifest.json`: timestamps, input-manifest hash and ID, Git commit,
-  Python/NumPy/config identity, safe Slurm metadata, and output checksum.
+  Python/NumPy/config identity, loaded stable-release module versions, safe
+  Slurm metadata, and output checksum.
 - `myquota-before.txt` and `myquota-after.txt`: raw allocation snapshots around
   the submitted workload.
+- `module-list.txt`: modules and versions active on the compute node.
 
 Preserve the Slurm stdout/stderr files, preflight receipt, and
 `.venv-hpc/anuma-environment.json` beside those outputs before any scientific

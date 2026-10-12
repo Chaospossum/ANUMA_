@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash -l
 #SBATCH --job-name=anuma-240m-smoke
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -44,6 +44,9 @@ finish() {
   set +e
   mkdir -p -- "${output_dir}"
   cp -- "${ANUMA_MYQUOTA_BEFORE}" "${output_dir}/myquota-before.txt"
+  if [[ -f "${job_tmp}/module-list.txt" ]]; then
+    cp -- "${job_tmp}/module-list.txt" "${output_dir}/module-list.txt"
+  fi
   {
     printf 'captured_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf 'command=myquota\n'
@@ -56,6 +59,16 @@ finish() {
 trap finish EXIT
 mkdir -p -- "${job_tmp}"
 export TMPDIR="${job_tmp}"
+command -v module >/dev/null 2>&1 || {
+  echo "Environment Modules is unavailable on the compute node" >&2
+  exit 2
+}
+module -t list > "${job_tmp}/module-list.txt" 2>&1
+if grep -q 'env/staging/2025\\.1' "${job_tmp}/module-list.txt"; then
+  echo "Smoke job requires stable env/release/2025.1 modules, not staging" >&2
+  exit 2
+fi
+export ANUMA_MODULE_LIST_FILE="${job_tmp}/module-list.txt"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"
 export OPENBLAS_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"
 export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"

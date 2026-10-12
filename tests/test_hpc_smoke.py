@@ -79,6 +79,9 @@ def test_run_writes_ranking_and_output_manifest(
     tmp_path, monkeypatch, _accept_tiny_test_grid
 ):
     manifest = _fixture_manifest(tmp_path)
+    module_list = tmp_path / "module-list.txt"
+    module_list.write_text("env/release/2025.1\nPython/3.12.3\n")
+    monkeypatch.setenv("ANUMA_MODULE_LIST_FILE", str(module_list))
     monkeypatch.setattr(hpc_smoke, "score", lambda layers, grid, cfg: object())
     monkeypatch.setattr(
         hpc_smoke,
@@ -89,6 +92,10 @@ def test_run_writes_ranking_and_output_manifest(
     result = hpc_smoke.run_smoke(manifest, output)
     assert result["status"] == "completed"
     assert result["input_manifest"]["declared_id"] == "test-grid"
+    assert result["software"]["modules"]["entries"] == [
+        "env/release/2025.1",
+        "Python/3.12.3",
+    ]
     ranking = json.loads((output / "ranking.json").read_text())
     assert ranking["resolution_m"] == 240.0
     assert result["outputs"]["ranking"]["sha256"] == _sha(output / "ranking.json")

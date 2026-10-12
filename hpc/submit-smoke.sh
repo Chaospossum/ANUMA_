@@ -6,10 +6,11 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ANUMA_ACCOUNT="${ANUMA_ACCOUNT:-p201619}"
 ANUMA_PARTITION="${ANUMA_PARTITION:-cpu}"
 ANUMA_QOS="${ANUMA_QOS:-test}"
+ANUMA_DATA_ROOT="${ANUMA_DATA_ROOT:-/project/home/p201619/ANUMA_}"
 : "${ANUMA_INPUT_MANIFEST:?set ANUMA_INPUT_MANIFEST}"
 : "${ANUMA_OUTPUT_ROOT:?set ANUMA_OUTPUT_ROOT}"
 ANUMA_SCRATCH_DIR="${ANUMA_SCRATCH_DIR:-/project/scratch/p201619}"
-export ANUMA_ACCOUNT ANUMA_PARTITION ANUMA_QOS ANUMA_SCRATCH_DIR
+export ANUMA_ACCOUNT ANUMA_PARTITION ANUMA_QOS ANUMA_DATA_ROOT ANUMA_SCRATCH_DIR
 
 ANUMA_PYTHON="${ANUMA_PYTHON:-${repo_root}/.venv-hpc/bin/python}"
 export ANUMA_PYTHON
@@ -41,6 +42,7 @@ expected = {
     "account": os.environ["ANUMA_ACCOUNT"],
     "partition": os.environ["ANUMA_PARTITION"],
     "qos": os.environ["ANUMA_QOS"],
+    "data_root": str(Path(os.environ["ANUMA_DATA_ROOT"]).resolve()),
     "input_manifest": str(Path(os.environ["ANUMA_INPUT_MANIFEST"]).resolve()),
     "output_root": str(Path(os.environ["ANUMA_OUTPUT_ROOT"]).resolve()),
     "scratch_dir": str(Path(os.environ["ANUMA_SCRATCH_DIR"]).resolve()),

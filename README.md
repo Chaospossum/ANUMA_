@@ -36,6 +36,16 @@ the 2.51 GiB LOLA DEM. A completed ingest produces `dem.npy`, `slope.npy`,
 `illumination.npy`, `hydrogen.npy`, `earth_visibility.npy`, and `grid.json`.
 `--synthetic` creates test fixtures only and must not be used for the demo.
 
+Raw source rasters and derived grids are intentionally excluded from Git. A
+clone alone cannot be scored. Check an HPC staging area with:
+
+```bash
+python3 -m anuma.hpc_data_check --root "$PWD" --require-ready
+```
+
+On MeluXina, ingest and verification are data-intensive compute-node work; do
+not run them on `login.lxp.lu`.
+
 ## Serve the UI
 
 After ingest completes, start the API and static UI:
