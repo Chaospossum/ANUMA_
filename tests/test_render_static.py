@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import csv
+import io
+
 import numpy as np
 import pytest
 
 from anuma.config import load_config
+from anuma.grid import Grid
 from anuma.render_static import export_figures, load_weights
 
 
-def _write_layers(grid_dir):
+def _write_layers(grid_dir, shape=(4, 4)):
     grid_dir.mkdir()
-    base = np.arange(16, dtype=np.float32).reshape(4, 4)
-    np.save(grid_dir / "slope.npy", np.where(base == 15, 20.0, 2.0))
+    base = np.arange(np.prod(shape), dtype=np.float32).reshape(shape)
+    np.save(grid_dir / "slope.npy", np.where(base == base.max(), 20.0, 2.0))
     np.save(grid_dir / "illumination.npy", base)
     np.save(grid_dir / "hydrogen.npy", np.flipud(base))
     np.save(grid_dir / "earth_visibility.npy", np.fliplr(base))
@@ -22,7 +26,11 @@ def test_export_figures_from_small_npy_files(tmp_path):
     grid_dir = tmp_path / "grid"
     output_dir = tmp_path / "figures"
     weights_path = tmp_path / "weights.yaml"
-    _write_layers(grid_dir)
+    cfg = load_config()
+    cfg["projection"]["resolution_m"] = 160_000.0
+    grid = Grid(cfg)
+    assert (grid.height, grid.width) == (4, 4)
+    _write_layers(grid_dir, (grid.height, grid.width))
     weights_path.write_text(
         "weights:\n"
         "  illumination: 0.5\n"
@@ -34,16 +42,30 @@ def test_export_figures_from_small_npy_files(tmp_path):
         weights_path=weights_path,
         grid_dir=grid_dir,
         output_dir=output_dir,
-        cfg=load_config(),
+        cfg=cfg,
     )
 
     assert {path.name for path in written} == {
         "score.png",
+        "score_heatmap.png",
+        "slope_mask.png",
+        "sites.csv",
+        "artemis_ranking.csv",
         "illumination.png",
         "hydrogen.png",
         "earth_visibility.png",
     }
-    assert all(path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n") for path in written)
+    pngs = [path for path in written if path.suffix == ".png"]
+    assert all(path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n") for path in pngs)
+    sites = list(csv.DictReader(io.StringIO((output_dir / "sites.csv").read_text())))
+    assert sites
+    assert sites[0]["rank"] == "1"
+    regions = list(
+        csv.DictReader(io.StringIO((output_dir / "artemis_ranking.csv").read_text()))
+    )
+    assert len(regions) == 9
+    assert all(region["rank"] == "" for region in regions)
+    assert all(region["coordinate_status"] == "not_published_by_nasa" for region in regions)
 
 
 def test_load_weights_rejects_unknown_public_layer(tmp_path):

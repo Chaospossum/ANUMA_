@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from anuma.config import load_config, repo_root
+from anuma.export import sites_csv, sites_geojson
 from anuma.grid import Grid
 from anuma.heatmap import render_png
 from anuma.ingest import write_artemis_geojson
@@ -166,10 +167,55 @@ def _artemis_feature_collection(cfg: dict, root: Path) -> dict:
     return json.loads(tmp.read_text())
 
 
+def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
+    cfg = _cfg()
+    root = data_root()
+    store = _load_store(cfg, root)
+    body = body or ScoreBody()
+    weights = dict(body.weights) if body.weights else dict(cfg["scoring"]["weights"])
+    max_slope = (
+        body.hard.max_slope_deg
+        if body.hard is not None and body.hard.max_slope_deg is not None
+        else float(cfg["hard"]["max_slope_deg"])
+    )
+    n = body.n if body.n is not None else int(cfg["scoring"]["n_sites"])
+    layers = store["layers"]
+    needed = ["slope", *weights.keys()]
+    absent = [name for name in needed if name not in layers]
+    if absent:
+        raise _not_ingested(absent)
+    try:
+        result = score(
+            layers,
+            weights=weights,
+            hard={"max_slope_deg": max_slope},
+            grid=store["grid"],
+            cfg=cfg,
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    sites = rank_sites(result, n=n)
+    geojson = _artemis_feature_collection(cfg, root)
+    overlap = artemis_overlap(sites, geojson, result=result)
+    grid = store["grid"]
+    payload = {
+        "bounds": [grid.xmin, grid.ymin, grid.xmax, grid.ymax],
+        "sites": [_site_payload(s) for s in overlap["sites"]],
+        "artemis": _artemis_payload(overlap, cfg),
+    }
+    if include_png:
+        png = render_png(result.combined, cmap="viridis")
+        payload["png"] = base64.b64encode(png).decode("ascii")
+    return payload
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="ANUMA",
         description="Lunar south-pole landing-site scoring for MAGPIE.",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
     )
 
     @app.get("/layers")
@@ -210,43 +256,27 @@ def create_app() -> FastAPI:
 
     @app.post("/score")
     def post_score(body: ScoreBody | None = None) -> dict:
-        cfg = _cfg()
-        root = data_root()
-        store = _load_store(cfg, root)
-        body = body or ScoreBody()
-        weights = dict(body.weights) if body.weights else dict(cfg["scoring"]["weights"])
-        max_slope = (
-            body.hard.max_slope_deg
-            if body.hard is not None and body.hard.max_slope_deg is not None
-            else float(cfg["hard"]["max_slope_deg"])
+        return _run_score(body)
+
+    @app.post("/score.csv")
+    def post_score_csv(body: ScoreBody | None = None) -> Response:
+        payload = _run_score(body, include_png=False)
+        return Response(
+            content=sites_csv(payload["sites"]),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="anuma-ranked-sites.csv"'},
         )
-        n = body.n if body.n is not None else int(cfg["scoring"]["n_sites"])
-        layers = store["layers"]
-        needed = ["slope", *weights.keys()]
-        absent = [name for name in needed if name not in layers]
-        if absent:
-            raise _not_ingested(absent)
-        try:
-            result = score(
-                layers,
-                weights=weights,
-                hard={"max_slope_deg": max_slope},
-                grid=store["grid"],
-                cfg=cfg,
-            )
-        except (KeyError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        sites = rank_sites(result, n=n)
-        geojson = _artemis_feature_collection(cfg, root)
-        overlap = artemis_overlap(sites, geojson, result=result)
-        png = render_png(result.combined, cmap="viridis")
-        grid = store["grid"]
-        return {
-            "png": base64.b64encode(png).decode("ascii"),
-            "bounds": [grid.xmin, grid.ymin, grid.xmax, grid.ymax],
-            "sites": [_site_payload(s) for s in overlap["sites"]],
-            "artemis": _artemis_payload(overlap, cfg),
-        }
+
+    @app.post("/score.geojson")
+    def post_score_geojson(body: ScoreBody | None = None) -> Response:
+        payload = _run_score(body, include_png=False)
+        return Response(
+            content=sites_geojson(payload["sites"]),
+            media_type="application/geo+json",
+            headers={
+                "Content-Disposition": 'attachment; filename="anuma-ranked-sites.geojson"'
+            },
+        )
 
     @app.get("/layer/{name}.png")
     def get_layer_png(name: str) -> Response:

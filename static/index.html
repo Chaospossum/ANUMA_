@@ -58,6 +58,10 @@
               </label>
             </div>
             <button type="button" id="btn-score" class="primary">Score</button>
+            <div class="export-actions" aria-label="Download ranked sites">
+              <button type="button" id="btn-csv" disabled>Download CSV</button>
+              <button type="button" id="btn-geojson" disabled>Download GeoJSON</button>
+            </div>
           </form>
         </section>
 
@@ -110,8 +114,11 @@
       </div>
 
       <footer class="status" id="status">
-        Layers: LDEM_80S_20MPP_ADJ (slope), AVGVISIB_65S_240M_201608, Lunar Prospector
-        hydrogenhd, Earth visibility from DEM. Artemis III centres are unpublished.
+        <span>Layers: LDEM_80S_20MPP_ADJ (slope), AVGVISIB_65S_240M_201608,
+        Lunar Prospector hydrogenhd, Earth visibility from DEM. Artemis III
+        centres are unpublished.</span>
+        <span class="disclaimer">Independent student project. Not affiliated with or
+        endorsed by ispace, ESA, or the MAGPIE mission team.</span>
       </footer>
     </div>
 

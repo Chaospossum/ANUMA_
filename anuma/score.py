@@ -131,8 +131,9 @@ def rank_sites(
     if min_separation_km is None:
         min_separation_km = float(cfg["scoring"]["min_separation_km"])
     sep_m = float(min_separation_km) * 1000.0
+    sep_pixels = sep_m / result.grid.resolution_m
+    radius = int(np.ceil(sep_pixels))
     remaining = result.combined.astype(np.float64).copy()
-    x, y = result.grid.pixel_centers()
     sites: list[dict] = []
     for _ in range(int(n)):
         if not np.isfinite(remaining).any():
@@ -156,9 +157,15 @@ def rank_sites(
                 "contributions": contributions,
             }
         )
-        dx = x - x[row_i, col_i]
-        dy = y - y[row_i, col_i]
-        remaining[(dx * dx + dy * dy) <= sep_m * sep_m] = np.nan
+        row_min = max(0, row_i - radius)
+        row_max = min(remaining.shape[0], row_i + radius + 1)
+        col_min = max(0, col_i - radius)
+        col_max = min(remaining.shape[1], col_i + radius + 1)
+        rows = np.arange(row_min, row_max, dtype=np.float64) - row_i
+        cols = np.arange(col_min, col_max, dtype=np.float64) - col_i
+        dc, dr = np.meshgrid(cols, rows)
+        local = remaining[row_min:row_max, col_min:col_max]
+        local[(dr * dr + dc * dc) <= sep_pixels * sep_pixels] = np.nan
     return sites
 
 

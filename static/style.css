@@ -227,6 +227,27 @@ select {
   cursor: wait;
 }
 
+.export-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.export-actions button {
+  padding: 6px;
+  border: 1px solid var(--line);
+  background: var(--white);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.export-actions button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .panel-map {
   display: flex;
   flex-direction: column;
@@ -431,11 +452,19 @@ select {
 }
 
 .status {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
   padding: 6px 12px;
   background: var(--white);
   border-top: 1px solid var(--line);
   font-size: 0.72rem;
   color: var(--muted);
+}
+
+.disclaimer {
+  color: var(--ink);
+  text-align: right;
 }
 
 .pole-mark,
@@ -473,6 +502,16 @@ select {
   }
 
   .subtitle {
+    text-align: left;
+  }
+
+  .status {
+    display: block;
+  }
+
+  .disclaimer {
+    display: block;
+    margin-top: 4px;
     text-align: left;
   }
 
