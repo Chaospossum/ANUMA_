@@ -1,0 +1,55 @@
+# Stage B — full-cap 20 m slope and ranking comparison.
+# Soft-layer weights, the 8° hard mask, and normalization policies stay in
+# config/layers.yaml and config/demo_weights.yaml. Do not retune them here.
+
+stage: B-20m-slope-ranking
+
+dem:
+  # Relative to repository root unless overridden on the command line.
+  path: data/raw/LDEM_80S_20MPP_ADJ.TIF
+  resolution_m: 20.0
+  expected_height: 30400
+  expected_width: 30400
+
+slope:
+  tile_size: 2048
+  halo: 1
+  method: horn_3x3
+
+# Soft layers remain the ingested 240 m arrays. Each 20 m pixel centre takes
+# the value of the nearest 240 m pixel (no invented fine-scale detail).
+soft_layer_sampling: nearest_240m_pixel_center
+
+# Agreement map is written on the 240 m grid. At each 240 m pixel centre the
+# 20 m hard mask is sampled by nearest neighbour and compared for equality
+# with the 240 m hard mask. 1 = agree, 0 = disagree, NaN = either side invalid.
+agreement:
+  grid: 240m
+  kind: hard_mask_equality_at_240m_centers
+
+ranking:
+  # Same n_sites and min_separation_km as config/layers.yaml scoring.
+  use_layers_yaml_defaults: true
+
+execution:
+  nodes: 1
+  maximum_workers: 128
+  accelerators: false
+  memory: 240G
+  # Sized from the 12 October 2026 laptop tile benchmark documented in
+  # docs/meluxina-execution.md. Pilot 0.5 + production 6.0 stays under 40.
+  pilot_node_hours: 0.5
+  production_node_hours: 6.0
+  stage_node_hour_cap: 40.0
+  production_walltime: "06:00:00"
+
+pilot:
+  # Time this many full-cap tiles under the production worker count.
+  tile_count: 16
+
+stage_a_gate:
+  # Refuse production unless this acceptance record shows RMSE <= 0.05.
+  stop_rmse: 0.05
+  required_status: passed
+  # Default relative path; override with ANUMA_STAGE_A_ACCEPTANCE.
+  default_record: out/sun-validation/validation-report.json
