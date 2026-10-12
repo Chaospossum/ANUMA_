@@ -94,8 +94,11 @@ def sample_coarse_to_fine(
     rows = np.arange(height, dtype=np.float64) + 0.5
     x = fine_transform.c + cols * fine_transform.a
     y = fine_transform.f + rows * fine_transform.e
-    coarse_cols = np.rint((x - grid.affine.c) / grid.affine.a).astype(np.int64)
-    coarse_rows = np.rint((y - grid.affine.f) / grid.affine.e).astype(np.int64)
+    # floor gives the coarse pixel that contains the fine centre. rint would
+    # pick the nearest coarse corner and shift half the samples by one cell.
+    # Fine centres never fall on a 240 m edge for these two grids.
+    coarse_cols = np.floor((x - grid.affine.c) / grid.affine.a).astype(np.int64)
+    coarse_rows = np.floor((y - grid.affine.f) / grid.affine.e).astype(np.int64)
     valid_cols = (coarse_cols >= 0) & (coarse_cols < grid.width)
     # Fill row-wise to avoid a full-cap coordinate mesh in memory.
     for row_index, coarse_row in enumerate(coarse_rows):
@@ -130,12 +133,28 @@ def agreement_map(
     mask_20: np.ndarray,
     fine_transform,
     grid: Grid,
+    *,
+    valid_240: np.ndarray | None = None,
+    valid_20: np.ndarray | None = None,
 ) -> np.ndarray:
-    """1 where hard masks agree at 240 m centres, 0 disagree, NaN invalid."""
-    sampled_20, valid_20 = sample_fine_mask_to_coarse(mask_20, fine_transform, grid)
+    """1 where hard masks agree at 240 m centres, 0 disagree, NaN invalid.
+
+    A centre is invalid when it falls outside the 20 m grid, or when either
+    slope is not finite there (for example outside the 80°S cap, where the
+    240 m slope is NaN but the 20 m DEM still has values).
+    """
+    sampled_20, inside_20 = sample_fine_mask_to_coarse(mask_20, fine_transform, grid)
+    valid = inside_20.copy()
+    if valid_240 is not None:
+        valid &= np.asarray(valid_240, dtype=bool)
+    if valid_20 is not None:
+        sampled_valid, _ = sample_fine_mask_to_coarse(
+            np.asarray(valid_20, dtype=bool), fine_transform, grid
+        )
+        valid &= sampled_valid
     agree = sampled_20 == np.asarray(mask_240, dtype=bool)
     out = np.full(mask_240.shape, np.nan, dtype=np.float32)
-    out[valid_20] = np.where(agree[valid_20], 1.0, 0.0).astype(np.float32)
+    out[valid] = np.where(agree[valid], 1.0, 0.0).astype(np.float32)
     return out
 
 
@@ -390,7 +409,14 @@ def run_production(
 
     mask_240 = hard_mask(layers_240["slope"], cfg=cfg)
     mask_20 = hard_mask(np.asarray(slope_20), cfg=cfg)
-    agree = agreement_map(mask_240, mask_20, transform, grid)
+    agree = agreement_map(
+        mask_240,
+        mask_20,
+        transform,
+        grid,
+        valid_240=np.isfinite(layers_240["slope"]),
+        valid_20=np.isfinite(np.asarray(slope_20)),
+    )
     agree_path = output_dir / "agreement-map-240m.npy"
     np.save(agree_path, agree, allow_pickle=False)
 

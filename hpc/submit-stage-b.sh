@@ -103,6 +103,14 @@ if hashlib.sha256(manifest.read_bytes()).hexdigest() != receipt["input_manifest_
 dem = Path(os.environ["ANUMA_DEM"])
 if not dem.is_file():
     raise SystemExit(f"20 m DEM is missing: {dem}")
+if str(dem.resolve()) != str(Path(receipt.get("dem_path", "")).resolve()):
+    raise SystemExit("20 m DEM path differs from the preflight receipt")
+digest = hashlib.sha256()
+with dem.open("rb") as handle:
+    for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+        digest.update(chunk)
+if digest.hexdigest() != receipt.get("dem_sha256"):
+    raise SystemExit("20 m DEM changed after preflight")
 if profile == "stage-b":
     try:
         require_stage_a_acceptance(Path(os.environ["ANUMA_STAGE_A_ACCEPTANCE"]))

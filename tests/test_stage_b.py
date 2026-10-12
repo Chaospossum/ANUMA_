@@ -99,6 +99,13 @@ def test_sample_coarse_to_fine_nearest_and_agreement_map():
     # Fine centres in the middle of coarse (1,1) (x=360,y=360) use that value.
     assert fine[4, 4] == coarse[1, 1]
     assert fine[5, 5] == coarse[1, 1]
+    # Fine col 2 centre x=150 lies inside coarse col 0 (0-240 m), not col 1.
+    assert fine[0, 2] == coarse[0, 0]
+    assert fine[0, 3] == coarse[0, 0]
+    assert fine[0, 4] == coarse[0, 1]
+    # Every fine pixel takes the coarse cell that contains its centre.
+    expected = np.repeat(np.repeat(coarse, 4, axis=0), 4, axis=1)
+    assert np.array_equal(fine, expected)
 
     mask_240 = np.array(
         [[True, True, False], [True, False, False], [True, True, True]]
@@ -112,6 +119,20 @@ def test_sample_coarse_to_fine_nearest_and_agreement_map():
     assert agree[0, 0] == 1.0  # True vs True
     assert agree[0, 2] == 0.0  # False vs True
     assert agree[1, 1] == 1.0  # False vs False
+    # Outside the 240 m slope coverage the map is NaN, not "disagree".
+    valid_240 = np.ones((3, 3), dtype=bool)
+    valid_240[0, 2] = False
+    masked = agreement_map(
+        mask_240, mask_fine, fine_transform, Tiny(), valid_240=valid_240
+    )
+    assert np.isnan(masked[0, 2])
+    assert masked[0, 0] == 1.0
+    valid_fine = np.ones((12, 12), dtype=bool)
+    valid_fine[6, 6] = False
+    masked_fine = agreement_map(
+        mask_240, mask_fine, fine_transform, Tiny(), valid_20=valid_fine
+    )
+    assert np.isnan(masked_fine[1, 1])
 
 
 def test_build_rank_table_pairs_and_membership():
