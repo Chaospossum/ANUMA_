@@ -20,6 +20,9 @@ ingest = [
   "matplotlib",
   "scipy",
 ]
+sun = [
+  "spiceypy",
+]
 web = [
   "fastapi",
   "uvicorn",

@@ -13,9 +13,9 @@ and staged data.
 
 ## Confirmed project resources
 
-The current `myquota` facts for project/account `p201619` are:
+The 12 October `myquota` facts for project/account `p201619` are:
 
-- 300 CPU node-hours for the current month, with 0 used when confirmed;
+- 300 CPU node-hours for the current month, with about 1 used when confirmed;
 - no GPU, FPGA, or large-memory allocation;
 - CPU nodes have 128 cores and 512 GB RAM;
 - `/project/home/p201619` and `/project/scratch/p201619` each have 10 TB;
@@ -43,13 +43,13 @@ ceilings, not evidence that ANUMA benefits from or is allowed to use a
 - Host: `login.lxp.lu`
 - Port: `8822`
 - Repository: `/project/home/p201619/ANUMA_`
-- Confirmed clone `main`: `e86e2cc2d684af44e0543c777b8bee42593f3e50`
+- Study-plan baseline `main`: `7546943cfb6e5e80d1b234b0524b7c8715d1dc58`
 
-Connect with `ssh -p 8822 <assigned-user>@login.lxp.lu`; keep the assigned
-personal username out of public documentation. Authentication uses the approved
-SSH credential provisioned outside this repository. Never copy, commit, print,
-or request private-key material. Verify the host fingerprint out of band before
-accepting it.
+Use site-managed SSH configuration for `login.lxp.lu` on port `8822`; public
+documentation intentionally contains no personal username. Authentication uses
+an approved SSH credential provisioned outside this repository. Never copy,
+commit, print, or request private-key material. Verify the host fingerprint out
+of band before accepting it.
 
 The login nodes are for SSH access, Git/file management, `myquota`, job
 submission, and monitoring only. Official policy forbids computationally
@@ -102,6 +102,8 @@ account from unrelated example commands.
   hashes; bootstrap installs it with `--require-hashes`.
 - `hpc/requirements-ingest.lock`: exact Python 3.12 Linux-wheel hashes for the
   compute-node ingest runtime, including Rasterio/GDAL, SciPy, and Matplotlib.
+- `hpc/requirements-sun.lock`: exact Python 3.12 Linux-wheel hashes for the
+  scoring core and `spiceypy`; kernels remain checksummed scientific inputs.
 - `hpc/build-input-manifest.py`: checksums an existing 240 m grid.
 - `hpc/preflight.py`: read-only Slurm, allocation, quota, path, and data checks.
 - `hpc/submit-smoke.sh`: accepts only a preflight receipt less than 24 hours old.
@@ -110,13 +112,18 @@ account from unrelated example commands.
 - `hpc/slurm/monte-carlo.sbatch`: one-node study job with mode-specific caps.
 - `anuma/hpc_smoke.py`: validates inputs, scores, and writes output lineage.
 - `anuma/hpc_monte_carlo.py`: deterministic 240 m clip-and-weight study.
+- `config/sun.yaml`: separate horizon, DE440, date, output, and fixed
+  validation-gate settings; it does not modify `config/layers.yaml`.
+- `anuma/sun.py` and `anuma/sun_validation.py`: reusable terrain horizons,
+  SPICE-only Sun directions, disk visibility, darkness outputs, and Stage-A
+  RMSE/bias/scatter validation.
 
 ## Stop conditions
 
 Do not run `submit-smoke.sh` until all of the following are known from the
 current MeluXina account or project portal:
 
-1. login hostname and SSH username;
+1. login hostname, port, and approved site-managed SSH access;
 2. Slurm account, eligible CPU partition, and account-eligible QOS;
 3. current remaining CPU node-hours (not only the original award);
 4. project storage quota and current bytes used;
@@ -129,11 +136,15 @@ environment variable shown in a log, or a preflight evidence field.
 
 ## Stable software stack and reproducible setup
 
-MeluXina's current stable default is `env/release/2025.1`. Updates are exposed
-under `env/staging/2025.1`, but staging must not be used unless a required
-package is absent from release and that exception is documented. Never guess
-module names. From the `cpudev` compute allocation, discover Python, GDAL,
-PROJ, and geospatial dependencies:
+MeluXina's current default is `env/release/2025.1`, which provides Python
+3.13.1 only. Python 3.12.3 is available only under `env/release/2024.1`.
+Updates are exposed under `env/staging/2025.1`, but staging must not be used
+unless a required package is absent from release and that exception is
+documented. Login nodes have no Lmod; run module discovery inside `srun` on a
+compute allocation. Never run `module purge`, because it removes the
+environment that supplies `myquota`. Never guess module names. From the
+`cpudev` compute allocation, discover Python, GDAL, PROJ, and geospatial
+dependencies:
 
 ```bash
 module list
@@ -142,11 +153,11 @@ bash hpc/discover-software.sh \
 ```
 
 The discovery script uses `module spider` and does not load staging or install
-anything. Select a stable-release Python 3.12 interpreter from the recorded
-results, then create the project-local fallback environment on project storage:
+anything. The scoring environment uses OS `/usr/bin/python3.12`, then creates
+the project-local fallback on project storage:
 
 ```bash
-export ANUMA_BOOTSTRAP_PYTHON=/absolute/path/to/python3
+export ANUMA_BOOTSTRAP_PYTHON=/usr/bin/python3.12
 export ANUMA_VENV=/project/home/p201619/ANUMA_/.venv-hpc
 bash hpc/bootstrap.sh
 cat "$ANUMA_VENV/anuma-environment.json"
@@ -169,13 +180,14 @@ itself rejects staging modules.
 
 ### Supported compute-node ingest environment
 
-If discovery confirms stable-release Python 3.12 on the CPU compute node, use
-the committed hash-pinned ingest profile; do not guess or hard-code MeluXina
-GDAL/PROJ module names:
+The ingest environment switches to `env/release/2024.1` inside `srun` to use
+Python 3.12.3, then applies the committed hash-pinned profile. Do not switch on
+a login node, run `module purge`, or guess GDAL/PROJ module names:
 
 ```bash
+module load env/release/2024.1
 export ANUMA_ENVIRONMENT=ingest
-export ANUMA_BOOTSTRAP_PYTHON=/absolute/path/from-module-discovery/python3
+export ANUMA_BOOTSTRAP_PYTHON="$(command -v python3)"
 export ANUMA_VENV=/project/home/p201619/ANUMA_/.venv-hpc-ingest
 bash hpc/bootstrap.sh
 ```
@@ -183,10 +195,31 @@ bash hpc/bootstrap.sh
 This runs only inside a compute allocation, installs pinned Linux wheels for
 Rasterio (including its GDAL runtime), PyProj/PROJ, SciPy, and Matplotlib,
 runs `pip check`, imports the ingest stack, prints the Rasterio/GDAL versions,
-and records modules/packages in `anuma-environment.json`. If stable-release
-Python 3.12 or a compatible pinned wheel is unavailable, stop: the supported
+and records modules/packages in `anuma-environment.json`. If release/2024.1
+Python 3.12.3 or a compatible pinned wheel is unavailable, stop: the supported
 fallback is approved-workstation ingest until the lock is deliberately
 regenerated and reviewed. Do not switch to staging or guess package names.
+
+### Supported Sun-model environment
+
+Inside a reviewed compute allocation, build the separate hash-pinned SPICE
+environment with OS Python 3.12. Kernel files are not downloaded by bootstrap:
+DE440, lunar orientation/frame, and leap-second kernels are externally staged
+and listed with SHA-256 digests in a job-specific kernel manifest.
+
+```bash
+export ANUMA_ENVIRONMENT=sun
+export ANUMA_BOOTSTRAP_PYTHON=/usr/bin/python3.12
+export ANUMA_VENV=/project/home/p201619/ANUMA_/.venv-hpc-sun
+bash hpc/bootstrap.sh
+```
+
+Stage A also requires a reviewed epoch manifest containing the published
+`avgvisib_65s_240m_201608` temporal definition and explicit UTC epochs.
+`anuma.sun_validation` refuses an empty definition. Its real-data destination
+is `out/sun-validation/`; no report is committed here. The fixed gate is RMSE
+0.05, accompanied by bias and residual scatter. Its calendar-year-2029
+scenario default remains configurable and is not a mission interval.
 
 ## Ingest, transfer, and pin the 240 m inputs
 
@@ -279,8 +312,9 @@ identify its non-secret source.
 {"source":"myquota capture path","captured_at_utc":"<ISO-8601 UTC>","quota_bytes":10000000000000,"used_bytes":0}
 ```
 
-The numbers above illustrate field types only. Replace every value with the
-current account evidence; do not treat the original award as remaining quota.
+The numbers above illustrate field types only. Replace every value with a
+fresh capture; `myquota` reporting is delayed, and the original award is not
+the current remaining quota.
 
 ```bash
 export ANUMA_ACCOUNT='p201619'
@@ -348,10 +382,11 @@ After the job exits, use documented MeluXina accounting commands to record
 elapsed time, CPU time, and peak memory. Do not schedule a 20 m run until the
 240 m outputs and accounting record have been reviewed.
 
-## First study: 240 m clip-and-weight Monte Carlo
+## Completed precursor: 240 m clip-and-weight Monte Carlo
 
-This study is prepared but has not been run. It compares three declared
-policies from `config/layers.yaml`:
+The 500-draw precursor exists as job `5332991`. Do not rerun it. Preserve and
+review its manifests, `sacct`, and delayed before/after `myquota` captures. The
+implemented study compares three declared policies from `config/layers.yaml`:
 
 1. `legacy_global_2_98`: the former global 2nd/98th percentile policy,
    retained only as a comparison;
@@ -373,6 +408,11 @@ documented 0.5/0.3/0.2 demo weights, and normalization-to-one. Outputs are:
 No latitude or site is hard-coded as the expected winner. The study refuses
 synthetic input, missing ingest provenance, and any illumination ingest whose
 `illumination_affine_revision` is not `pds3-pixel-center-v2`.
+
+### Guarded path retained for provenance only
+
+The commands below document the precursor guardrails; they do not authorize or
+request a rerun of job `5332991`.
 
 ### Tiny pilot
 

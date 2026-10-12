@@ -11,6 +11,7 @@ import json
 import os
 import platform
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -82,6 +83,24 @@ def _winner_class_changed(
     return bool(distance_m > radius_km * 1000.0)
 
 
+def _evaluate_draw(
+    item: tuple[int, dict[str, float]],
+    prepared: dict[str, ScoreResult],
+    policies: list[str],
+) -> tuple[dict[str, Any], dict[str, list[dict]]]:
+    index, draw = item
+    row: dict[str, Any] = {"draw": index, "weights": draw, "policies": {}}
+    ranked: dict[str, list[dict]] = {}
+    for policy in policies:
+        sites = _rank_with_weights(prepared[policy], draw)
+        if not sites:
+            raise ValueError(f"policy {policy!r} produced no ranked sites")
+        ranked[policy] = sites
+        ids = [_site_id(site) for site in sites]
+        row["policies"][policy] = {"winner": ids[0], "top10": ids}
+    return row, ranked
+
+
 def run_study(
     layers: dict[str, np.ndarray],
     grid: Grid,
@@ -89,6 +108,7 @@ def run_study(
     *,
     mode: str,
     draw_count: int | None = None,
+    workers: int = 1,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     study_cfg = cfg["hpc_studies"]["clip_weight_monte_carlo"]
     if mode not in ("pilot", "full"):
@@ -96,6 +116,8 @@ def run_study(
     count = int(draw_count if draw_count is not None else study_cfg["draws"][mode])
     if count <= 0:
         raise ValueError("draw count must be positive")
+    if workers <= 0 or workers > 128:
+        raise ValueError("workers must be between 1 and 128")
     weights = draw_weights(cfg, count)
     policies = list(study_cfg["policies"])
     prepared = {
@@ -116,12 +138,23 @@ def run_study(
     draw_rows: list[dict[str, Any]] = []
     winner_sites: dict[str, list[dict]] = {policy: [] for policy in policies}
 
-    for index, draw in enumerate(weights):
-        row: dict[str, Any] = {"draw": index, "weights": draw, "policies": {}}
+    items = list(enumerate(weights))
+    if workers == 1:
+        evaluated = [_evaluate_draw(item, prepared, policies) for item in items]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            # executor.map preserves draw order. Aggregation below is serial, so
+            # worker scheduling cannot alter floating-point operations or output.
+            evaluated = list(
+                executor.map(
+                    lambda item: _evaluate_draw(item, prepared, policies), items
+                )
+            )
+
+    for row, ranked in evaluated:
+        index = int(row["draw"])
         for policy in policies:
-            sites = _rank_with_weights(prepared[policy], draw)
-            if not sites:
-                raise ValueError(f"policy {policy!r} produced no ranked sites")
+            sites = ranked[policy]
             ids = [_site_id(site) for site in sites]
             membership[policy].update(ids)
             winners[policy].update([ids[0]])
@@ -137,7 +170,6 @@ def run_study(
                         "lat": float(site["lat"]),
                     },
                 )
-            row["policies"][policy] = {"winner": ids[0], "top10": ids}
         draw_rows.append(row)
 
     clipped = str(study_cfg["clipped_policy"])
@@ -207,6 +239,7 @@ def run_from_manifest(
     output_dir: Path,
     *,
     mode: str,
+    workers: int = 1,
 ) -> dict[str, Any]:
     manifest, files = validate_input_manifest(input_manifest)
     cfg = load_config()
@@ -221,7 +254,7 @@ def run_from_manifest(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     started = datetime.now(timezone.utc).isoformat()
-    summary, draws = run_study(layers, grid, cfg, mode=mode)
+    summary, draws = run_study(layers, grid, cfg, mode=mode, workers=workers)
     summary_path = output_dir / "study-summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
     draws_path = output_dir / "draws.jsonl"
@@ -247,17 +280,20 @@ def run_from_manifest(
             "numpy": np.__version__,
         },
         "execution": {
-            key: value
-            for key, value in os.environ.items()
-            if key
-            in {
-                "SLURM_JOB_ID",
-                "SLURM_JOB_ACCOUNT",
-                "SLURM_JOB_PARTITION",
-                "SLURM_JOB_QOS",
-                "SLURM_CPUS_PER_TASK",
-                "SLURM_JOB_NUM_NODES",
-            }
+            "workers": workers,
+            **{
+                key: value
+                for key, value in os.environ.items()
+                if key
+                in {
+                    "SLURM_JOB_ID",
+                    "SLURM_JOB_ACCOUNT",
+                    "SLURM_JOB_PARTITION",
+                    "SLURM_JOB_QOS",
+                    "SLURM_CPUS_PER_TASK",
+                    "SLURM_JOB_NUM_NODES",
+                }
+            },
         },
         "outputs": {
             path.name: {"sha256": sha256_file(path), "bytes": path.stat().st_size}
@@ -276,12 +312,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--input-manifest", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--mode", choices=("pilot", "full"), required=True)
+    parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args(argv)
     try:
         result = run_from_manifest(
             args.input_manifest,
             args.output_dir,
             mode=args.mode,
+            workers=args.workers,
         )
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
         parser.exit(2, f"study precondition failed: {exc}\n")

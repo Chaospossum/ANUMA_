@@ -1,0 +1,51 @@
+# Sun-model configuration is separate from the scored-layer policy.
+
+horizon:
+  azimuth_count: 360
+  azimuth_origin_deg: 0.0
+  # Use every available 240 m DEM sample in each ray direction. A smaller
+  # local cutoff would omit far-terrain shadowing and is not accepted.
+  far_terrain: full_240m_dem
+  moon_radius_m: 1737400.0
+
+sun:
+  disk_radius_deg: 0.27
+  ephemeris_provider: spiceypy_de440
+  frame: MOON_ME
+  aberration_correction: LT+S
+  observer: MOON
+  target: SUN
+  # Kernel files are externally supplied, checksummed scientific inputs.
+  # The job manifest must name and hash DE440, lunar orientation/frame, and
+  # leap-second kernels before spiceypy is invoked.
+  required_kernel_roles:
+    - de440_ephemeris
+    - lunar_orientation
+    - lunar_frame
+    - leap_seconds
+
+scenario:
+  default_start_utc: "2029-01-01T00:00:00Z"
+  default_end_utc: "2030-01-01T00:00:00Z"
+  cadence_hours: 1.0
+  mission_start_utc: null
+  mission_end_utc: null
+  lit_threshold_fraction: 0.80
+
+validation:
+  measured_layer: avgvisib_65s_240m_201608
+  # This must be filled from the product's documented averaging interval,
+  # not inferred from the filename.
+  published_temporal_definition: null
+  metrics:
+    - rmse
+    - bias
+    - scatter
+  stop_rmse: 0.05
+  tune_threshold_after_run: false
+  report_directory: out/sun-validation
+
+execution:
+  nodes: 1
+  maximum_workers: 128
+  accelerators: false
