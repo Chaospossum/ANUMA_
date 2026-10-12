@@ -6,10 +6,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import shutil
 import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,17 +18,25 @@ from anuma.hpc_smoke import run_smoke, sha256_file
 REQUIRED_ENV = (
     "ANUMA_ACCOUNT",
     "ANUMA_PARTITION",
+    "ANUMA_QOS",
     "ANUMA_INPUT_MANIFEST",
     "ANUMA_OUTPUT_ROOT",
     "ANUMA_SCRATCH_DIR",
-    "ANUMA_PROJECT_REMAINING_CPU_HOURS",
-    "ANUMA_PROJECT_STORAGE_QUOTA_BYTES",
-    "ANUMA_PROJECT_STORAGE_USED_BYTES",
-    "ANUMA_ALLOCATION_EVIDENCE",
-    "ANUMA_STORAGE_EVIDENCE",
+    "ANUMA_ALLOCATION_EVIDENCE_FILE",
+    "ANUMA_STORAGE_EVIDENCE_FILE",
 )
 JOB_CPU_HOURS = 2.0  # 4 CPUs * 30 minutes
 OUTPUT_HEADROOM_BYTES = 100 * 1024 * 1024
+QOS_MAX_WALL_MINUTES = {
+    "dev": 6 * 60,
+    "test": 30,
+    "short": 6 * 60,
+    "short-preempt": 6 * 60,
+    "default": 48 * 60,
+    "long": 144 * 60,
+    "large": 24 * 60,
+    "urgent": 6 * 60,
+}
 
 
 def fail(message: str) -> None:
@@ -58,6 +66,32 @@ def _association_matches(output: str, account: str) -> bool:
     return False
 
 
+def _load_fresh_evidence(path: Path, required: tuple[str, ...]) -> dict:
+    path = path.resolve()
+    stat = path.stat()
+    if not path.is_file() or stat.st_uid != os.getuid() or stat.st_mode & 0o022:
+        fail(f"evidence must be a user-owned, non-group/world-writable file: {path}")
+    evidence = json.loads(path.read_text())
+    missing = [key for key in required if key not in evidence]
+    if missing:
+        fail(f"{path} is missing fields: {', '.join(missing)}")
+    captured = datetime.fromisoformat(evidence["captured_at_utc"])
+    if captured.tzinfo is None:
+        fail(f"evidence timestamp must include a UTC offset: {path}")
+    age = (datetime.now(timezone.utc) - captured).total_seconds()
+    if not 0 <= age <= 86400:
+        fail(f"evidence must be captured within the last 24 hours: {path}")
+    if not str(evidence["source"]).strip():
+        fail(f"evidence source is empty: {path}")
+    return {
+        "path": str(path),
+        "sha256": sha256_file(path),
+        "source": evidence["source"],
+        "captured_at_utc": evidence["captured_at_utc"],
+        **{key: evidence[key] for key in required if key not in ("source", "captured_at_utc")},
+    }
+
+
 def run_preflight(receipt_path: Path) -> dict:
     missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
     if missing:
@@ -68,6 +102,11 @@ def run_preflight(receipt_path: Path) -> dict:
 
     account = os.environ["ANUMA_ACCOUNT"]
     partition = os.environ["ANUMA_PARTITION"]
+    qos = os.environ["ANUMA_QOS"]
+    if qos not in QOS_MAX_WALL_MINUTES:
+        fail(f"unknown ANUMA_QOS {qos!r}; use a documented MeluXina QOS")
+    if QOS_MAX_WALL_MINUTES[qos] < 30:
+        fail(f"ANUMA_QOS {qos!r} cannot accommodate the 30-minute smoke job")
     association = run_checked(
         [
             "sacctmgr",
@@ -82,12 +121,28 @@ def run_preflight(receipt_path: Path) -> dict:
     if not _association_matches(association, account):
         fail(f"no Slurm association found for user={os.environ['USER']} account={account}")
     run_checked(["scontrol", "show", "partition", partition])
+    if not run_checked(
+        ["sacctmgr", "-nP", "show", "qos", qos, "format=Name,MaxWall,MaxJobsPU"]
+    ).strip():
+        fail(f"Slurm QOS is unavailable: {qos}")
 
-    remaining = float(os.environ["ANUMA_PROJECT_REMAINING_CPU_HOURS"])
-    if remaining < JOB_CPU_HOURS:
+    allocation = _load_fresh_evidence(
+        Path(os.environ["ANUMA_ALLOCATION_EVIDENCE_FILE"]),
+        ("source", "captured_at_utc", "account", "remaining_cpu_hours"),
+    )
+    if allocation["account"] != account:
+        fail("allocation evidence account does not match ANUMA_ACCOUNT")
+    remaining = float(allocation["remaining_cpu_hours"])
+    if not math.isfinite(remaining) or remaining < JOB_CPU_HOURS:
         fail(f"remaining allocation {remaining} CPU-hours is below required {JOB_CPU_HOURS}")
-    quota = int(os.environ["ANUMA_PROJECT_STORAGE_QUOTA_BYTES"])
-    used = int(os.environ["ANUMA_PROJECT_STORAGE_USED_BYTES"])
+    storage = _load_fresh_evidence(
+        Path(os.environ["ANUMA_STORAGE_EVIDENCE_FILE"]),
+        ("source", "captured_at_utc", "quota_bytes", "used_bytes"),
+    )
+    quota = int(storage["quota_bytes"])
+    used = int(storage["used_bytes"])
+    if quota < 0 or used < 0 or used > quota:
+        fail("storage evidence contains an invalid quota/usage pair")
     if quota - used < OUTPUT_HEADROOM_BYTES:
         fail("verified project storage has less than 100 MiB free")
 
@@ -101,6 +156,12 @@ def run_preflight(receipt_path: Path) -> dict:
 
     input_manifest = Path(os.environ["ANUMA_INPUT_MANIFEST"]).resolve()
     run_smoke(input_manifest, output_root / ".anuma-check-only", check_only=True)
+    repo_root = Path(__file__).resolve().parents[1]
+    if run_checked(["git", "-C", str(repo_root), "status", "--porcelain"]).strip():
+        fail("repository must be clean before a preflight receipt is created")
+    git_commit = run_checked(
+        ["git", "-C", str(repo_root), "rev-parse", "HEAD"]
+    ).strip()
 
     receipt = {
         "schema_version": 1,
@@ -108,6 +169,7 @@ def run_preflight(receipt_path: Path) -> dict:
         "user": os.environ["USER"],
         "account": account,
         "partition": partition,
+        "qos": qos,
         "input_manifest": str(input_manifest),
         "input_manifest_sha256": sha256_file(input_manifest),
         "output_root": str(output_root),
@@ -115,8 +177,9 @@ def run_preflight(receipt_path: Path) -> dict:
         "remaining_cpu_hours": remaining,
         "storage_quota_bytes": quota,
         "storage_used_bytes": used,
-        "allocation_evidence": os.environ["ANUMA_ALLOCATION_EVIDENCE"],
-        "storage_evidence": os.environ["ANUMA_STORAGE_EVIDENCE"],
+        "allocation_evidence": allocation,
+        "storage_evidence": storage,
+        "git_commit": git_commit,
         "job_cpu_hours_cap": JOB_CPU_HOURS,
         "job_walltime": "00:30:00",
         "job_cpus": 4,
@@ -124,7 +187,10 @@ def run_preflight(receipt_path: Path) -> dict:
     canonical = json.dumps(receipt, sort_keys=True).encode()
     receipt["receipt_sha256"] = hashlib.sha256(canonical).hexdigest()
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
-    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+    fd = os.open(receipt_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        json.dump(receipt, handle, indent=2, sort_keys=True)
+        handle.write("\n")
     return receipt
 
 

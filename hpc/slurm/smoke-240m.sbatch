@@ -19,6 +19,19 @@ umask 027
 : "${SLURM_JOB_ID:?this script must run under Slurm}"
 : "${SLURM_JOB_ACCOUNT:?Slurm did not provide an account}"
 : "${SLURM_JOB_PARTITION:?Slurm did not provide a partition}"
+: "${SLURM_JOB_QOS:?Slurm did not provide a QOS}"
+: "${SLURM_CPUS_PER_TASK:?Slurm did not provide CPUs per task}"
+: "${SLURM_JOB_NUM_NODES:?Slurm did not provide node count}"
+: "${SLURM_NTASKS:?Slurm did not provide task count}"
+
+[[ "${SLURM_CPUS_PER_TASK}" == "4" ]] || { echo "CPU cap mismatch" >&2; exit 2; }
+[[ "${SLURM_JOB_NUM_NODES}" == "1" ]] || { echo "node cap mismatch" >&2; exit 2; }
+[[ "${SLURM_NTASKS}" == "1" ]] || { echo "task cap mismatch" >&2; exit 2; }
+job_record="$(scontrol show job "${SLURM_JOB_ID}" --oneliner)"
+[[ "${job_record}" == *"TimeLimit=00:30:00"* ]] || {
+  echo "walltime cap mismatch" >&2
+  exit 2
+}
 
 repo_root="${SLURM_SUBMIT_DIR:?Slurm submit directory is unavailable}"
 output_dir="${ANUMA_OUTPUT_ROOT}/smoke-240m-${SLURM_JOB_ID}"
@@ -38,6 +51,7 @@ export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"
 import hashlib
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -54,6 +68,7 @@ if not 0 <= (datetime.now(timezone.utc) - verified).total_seconds() <= 86400:
 checks = {
     "account": os.environ["SLURM_JOB_ACCOUNT"],
     "partition": os.environ["SLURM_JOB_PARTITION"],
+    "qos": os.environ["SLURM_JOB_QOS"],
     "input_manifest": str(Path(os.environ["ANUMA_INPUT_MANIFEST"]).resolve()),
     "output_root": str(Path(os.environ["ANUMA_OUTPUT_ROOT"]).resolve()),
     "scratch_dir": str(Path(os.environ["ANUMA_SCRATCH_DIR"]).resolve()),
@@ -61,6 +76,15 @@ checks = {
 for key, expected in checks.items():
     if receipt.get(key) != expected:
         raise SystemExit(f"preflight receipt mismatch: {key}")
+manifest = Path(os.environ["ANUMA_INPUT_MANIFEST"])
+if hashlib.sha256(manifest.read_bytes()).hexdigest() != receipt["input_manifest_sha256"]:
+    raise SystemExit("input manifest changed after preflight")
+repo = Path(os.environ["SLURM_SUBMIT_DIR"])
+if subprocess.check_output(["git", "-C", repo, "status", "--porcelain"], text=True).strip():
+    raise SystemExit("repository changed after preflight")
+commit = subprocess.check_output(["git", "-C", repo, "rev-parse", "HEAD"], text=True).strip()
+if commit != receipt["git_commit"]:
+    raise SystemExit("Git commit changed after preflight")
 PY
 
 test -x "${ANUMA_PYTHON}"
@@ -71,7 +95,7 @@ test -w "${ANUMA_SCRATCH_DIR}"
 test ! -e "${output_dir}"
 
 cd "${repo_root}"
-srun --ntasks=1 --cpus-per-task="${SLURM_CPUS_PER_TASK:-4}" \
+srun --ntasks=1 --cpus-per-task=4 \
   "${ANUMA_PYTHON}" -m anuma.hpc_smoke \
   --input-manifest "${ANUMA_INPUT_MANIFEST}" \
   --output-dir "${output_dir}"

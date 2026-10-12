@@ -9,6 +9,15 @@ import numpy as np
 import pytest
 
 from anuma import hpc_smoke
+from anuma.config import load_config
+from anuma.grid import Grid
+
+
+@pytest.fixture
+def _accept_tiny_test_grid(monkeypatch):
+    monkeypatch.setattr(
+        hpc_smoke.Grid, "from_json", classmethod(lambda cls, path, cfg=None: object())
+    )
 
 
 def _sha(path):
@@ -42,7 +51,7 @@ def _fixture_manifest(tmp_path):
     return manifest
 
 
-def test_check_only_validates_pinned_inputs(tmp_path):
+def test_check_only_validates_pinned_inputs(tmp_path, _accept_tiny_test_grid):
     manifest = _fixture_manifest(tmp_path)
     result = hpc_smoke.run_smoke(manifest, tmp_path / "unused", check_only=True)
     assert result == {"status": "validated", "shape": [2, 3]}
@@ -66,11 +75,10 @@ def test_manifest_path_cannot_escape_manifest_directory(tmp_path):
         hpc_smoke.validate_input_manifest(manifest)
 
 
-def test_run_writes_ranking_and_output_manifest(tmp_path, monkeypatch):
+def test_run_writes_ranking_and_output_manifest(
+    tmp_path, monkeypatch, _accept_tiny_test_grid
+):
     manifest = _fixture_manifest(tmp_path)
-    monkeypatch.setattr(
-        hpc_smoke.Grid, "from_json", classmethod(lambda cls, path, cfg=None: object())
-    )
     monkeypatch.setattr(hpc_smoke, "score", lambda layers, grid, cfg: object())
     monkeypatch.setattr(
         hpc_smoke,
@@ -87,10 +95,23 @@ def test_run_writes_ranking_and_output_manifest(tmp_path, monkeypatch):
     assert json.loads((output / "output-manifest.json").read_text()) == result
 
 
-def test_nonempty_output_directory_is_rejected(tmp_path, monkeypatch):
+def test_nonempty_output_directory_is_rejected(
+    tmp_path, monkeypatch, _accept_tiny_test_grid
+):
     manifest = _fixture_manifest(tmp_path)
     output = tmp_path / "out"
     output.mkdir()
     (output / "existing").write_text("keep")
     with pytest.raises(ValueError, match="not empty"):
         hpc_smoke.run_smoke(manifest, output)
+
+
+def test_grid_metadata_rejects_changed_transform(tmp_path):
+    grid = Grid(load_config())
+    path = tmp_path / "grid.json"
+    grid.save_json(path)
+    body = json.loads(path.read_text())
+    body["transform"][2] += 240.0
+    path.write_text(json.dumps(body))
+    with pytest.raises(ValueError, match="does not match"):
+        Grid.from_json(path, cfg=load_config())

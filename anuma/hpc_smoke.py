@@ -108,8 +108,10 @@ def _slurm_metadata() -> dict[str, str]:
         "SLURM_JOB_NAME",
         "SLURM_JOB_ACCOUNT",
         "SLURM_JOB_PARTITION",
+        "SLURM_JOB_QOS",
         "SLURM_CPUS_PER_TASK",
         "SLURM_JOB_NUM_NODES",
+        "SLURM_NTASKS",
     )
     return {name: os.environ[name] for name in names if name in os.environ}
 
@@ -117,6 +119,8 @@ def _slurm_metadata() -> dict[str, str]:
 def run_smoke(input_manifest: Path, output_dir: Path, check_only: bool = False) -> dict:
     manifest, files = validate_input_manifest(input_manifest)
     grid_meta = json.loads(files["grid"].read_text())
+    cfg = load_config()
+    grid = Grid.from_json(files["grid"], cfg=cfg)
     expected_shape = (int(grid_meta["height"]), int(grid_meta["width"]))
 
     layers: dict[str, np.ndarray] = {}
@@ -139,8 +143,6 @@ def run_smoke(input_manifest: Path, output_dir: Path, check_only: bool = False) 
     output_dir.mkdir(parents=True, exist_ok=True)
 
     started = _utc_now()
-    cfg = load_config()
-    grid = Grid.from_json(files["grid"], cfg=cfg)
     result = score(layers, grid=grid, cfg=cfg)
     ranking = {
         "schema_version": SCHEMA_VERSION,
