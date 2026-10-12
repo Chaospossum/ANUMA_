@@ -10,7 +10,7 @@ import base64
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
@@ -36,7 +36,7 @@ class HardBody(BaseModel):
 
 
 class ScoreBody(BaseModel):
-    weights: dict[str, float] | None = None
+    weights: dict[str, Annotated[float, Field(ge=0.0)]] | None = None
     hard: HardBody | None = None
     n: int | None = Field(default=None, ge=1, le=50)
 

@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from xml.etree import ElementTree
 
 import numpy as np
 import pytest
 
 from anuma.config import load_config
 from anuma.grid import Grid
-from anuma.ingest import run
+from anuma.ingest import _illumination_affine, run
+
+METADATA_FIXTURES = Path(__file__).parent / "fixtures" / "metadata"
 
 
 @pytest.fixture(scope="module")
@@ -46,6 +50,50 @@ def test_grid_covers_80s_circle():
     row, col = grid.to_pixel(0.0, -80.0)
     assert 0.0 <= row <= grid.height
     assert 0.0 <= col <= grid.width
+
+
+def _pds_number(label: str, key: str) -> float:
+    match = re.search(rf"^\s*{key}\s*=\s*([-+]?\d+(?:\.\d+)?)", label, re.MULTILINE)
+    assert match is not None, key
+    return float(match.group(1))
+
+
+def test_illumination_affine_matches_real_pds_metadata():
+    """Catch the one-pixel shift using the archived product's small label."""
+    cfg = load_config()
+    georef = cfg["layers"]["illumination"]["georef"]
+    label = (
+        METADATA_FIXTURES / "avgvisib_65s_240m_201608_jp2.lbl"
+    ).read_text()
+
+    assert georef["width"] == int(_pds_number(label, "LINE_SAMPLES"))
+    assert georef["height"] == int(_pds_number(label, "LINES"))
+    assert georef["pixel_m"] == _pds_number(label, "MAP_SCALE")
+    assert georef["sample_projection_offset"] == _pds_number(
+        label, "SAMPLE_PROJECTION_OFFSET"
+    )
+    assert georef["line_projection_offset"] == _pds_number(
+        label, "LINE_PROJECTION_OFFSET"
+    )
+
+    transform = _illumination_affine(georef)
+    assert transform.a == 240.0
+    assert transform.e == -240.0
+    assert transform.c == -770_400.0
+    assert transform.f == 770_400.0
+    assert transform.c + georef["width"] * transform.a == 770_400.0
+    assert transform.f + georef["height"] * transform.e == -770_400.0
+
+
+def test_illumination_scaling_matches_real_gdal_aux_metadata():
+    cfg = load_config()
+    meta = cfg["layers"]["illumination"]
+    root = ElementTree.parse(
+        METADATA_FIXTURES / "avgvisib_65s_240m_201608_aux.xml"
+    ).getroot()
+    assert float(root.findtext(".//NoDataValue")) == meta["nodata"]
+    assert float(root.findtext(".//Scale")) == meta["scale"]
+    assert float(root.findtext(".//Offset")) == meta["offset"]
 
 
 def test_slope_finite_inside_85s(synthetic_root: Path):
