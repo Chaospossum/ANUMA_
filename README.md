@@ -98,8 +98,9 @@ python3 -m anuma.render_static --weights config/demo_weights.yaml
 The command reads `data/grid/*.npy` and writes `out/static/score_heatmap.png`
 with numbered ranked sites, `slope_mask.png`, `sites.csv`,
 `artemis_ranking.csv`, the unannotated `score.png`, and normalized criterion
-figures. Artemis rows remain unranked when NASA coordinates are unavailable;
-the exporter does not invent geometry. It prints every written path. Use
+figures. Artemis rows are ranked only where a cited point falls on a
+finite score. Four 2024-only names stay unranked because they have no cited
+geometry. The exporter does not invent coordinates or a plume radius. It prints every written path. Use
 `--grid-dir PATH` and `--output-dir PATH` to override those directories.
 
 ## Ten-line UI demo
@@ -136,7 +137,9 @@ python3 -m anuma.ingest --synthetic --data-dir /tmp/anuma-test
 
 Moon south polar stereographic, `+proj=stere +lat_0=-90 +lon_0=0 +R=1737400 +units=m +no_defs`, 240 m/pixel, square covering 80°S–90°S. Arrays in `data/grid/*.npy`, transform in `data/grid/grid.json`.
 
-Artemis III region names are in `data/artemis3_regions.geojson`. NASA has not published centre coordinates; geometries are null and the file is marked approximate.
+Artemis III names are in `config/layers.yaml` and `GET /artemis3.geojson`. NASA has not published centres. Approximate points for the 2022 names come from Goossens et al. (2025) Table 1 and are marked approximate. Peak near Cabeus B, Mons Mouton Plateau, Mons Mouton, and Slater Plain stay null. See `docs/results.md` and `out/artemis-validation.md`.
+
+Optional keep-out on `POST /score`: send `keepout.points`, a required `keepout.radius_km`, and `keepout.mode` of `hard` or `penalty`. Penalty mode also requires `keepout.penalty`. There is no default radius. Orbital debris affects trajectories, not site choice, so it is not modelled.
 
 Layer URLs, citations, and thresholds live in `config/layers.yaml`. See `SOURCES.md` for the jury list.
 

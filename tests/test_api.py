@@ -125,9 +125,10 @@ def test_artemis_geojson_names_only_without_ingest(client_empty: TestClient):
     assert response.status_code == 200
     data = response.json()
     names = [feat["properties"]["name"] for feat in data["features"]]
-    assert names == cfg["artemis3"]["regions"]
-    assert all(feat["geometry"] is None for feat in data["features"])
-    assert data["properties"]["source"] == cfg["artemis3"]["source_url"]
+    assert names == [region["name"] for region in cfg["artemis3"]["regions"]]
+    assert any(feat["geometry"] is not None for feat in data["features"])
+    assert any(feat["geometry"] is None for feat in data["features"])
+    assert data["properties"]["point_source_doi"] == cfg["artemis3"]["point_source"]["doi"]
 
 
 def test_score_returns_heatmap_sites_and_artemis(client_ingested: TestClient):
@@ -159,11 +160,18 @@ def test_score_returns_heatmap_sites_and_artemis(client_ingested: TestClient):
     np.testing.assert_allclose(
         sum(top["contributions"].values()), top["total"], atol=1e-5
     )
-    assert top["nearest"] is None
-    assert top["distance_km"] is None
-    assert len(body["artemis"]["regions"]) == 9
-    assert body["artemis"]["coordinate_status"] == "not_published_by_nasa"
-    assert all(region["rank"] is None for region in body["artemis"]["regions"])
+    assert isinstance(top["nearest"], str) and top["nearest"]
+    assert top["distance_km"] is not None and top["distance_km"] >= 0.0
+    assert len(body["artemis"]["regions"]) == 17
+    assert body["artemis"]["coordinate_status"] == "nasa_centres_unpublished"
+    assert "Goossens" in body["artemis"]["point_source"]
+    unpublished = [
+        region
+        for region in body["artemis"]["regions"]
+        if region["coordinate_status"] == "not_published"
+    ]
+    assert len(unpublished) == 4
+    assert all(region["rank"] is None for region in unpublished)
 
 
 def test_ranked_site_downloads(client_ingested: TestClient):
@@ -178,7 +186,7 @@ def test_ranked_site_downloads(client_ingested: TestClient):
     assert "attachment" in csv_response.headers["content-disposition"]
     rows = list(csv.DictReader(io.StringIO(csv_response.text)))
     assert [row["rank"] for row in rows] == ["1", "2"]
-    assert rows[0]["nearest_artemis_region"] == ""
+    assert rows[0]["nearest_artemis_region"]
     assert float(rows[0]["latitude_deg"]) < -80.0
 
     geo_response = client_ingested.post("/score.geojson", json=request)
@@ -215,6 +223,45 @@ def test_negative_weight_is_rejected(client_ingested: TestClient):
         "/score", json={"weights": {"illumination": -0.01}}
     )
     assert response.status_code == 422
+
+
+def test_keepout_radius_is_required(client_ingested: TestClient):
+    response = client_ingested.post(
+        "/score",
+        json={
+            "keepout": {
+                "points": [{"lon": 0.0, "lat": -87.0}],
+                "mode": "hard",
+            }
+        },
+    )
+    assert response.status_code == 400
+    assert "radius_km" in response.json()["detail"]
+
+
+def test_keepout_hard_mask_removes_a_site(client_ingested: TestClient):
+    request = {
+        "weights": {"illumination": 0.5, "hydrogen": 0.3, "earth_visibility": 0.2},
+        "hard": {"max_slope_deg": 8},
+        "n": 10,
+    }
+    first = client_ingested.post("/score", json=request)
+    assert first.status_code == 200
+    top = first.json()["sites"][0]
+    blocked = client_ingested.post(
+        "/score",
+        json={
+            **request,
+            "keepout": {
+                "points": [{"lon": top["lon"], "lat": top["lat"]}],
+                "radius_km": 1.0,
+                "mode": "hard",
+            },
+        },
+    )
+    assert blocked.status_code == 200, blocked.text
+    replacement = blocked.json()["sites"][0]
+    assert (replacement["row"], replacement["col"]) != (top["row"], top["col"])
 
 
 def test_layers_ingested_flag(client_ingested: TestClient):

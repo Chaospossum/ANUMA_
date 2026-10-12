@@ -142,7 +142,11 @@ def test_artemis_geojson_has_nine_named_regions(synthetic_root: Path):
     path = synthetic_root / cfg["paths"]["artemis_geojson"]
     data = json.loads(path.read_text())
     names = [f["properties"]["name"] for f in data["features"]]
-    assert names == cfg["artemis3"]["regions"]
-    assert len(names) == 9
-    assert data["properties"]["source"] == cfg["artemis3"]["source_url"]
-    assert all(f["geometry"] is None for f in data["features"])
+    assert names == [region["name"] for region in cfg["artemis3"]["regions"]]
+    assert sum("2022" in feature["properties"]["lists"] for feature in data["features"]) == 13
+    assert sum("2024" in feature["properties"]["lists"] for feature in data["features"]) == 9
+    assert data["properties"]["point_source_doi"] == cfg["artemis3"]["point_source"]["doi"]
+    pointed = [feature for feature in data["features"] if feature["geometry"] is not None]
+    assert len(pointed) == 13
+    assert all(feature["geometry"]["type"] == "Point" for feature in pointed)
+    assert all(feature["properties"]["approximate"] is True for feature in pointed)

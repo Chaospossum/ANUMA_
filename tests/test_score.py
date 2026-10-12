@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 
 import numpy as np
@@ -10,7 +11,7 @@ import pytest
 from anuma.config import load_config
 from anuma.grid import Grid
 from anuma.ingest import write_artemis_geojson
-from anuma.score import artemis_overlap, hard_mask, normalize, rank_sites, score
+from anuma.score import apply_keepout, artemis_overlap, hard_mask, normalize, rank_sites, score
 
 
 @pytest.fixture(scope="module")
@@ -267,21 +268,86 @@ def test_artemis_overlap_synthetic_geometries(grid, cfg):
     ranked = {r["name"]: r for r in overlap["regions"]}
     assert ranked["synthetic-peak"]["rank"] == 1
     assert ranked["synthetic-peak"]["mean_score"] > 0.0
+    assert ranked["synthetic-peak"]["best_score"] >= ranked["synthetic-peak"]["mean_score"]
     assert len(overlap["regions"]) == 9
 
 
-def test_artemis_null_geometries_do_not_crash(grid, cfg, tmp_path):
-    dest = tmp_path / "artemis3_regions.geojson"
-    write_artemis_geojson(cfg, dest)
+def test_artemis_null_geometries_do_not_crash(grid, cfg):
     row, col = _pixel(grid, 0.0, -88.0)
     layers = _peak_layers(grid, [(row, col, 40.0, 1.0)])
     result = score(layers, cfg["scoring"]["weights"], cfg["hard"], grid=grid, cfg=cfg)
     sites = rank_sites(result, n=1)
-    overlap = artemis_overlap(sites, dest, result=result)
+    geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"name": "unnamed"},
+                "geometry": None,
+            }
+        ],
+    }
+    overlap = artemis_overlap(sites, geojson, result=result)
     assert len(overlap["sites"]) == 1
     assert overlap["sites"][0]["nearest"] is None
     assert overlap["sites"][0]["distance_km"] is None
-    assert len(overlap["regions"]) == 9
-    assert all(r["name"] in cfg["artemis3"]["regions"] for r in overlap["regions"])
-    assert all(r["rank"] is None for r in overlap["regions"])
-    assert all(not np.isfinite(r["mean_score"]) for r in overlap["regions"])
+    assert overlap["regions"][0]["rank"] is None
+    assert not np.isfinite(overlap["regions"][0]["mean_score"])
+    assert not np.isfinite(overlap["regions"][0]["best_score"])
+
+
+def test_cited_artemis_points_and_measured_winner(grid, cfg, tmp_path):
+    dest = tmp_path / "artemis3_regions.geojson"
+    write_artemis_geojson(cfg, dest)
+    data = json.loads(dest.read_text())
+    names = [region["name"] for region in cfg["artemis3"]["regions"]]
+    assert [feat["properties"]["name"] for feat in data["features"]] == names
+    pointed = [feat for feat in data["features"] if feat["geometry"] is not None]
+    empty = [feat for feat in data["features"] if feat["geometry"] is None]
+    assert len(pointed) == 13
+    assert {feat["properties"]["name"] for feat in empty} == {
+        "Peak near Cabeus B",
+        "Mons Mouton Plateau",
+        "Mons Mouton",
+        "Slater Plain",
+    }
+    assert sum("2022" in feat["properties"]["lists"] for feat in data["features"]) == 13
+    assert sum("2024" in feat["properties"]["lists"] for feat in data["features"]) == 9
+    ridge = next(feat for feat in pointed if feat["properties"]["name"] == "Connecting Ridge")
+    assert ridge["properties"]["lon_east"] == "222.51"
+    assert ridge["properties"]["lat"] == "-89.463"
+    assert ridge["properties"]["approximate"] is True
+    assert "2024" not in ridge["properties"]["lists"]
+    rim = next(feat for feat in pointed if feat["properties"]["name"] == "de Gerlache Rim 2")
+    assert "2024" in rim["properties"]["lists"]
+
+    winner = [{"lon": -137.3, "lat": -89.45, "total": None}]
+    overlap = artemis_overlap(winner, data)
+    assert overlap["sites"][0]["nearest"] == "Connecting Ridge"
+    distance = overlap["sites"][0]["distance_km"]
+    assert distance is not None and 0.0 < distance < 5.0
+    by_name = {row["name"]: row for row in overlap["regions"]}
+    assert by_name["Slater Plain"]["rank"] is None
+    assert not np.isfinite(by_name["Connecting Ridge"]["best_score"])
+
+
+def test_keepout_requires_radius_and_can_mask_or_penalise(grid, cfg):
+    row, col = _pixel(grid, 0.0, -87.0)
+    row_b, col_b = _pixel(grid, 0.0, -86.0)
+    layers = _peak_layers(
+        grid,
+        [(row, col, 100.0, 1.0), (row_b, col_b, 40.0, 1.0)],
+    )
+    result = score(layers, cfg["scoring"]["weights"], cfg["hard"], grid=grid, cfg=cfg)
+    with pytest.raises(ValueError, match="radius_km"):
+        apply_keepout(result, [(0.0, -87.0)], None, "hard")
+    with pytest.raises(ValueError, match="penalty"):
+        apply_keepout(result, [(0.0, -87.0)], 1.0, "penalty")
+    masked = apply_keepout(result, [(0.0, -87.0)], 1.0, "hard")
+    assert not np.isfinite(masked.combined[row, col])
+    sites = rank_sites(masked, n=1)
+    assert (sites[0]["row"], sites[0]["col"]) == (row_b, col_b)
+    penalised = apply_keepout(result, [(0.0, -87.0)], 1.0, "penalty", penalty=0.25)
+    assert np.isfinite(penalised.combined[row, col])
+    assert float(penalised.combined[row, col]) < float(result.combined[row, col])
+    assert float(penalised.combined[row_b, col_b]) == float(result.combined[row_b, col_b])

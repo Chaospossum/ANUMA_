@@ -187,22 +187,113 @@ layers:
     citation: "Derived from the ingested DEM. Clearance = Earth elevation minus horizon elevation toward (0°E, 0°N)."
 
 artemis3:
-  source_url: https://www.nasa.gov/news-release/nasa-provides-update-on-artemis-iii-moon-landing-regions/
-  announced: "2024-10-28"
   approximate: true
-  coordinate_status: not_published_by_nasa
-  note: >
-    NASA named nine candidate regions and did not publish centre coordinates
-    on nasa.gov. Geometry is null until coordinates are confirmed. The 2022
-    thirteen-region release described ~15 km × 15 km boxes; the 2024 page
-    does not repeat that size.
+  coordinate_status: nasa_centres_unpublished
+  distinction: >
+    The 19 August 2022 NASA list has 13 candidate regions and includes
+    Connecting Ridge, the Shackleton connecting ridge. The 28 October 2024
+    list has nine regions and does not include that ridge. de Gerlache Rim 2
+    is in the 2024 list and lies next to that ridge. NASA does not publish
+    region centres on nasa.gov. NASA SVS 5013 shows the 13 regions and does
+    not publish numeric coordinates. Approximate points for the 13 names are
+    the Mean Earth sites in Goossens et al. (2025) Table 1, not NASA polygons.
+    Peak near Cabeus B, Mons Mouton Plateau, Mons Mouton, and Slater Plain
+    have no citable centre in a peer-reviewed paper or an SVS coordinate file,
+    so their geometries stay empty.
+  lists:
+    "2022":
+      announced: "2022-08-19"
+      count: 13
+      source_url: https://www.nasa.gov/news-release/nasa-identifies-candidate-regions-for-landing-next-americans-on-moon/
+      box_note: "The 2022 release described each region as about 15 km by 15 km. That size is not drawn here."
+    "2024":
+      announced: "2024-10-28"
+      count: 9
+      source_url: https://www.nasa.gov/news-release/nasa-provides-update-on-artemis-iii-moon-landing-regions/
+      box_note: "The 2024 release does not repeat a region size."
+  point_source:
+    citation: "Goossens, S. J., Smith, D. E., Zuber, M. T., and Head, J. W. (2025), Shallow crustal density in the lunar south polar region, Planet. Sci. J. 6, 191, Table 1. https://doi.org/10.3847/PSJ/adf05f"
+    doi: https://doi.org/10.3847/PSJ/adf05f
+    frame: "Mean Earth longitude, positive east, and latitude"
+    kind: approximate_point
+  svs:
+    id: 5013
+    url: https://svs.gsfc.nasa.gov/5013/
+    coordinates_published: false
+  # lon_east and lat are the published Table 1 strings. They are point sites
+  # the paper investigated, not NASA region centres. Names without those keys
+  # stay null.
   regions:
-    - Peak near Cabeus B
-    - Haworth
-    - Malapert Massif
-    - Mons Mouton Plateau
-    - Mons Mouton
-    - Nobile Rim 1
-    - Nobile Rim 2
-    - de Gerlache Rim 2
-    - Slater Plain
+    - name: Faustini Rim A
+      lists: ["2022"]
+      paper_name: Faustini Rim A
+      lon_east: "90.000"
+      lat: "-87.890"
+    - name: Peak Near Shackleton
+      lists: ["2022"]
+      paper_name: Pt Nr Shackleton
+      lon_east: "123.691"
+      lat: "-88.811"
+    - name: Connecting Ridge
+      lists: ["2022"]
+      paper_name: Connecting Ridge
+      lon_east: "222.51"
+      lat: "-89.463"
+    - name: Connecting Ridge Extension
+      lists: ["2022"]
+      paper_name: Connecting Ridge Ext
+      lon_east: "258.001"
+      lat: "-89.032"
+    - name: de Gerlache Rim 1
+      lists: ["2022"]
+      paper_name: de Gerlache Rim 1
+      lon_east: "292.068"
+      lat: "-88.684"
+    - name: de Gerlache Rim 2
+      lists: ["2022", "2024"]
+      paper_name: de Gerlache Rim 2
+      lon_east: "295.372"
+      lat: "-88.231"
+    - name: de Gerlache-Kocher Massif
+      lists: ["2022"]
+      paper_name: de Gerlache-Kocher Massif
+      lon_east: "243.678"
+      lat: "-85.831"
+    - name: Haworth
+      lists: ["2022", "2024"]
+      paper_name: Haworth
+      lon_east: "337.223"
+      lat: "-86.765"
+    - name: Malapert Massif
+      lists: ["2022", "2024"]
+      paper_name: Malapert
+      lon_east: "359.764"
+      lat: "-85.996"
+    - name: Leibnitz Beta Plateau
+      lists: ["2022"]
+      paper_name: Leibnitz Beta Plateau
+      lon_east: "31.743"
+      lat: "-85.428"
+    - name: Nobile Rim 1
+      lists: ["2022", "2024"]
+      paper_name: Nobile Rim 1
+      lon_east: "37.367"
+      lat: "-85.440"
+    - name: Nobile Rim 2
+      lists: ["2022", "2024"]
+      paper_name: Nobile Rim 2
+      lon_east: "58.822"
+      lat: "-83.956"
+    - name: Amundsen Rim
+      lists: ["2022"]
+      paper_name: Amundsen Rim
+      lon_east: "69.444"
+      lat: "-84.230"
+    - name: Peak near Cabeus B
+      lists: ["2024"]
+    - name: Mons Mouton Plateau
+      lists: ["2024"]
+    - name: Mons Mouton
+      lists: ["2024"]
+    - name: Slater Plain
+      lists: ["2024"]

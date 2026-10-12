@@ -165,6 +165,63 @@ def score(
     )
 
 
+def apply_keepout(
+    result: ScoreResult,
+    points: list[tuple[float, float]],
+    radius_km: float | None,
+    mode: str,
+    penalty: float | None = None,
+) -> ScoreResult:
+    """Mask or penalise pixels near user-supplied landing points.
+
+    ``radius_km`` is required. There is no default plume radius.
+    ``mode`` is ``hard`` (drop the disk from the feasible set) or ``penalty``
+    (subtract a caller-supplied penalty from the weighted score). Orbital
+    debris is not part of this layer.
+    """
+    if radius_km is None:
+        raise ValueError(
+            "keep-out radius_km is required and must be positive; there is no default"
+        )
+    radius = float(radius_km)
+    if not np.isfinite(radius) or radius <= 0.0:
+        raise ValueError(
+            "keep-out radius_km is required and must be positive; there is no default"
+        )
+    if not points:
+        raise ValueError("keep-out requires at least one landing point")
+    if mode not in ("hard", "penalty"):
+        raise ValueError("keep-out mode must be 'hard' or 'penalty'")
+    if mode == "penalty" and (penalty is None or not np.isfinite(float(penalty))):
+        raise ValueError("penalty mode requires a finite penalty; there is no default")
+
+    x, y = result.grid.pixel_centers()
+    radius_m = radius * 1000.0
+    disk = np.zeros(x.shape, dtype=bool)
+    for lon, lat in points:
+        px, py = result.grid.fwd.transform(float(lon), float(lat))
+        disk |= (x - float(px)) ** 2 + (y - float(py)) ** 2 <= radius_m * radius_m
+
+    combined = result.combined.astype(np.float64, copy=True)
+    mask = np.array(result.hard_mask, copy=True)
+    if mode == "hard":
+        combined[disk] = np.nan
+        mask[disk] = False
+    else:
+        finite = disk & np.isfinite(combined)
+        combined[finite] = combined[finite] - float(penalty)
+    return ScoreResult(
+        combined=combined.astype(np.float32),
+        normalized=result.normalized,
+        hard_mask=mask,
+        weights=result.weights,
+        grid=result.grid,
+        normalization_policy=result.normalization_policy,
+        cfg=result.cfg,
+        ranking_inputs=result.ranking_inputs,
+    )
+
+
 def _pixel_center_lonlat(grid: Grid, row: int, col: int) -> tuple[float, float]:
     return grid.to_lonlat(row + 0.5, col + 0.5)
 
@@ -304,13 +361,11 @@ def _distance_km(grid: Grid, lon: float, lat: float, rings_xy: list[np.ndarray])
     return best / 1000.0
 
 
-def _region_mean_score(
-    result: ScoreResult, rings_xy: list[np.ndarray]
-) -> float:
+def _finite_inside(result: ScoreResult, rings_xy: list[np.ndarray]) -> np.ndarray:
     from matplotlib.path import Path as MplPath
 
     if not rings_xy:
-        return float("nan")
+        return np.asarray([], dtype=np.float64)
     x, y = result.grid.pixel_centers()
     inside = np.zeros(result.combined.shape, dtype=bool)
     for ring in rings_xy:
@@ -325,10 +380,70 @@ def _region_mean_score(
         sel[bbox] = hit
         inside |= sel
     values = result.combined[inside]
-    finite = values[np.isfinite(values)]
-    if finite.size == 0:
+    return values[np.isfinite(values)].astype(np.float64)
+
+
+def _region_mean_score(result: ScoreResult, rings_xy: list[np.ndarray]) -> float:
+    values = _finite_inside(result, rings_xy)
+    if values.size == 0:
         return float("nan")
-    return float(np.mean(finite))
+    return float(np.mean(values))
+
+
+def _region_best_score(result: ScoreResult, rings_xy: list[np.ndarray]) -> float:
+    values = _finite_inside(result, rings_xy)
+    if values.size == 0:
+        return float("nan")
+    return float(np.max(values))
+
+
+def _sample_score(result: ScoreResult, lon: float, lat: float) -> float:
+    row_f, col_f = result.grid.to_pixel(lon, lat)
+    row, col = int(np.floor(row_f)), int(np.floor(col_f))
+    height, width = result.combined.shape
+    if row < 0 or col < 0 or row >= height or col >= width:
+        return float("nan")
+    value = float(result.combined[row, col])
+    return value if np.isfinite(value) else float("nan")
+
+
+def _prepare_region(grid: Grid, feature: dict) -> dict:
+    props = feature.get("properties") or {}
+    geometry = feature.get("geometry")
+    prepared = {
+        "name": props.get("name"),
+        "kind": "none",
+        "rings": [],
+        "xy": None,
+        "lon": None,
+        "lat": None,
+        "coordinate_status": props.get("coordinate_status"),
+        "lists": props.get("lists"),
+    }
+    if not geometry or not geometry.get("coordinates"):
+        return prepared
+    if geometry.get("type") == "Point":
+        lon, lat = float(geometry["coordinates"][0]), float(geometry["coordinates"][1])
+        x, y = grid.fwd.transform(lon, lat)
+        prepared.update(
+            {"kind": "point", "xy": (float(x), float(y)), "lon": lon, "lat": lat}
+        )
+        return prepared
+    rings = [_ring_xy(grid, ring) for ring in _rings_lonlat(geometry)]
+    if rings:
+        prepared["kind"] = "polygon"
+        prepared["rings"] = rings
+    return prepared
+
+
+def _region_distance_km(grid: Grid, lon: float, lat: float, region: dict) -> float | None:
+    if region["kind"] == "point":
+        px, py = grid.fwd.transform(float(lon), float(lat))
+        x, y = region["xy"]
+        return float(np.hypot(float(px) - x, float(py) - y) / 1000.0)
+    if region["kind"] == "polygon":
+        return _distance_km(grid, lon, lat, region["rings"])
+    return None
 
 
 def artemis_overlap(
@@ -336,22 +451,17 @@ def artemis_overlap(
     regions_geojson,
     result: ScoreResult | None = None,
 ) -> dict:
-    """Nearest region per site, plus mean score and rank among the regions.
+    """Nearest region and distance for each site; best score and rank per region.
 
-    Null geometries are skipped: nearest is None and mean_score is NaN.
-    Raster mean uses `result` when given; otherwise the mean of ranked
-    sites assigned to that region.
+    Null geometries are skipped. Point distance is in the stereographic plane.
+    Polygon distance is 0 inside the ring. ``best_score`` is the maximum finite
+    raster value inside a polygon, or the value at a point. Rank follows
+    ``best_score``. ``mean_score`` is retained for polygon checks.
     """
     cfg = result.cfg if result is not None else load_config()
     grid = result.grid if result is not None else Grid(cfg)
     collection = _load_geojson(regions_geojson)
-    features = collection.get("features") or []
-    prepared = []
-    for feat in features:
-        props = feat.get("properties") or {}
-        name = props.get("name")
-        rings = [_ring_xy(grid, ring) for ring in _rings_lonlat(feat.get("geometry"))]
-        prepared.append({"name": name, "rings": rings})
+    prepared = [_prepare_region(grid, feat) for feat in (collection.get("features") or [])]
 
     site_rows = []
     assigned_totals: dict[str, list[float]] = {p["name"]: [] for p in prepared}
@@ -359,44 +469,61 @@ def artemis_overlap(
         nearest = None
         nearest_d = None
         for region in prepared:
-            dist = _distance_km(grid, site["lon"], site["lat"], region["rings"])
+            dist = _region_distance_km(grid, site["lon"], site["lat"], region)
             if dist is None:
                 continue
-            if nearest_d is None or dist < nearest_d:
+            if nearest_d is None or dist < nearest_d or (
+                dist == nearest_d and str(region["name"]) < str(nearest)
+            ):
                 nearest = region["name"]
                 nearest_d = dist
         row = dict(site)
         row["nearest"] = nearest
         row["distance_km"] = nearest_d
         site_rows.append(row)
-        if nearest is not None:
-            assigned_totals[nearest].append(float(site["total"]))
+        total = site.get("total")
+        if nearest is not None and total is not None and np.isfinite(float(total)):
+            assigned_totals[nearest].append(float(total))
 
     region_rows = []
     for region in prepared:
-        if result is not None and region["rings"]:
+        assigned = assigned_totals[region["name"]]
+        if result is not None and region["kind"] == "polygon" and region["rings"]:
             mean_score = _region_mean_score(result, region["rings"])
-        elif assigned_totals[region["name"]]:
-            mean_score = float(np.mean(assigned_totals[region["name"]]))
+            best_score = _region_best_score(result, region["rings"])
+        elif result is not None and region["kind"] == "point":
+            best_score = _sample_score(result, region["lon"], region["lat"])
+            mean_score = best_score
+        elif assigned:
+            best_score = float(np.max(assigned))
+            mean_score = float(np.mean(assigned))
         else:
+            best_score = float("nan")
             mean_score = float("nan")
         region_rows.append(
-            {"name": region["name"], "mean_score": mean_score, "rank": None}
+            {
+                "name": region["name"],
+                "mean_score": mean_score,
+                "best_score": best_score,
+                "rank": None,
+                "coordinate_status": region["coordinate_status"],
+                "lists": region["lists"],
+            }
         )
 
     order = sorted(
         range(len(region_rows)),
         key=lambda i: (
-            not np.isfinite(region_rows[i]["mean_score"]),
-            -(region_rows[i]["mean_score"])
-            if np.isfinite(region_rows[i]["mean_score"])
+            not np.isfinite(region_rows[i]["best_score"]),
+            -(region_rows[i]["best_score"])
+            if np.isfinite(region_rows[i]["best_score"])
             else 0.0,
             region_rows[i]["name"] or "",
         ),
     )
     rank = 1
     for i in order:
-        if np.isfinite(region_rows[i]["mean_score"]):
+        if np.isfinite(region_rows[i]["best_score"]):
             region_rows[i]["rank"] = rank
             rank += 1
         else:
