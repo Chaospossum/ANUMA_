@@ -115,7 +115,15 @@ account from unrelated example commands.
 - `hpc/slurm/sun-validation.sbatch`: one CPU node, 128 workers, no
   accelerators. Pilot is QOS `test` and at most 30 minutes. Production is
   14:30 so the two modes stay within 15 node-hours.
+- `hpc/submit-stage-b.sh`: guarded Stage B pilot/production wrapper. It does
+  not submit itself.
+- `hpc/slurm/stage-b.sbatch`: one CPU node, 128 workers, `--mem=240G`, no
+  accelerators. Pilot is QOS `test` and at most 30 minutes. Production is
+  QOS `default` and 06:00 so pilot plus production stays under 40 node-hours.
 - `config/sun-epoch.yaml`: frozen hourly windows for the 2016 comparison.
+- `config/stage-b.yaml`: Stage B tile size, pilot sample, walltime, and the
+  Stage A acceptance path. Weights, 8° mask, and normalization stay in
+  `config/layers.yaml`.
 - `anuma/hpc_smoke.py`: validates inputs, scores, and writes output lineage.
 - `anuma/hpc_monte_carlo.py`: deterministic 240 m clip-and-weight study.
 - `config/sun.yaml`: separate horizon, DE440, date, output, and fixed
@@ -125,6 +133,9 @@ account from unrelated example commands.
 - `anuma/sun.py` and `anuma/sun_validation.py`: reusable terrain horizons,
   SPICE-only Sun directions, disk visibility, darkness outputs, and Stage-A
   RMSE/bias/scatter validation.
+- `anuma/slope20.py` and `anuma/stage_b.py`: tiled 20 m Horn slope with halo
+  checkpoints, 20 m score/rank using sampled 240 m soft layers, agreement map,
+  and rank table.
 
 ## Stop conditions
 
@@ -297,6 +308,80 @@ Stage A writes `out/sun-validation/`; no report is committed here. The fixed
 gate is RMSE 0.05, accompanied by bias and residual scatter. That gate against
 `avgvisib_65s_240m_201608` remains unrun and blocking. The calendar-year-2029
 scenario default remains configurable and is not a mission interval.
+
+## Stage B — full-cap 20 m slope and ranking comparison
+
+Stage B asks whether the 240 m ranking survives a full-cap 20 m slope and the
+same frozen score. It does not submit itself. Scientific products are only:
+
+- `agreement-map-240m.npy` — hard-mask equality at 240 m centres after sampling
+  the 20 m mask;
+- `rank-table-20m-vs-240m.json` — top-N sites at both resolutions.
+
+Operational manifests, logs, tile checkpoints, and `slope-20m.npy` exist so
+those two products can be reproduced and so Stage D can reuse the 20 m slope.
+Open scientific choices are listed in [stage-b-open-questions.md](stage-b-open-questions.md).
+
+Frozen inputs (do not retune to make a run pass):
+
+- 8° hard slope mask from `config/layers.yaml`;
+- `decided_per_layer` normalization;
+- demo weights 0.5 / 0.3 / 0.2;
+- Stage A acceptance with RMSE ≤ 0.05 and `stop_rmse` still 0.05.
+
+Illumination, hydrogen, and Earth visibility stay on the 240 m grid and are
+sampled onto 20 m by nearest 240 m pixel centre. Only slope is recomputed from
+`data/raw/LDEM_80S_20MPP_ADJ.TIF` with windowed reads (never a whole-file load).
+Tiles use a one-pixel halo so Horn edges match the untiled serial reference;
+workers reopen the DEM for their window; finished tiles are checkpointed.
+
+### Laptop benchmark (not a MeluXina result)
+
+On 12 October 2026, a laptop timed 16 tiles of size 2048 on the full-cap 20 m
+DEM (225 tiles total) at about 0.96 s per tile wall time in a serial sample.
+Scaled to 128 workers that is about two waves ≈ 31 s of slope work, plus a
+0.25 node-hour scoring/I/O allowance → about **0.26 projected node-hours**.
+Production is therefore capped at **06:00** (6 node-hours) with `--mem=240G`.
+Pilot 0.5 + production 6.0 = 6.5 node-hours, under the Stage B 40-hour cap.
+Those figures are a laptop projection, not a MeluXina measurement and not a
+ranking result.
+
+### Guarded pilot
+
+```bash
+export ANUMA_JOB_PROFILE=stage-b-pilot
+export ANUMA_QOS=test
+export ANUMA_ACCOUNT=p201619
+export ANUMA_DEM=/project/home/p201619/ANUMA_/data/raw/LDEM_80S_20MPP_ADJ.TIF
+.venv-hpc-ingest/bin/python hpc/preflight.py \
+  --receipt "$HOME/anuma-stage-b-pilot-$(date -u +%Y%m%dT%H%M%SZ).json"
+export ANUMA_PREFLIGHT_RECEIPT="$HOME/<the-new-pilot-receipt>.json"
+bash hpc/submit-stage-b.sh pilot
+```
+
+The pilot times a sample of full-cap tiles, writes `pilot-measurement.json`
+with the projected one-node cost, and exits non-zero if that projection does
+not fit the configured production cap. It does not apply the Stage A RMSE gate
+and does not write the agreement map or rank table.
+
+### Guarded production
+
+Production requires a Stage A acceptance record. Do not assume job `5333886`
+passed; point `ANUMA_STAGE_A_ACCEPTANCE` at the real
+`validation-report.json` only after it shows RMSE ≤ 0.05.
+
+```bash
+export ANUMA_JOB_PROFILE=stage-b
+export ANUMA_QOS=default
+export ANUMA_STAGE_A_ACCEPTANCE=/project/home/p201619/ANUMA_/out/sun-validation/<job>/validation-report.json
+.venv-hpc-ingest/bin/python hpc/preflight.py \
+  --receipt "$HOME/anuma-stage-b-$(date -u +%Y%m%dT%H%M%SZ).json"
+export ANUMA_PREFLIGHT_RECEIPT="$HOME/<the-new-production-receipt>.json"
+bash hpc/submit-stage-b.sh production
+```
+
+Preflight, the submit wrapper, and the batch script all refuse production
+without that passed record. This document does not submit the job.
 
 ## Ingest, transfer, and pin the 240 m inputs
 

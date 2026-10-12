@@ -14,6 +14,7 @@ Project documentation:
 - [Team and delivery facts](docs/TEAM.md)
 - [HPC use plan](docs/hpc-use.md)
 - [Guarded MeluXina 240 m execution](docs/meluxina-execution.md)
+- [Stage B open questions](docs/stage-b-open-questions.md)
 - [Winning strategy](docs/winning-strategy.md)
 - [Short ispace meeting guide](docs/ispace-meeting.md)
 
