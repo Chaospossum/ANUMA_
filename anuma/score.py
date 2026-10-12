@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-from matplotlib.path import Path as MplPath
 
 from anuma.config import load_config
 from anuma.grid import Grid
@@ -237,6 +236,8 @@ def _point_to_segment_m(
 
 def _distance_km(grid: Grid, lon: float, lat: float, rings_xy: list[np.ndarray]) -> float | None:
     """Distance to the nearest ring in the stereo plane. 0 if inside. None if no rings."""
+    from matplotlib.path import Path as MplPath
+
     if not rings_xy:
         return None
     px, py = grid.fwd.transform(lon, lat)
@@ -261,6 +262,8 @@ def _distance_km(grid: Grid, lon: float, lat: float, rings_xy: list[np.ndarray])
 def _region_mean_score(
     result: ScoreResult, rings_xy: list[np.ndarray]
 ) -> float:
+    from matplotlib.path import Path as MplPath
+
     if not rings_xy:
         return float("nan")
     x, y = result.grid.pixel_centers()

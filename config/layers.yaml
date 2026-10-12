@@ -70,6 +70,7 @@ layers:
     filename: avgvisib_65s_240m_201608.jp2
     url: https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/extras/illumination/jp2/avgvisib_65s_240m_201608.jp2
     expected_bytes: 48625783
+    sha256: 4ccaf5ef7cdfc35bbff4d28e0d9b1051d9d56a66181cda633e71bfd42237dd49
     scale: 0.00004
     offset: 0.0
     nodata: -32768
@@ -91,8 +92,12 @@ layers:
     sidecars:
       - filename: avgvisib_65s_240m_201608_aux.xml
         url: https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/extras/illumination/jp2/avgvisib_65s_240m_201608_aux.xml
+        expected_bytes: 2142
+        sha256: 261418fc773a4ec3056affd2453a8dcfde2715d24cabd7c4856284624a1c01c0
       - filename: avgvisib_65s_240m_201608_jp2.lbl
         url: https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/extras/illumination/jp2/avgvisib_65s_240m_201608_jp2.lbl
+        expected_bytes: 6464
+        sha256: 2d377913872e628f3b27503fd61b3a379046dd85573fba93170e60f5b3257a24
 
   hydrogen:
     name: hydrogen
@@ -102,6 +107,7 @@ layers:
     filename: hydrogenhd.dat
     url: https://pds-geosciences.wustl.edu/missions/lunarp/reduced/hydrogenhd.dat
     expected_bytes: 518400
+    sha256: 7b9708c95cf3648a6ca6df754648fa18dbcdd2ebd4ae6e8b12dbc18d1e3ad6d4
     ascii_url: https://pds-geosciences.wustl.edu/missions/lunarp/reduced/hydrogenhd.txt
     ascii_filename: hydrogenhd.txt
     width: 720

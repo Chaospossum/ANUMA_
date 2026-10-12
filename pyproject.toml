@@ -9,18 +9,31 @@ description = "Landing-site decision support for the lunar south pole (MAGPIE / 
 requires-python = ">=3.11"
 dependencies = [
   "numpy",
-  "rasterio",
   "pyproj",
-  "matplotlib",
   "pyyaml",
-  "scipy",
   "affine",
-  "fastapi",
-  "uvicorn",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "httpx"]
+ingest = [
+  "rasterio",
+  "matplotlib",
+  "scipy",
+]
+web = [
+  "fastapi",
+  "uvicorn",
+  "matplotlib",
+]
+dev = [
+  "pytest",
+  "httpx",
+  "rasterio",
+  "matplotlib",
+  "scipy",
+  "fastapi",
+  "uvicorn",
+]
 
 [tool.setuptools.packages.find]
 include = ["anuma*"]

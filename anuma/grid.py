@@ -104,6 +104,30 @@ class Grid:
         """Rebuild a Grid and check it matches the saved transform."""
         meta = json.loads(Path(path).read_text())
         grid = cls(cfg)
-        if [grid.width, grid.height] != [meta["width"], meta["height"]]:
+        expected = grid.to_dict()
+        scalar_keys = (
+            "proj4",
+            "radius_m",
+            "resolution_m",
+            "width",
+            "height",
+            "xmin",
+            "ymin",
+            "xmax",
+            "ymax",
+        )
+        if any(meta.get(key) != expected[key] for key in scalar_keys):
+            raise ValueError("Saved grid.json does not match current config.")
+        transform = meta.get("transform")
+        if (
+            not isinstance(transform, list)
+            or len(transform) != 6
+            or not np.allclose(
+                np.asarray(transform, dtype=float),
+                np.asarray(expected["transform"], dtype=float),
+                rtol=0.0,
+                atol=1.0e-9,
+            )
+        ):
             raise ValueError("Saved grid.json does not match current config.")
         return grid

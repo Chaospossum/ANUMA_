@@ -9,6 +9,7 @@ Project documentation:
 
 - [Team and delivery facts](docs/TEAM.md)
 - [HPC use plan](docs/hpc-use.md)
+- [Guarded MeluXina 240 m execution](docs/meluxina-execution.md)
 - [Winning strategy](docs/winning-strategy.md)
 - [Short ispace meeting guide](docs/ispace-meeting.md)
 
@@ -34,6 +35,38 @@ common 240 m grid, and writes the arrays to `data/grid/`. The download includes
 the 2.51 GiB LOLA DEM. A completed ingest produces `dem.npy`, `slope.npy`,
 `illumination.npy`, `hydrogen.npy`, `earth_visibility.npy`, and `grid.json`.
 `--synthetic` creates test fixtures only and must not be used for the demo.
+
+Raw source rasters and derived grids are intentionally excluded from Git. A
+clone alone cannot be scored. Check an HPC staging area with:
+
+```bash
+python3 -m anuma.hpc_data_check --root "$PWD" --require-ready \
+  --manifest-output data/data-presence-manifest.json
+```
+
+Ingest either on an approved workstation followed by checksummed transfer, or
+in a separately reviewed one-node MeluXina compute job. Ingest, downloads,
+hashing, and environment installation are not login-node work. Do not stage a
+reference grid until the illumination-registration correction documented by
+the HPC audit is merged and verified.
+
+Existing raw sources are confirmed at local `data/raw` and MeluXina
+`/project/home/p201619/ANUMA_/data/raw`. After the ingest fixes merge, validate
+them before re-ingest:
+
+```bash
+python3 -m anuma.hpc_data_check --root "$PWD" --require-raw-ready \
+  --manifest-output data/raw-before-reingest.json
+```
+
+A passing check means re-ingest must reuse the existing sources. A missing,
+wrong-sized, or checksum-invalid source is the only reason to download its
+replacement. Re-ingest and post-ingest manifest capture remain compute-node or
+approved-workstation work. On MeluXina, first use module discovery to identify
+stable-release Python 3.12, then create the supported hash-pinned Rasterio
+environment with `ANUMA_ENVIRONMENT=ingest bash hpc/bootstrap.sh` from a
+compute allocation. Compare cross-machine transfer manifests by each file's
+SHA-256, not by the whole manifest hash, because absolute paths differ.
 
 ## Serve the UI
 
@@ -76,7 +109,7 @@ the normalized criterion used by scoring. It prints every written path. Use
 Unit tests use constructed arrays and `--synthetic` ingest only:
 
 ```bash
-python3 -m pytest tests/test_ingest.py tests/test_score.py tests/test_api.py tests/test_render_static.py
+python3 -m pytest
 python3 -m anuma.ingest --synthetic --data-dir /tmp/anuma-test
 ```
 

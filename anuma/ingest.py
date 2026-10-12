@@ -103,7 +103,10 @@ def _memory_raster(
 def ingest_dem(cfg: dict, paths: dict[str, Path], grid: Grid) -> np.ndarray:
     meta = cfg["layers"]["dem"]
     dest = download(
-        meta["url"], paths["raw"] / meta["filename"], meta.get("expected_bytes")
+        meta["url"],
+        paths["raw"] / meta["filename"],
+        meta.get("expected_bytes"),
+        meta.get("sha256"),
     )
     with rasterio.open(dest) as src:
         if src.crs is None:
@@ -118,10 +121,18 @@ def ingest_dem(cfg: dict, paths: dict[str, Path], grid: Grid) -> np.ndarray:
 def ingest_illumination(cfg: dict, paths: dict[str, Path], grid: Grid) -> np.ndarray:
     meta = cfg["layers"]["illumination"]
     dest = download(
-        meta["url"], paths["raw"] / meta["filename"], meta.get("expected_bytes")
+        meta["url"],
+        paths["raw"] / meta["filename"],
+        meta.get("expected_bytes"),
+        meta.get("sha256"),
     )
     for side in meta.get("sidecars", []):
-        download(side["url"], paths["raw"] / side["filename"])
+        download(
+            side["url"],
+            paths["raw"] / side["filename"],
+            side.get("expected_bytes"),
+            side.get("sha256"),
+        )
     georef = meta["georef"]
     src_transform = _illumination_affine(georef)
     src_crs = CRS.from_proj4(georef["proj4"])
@@ -142,7 +153,10 @@ def ingest_illumination(cfg: dict, paths: dict[str, Path], grid: Grid) -> np.nda
 def ingest_hydrogen(cfg: dict, paths: dict[str, Path], grid: Grid) -> np.ndarray:
     meta = cfg["layers"]["hydrogen"]
     dest = download(
-        meta["url"], paths["raw"] / meta["filename"], meta.get("expected_bytes")
+        meta["url"],
+        paths["raw"] / meta["filename"],
+        meta.get("expected_bytes"),
+        meta.get("sha256"),
     )
     height, width = int(meta["height"]), int(meta["width"])
     values = np.fromfile(dest, dtype=np.dtype(meta["dtype"]))
