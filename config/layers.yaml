@@ -20,14 +20,67 @@ hard:
   goal_slope_deg: 5.0
 
 scoring:
-  percentile_low: 2.0
-  percentile_high: 98.0
+  default_normalization_policy: decided_per_layer
+  normalization_policies:
+    legacy_global_2_98:
+      description: "Comparison only: the former global percentile policy."
+      default:
+        method: percentile
+        percentile_low: 2.0
+        percentile_high: 98.0
+        scope: valid
+    decided_per_layer:
+      description: "Default policy: preserve illumination's bright tail and bound coarse hydrogen."
+      layers:
+        slope:
+          method: min_max
+          scope: hard_mask
+        illumination:
+          method: min_max
+          scope: valid
+        hydrogen:
+          method: percentile
+          percentile_low: 2.0
+          percentile_high: 98.0
+          scope: valid
+        earth_visibility:
+          method: percentile
+          percentile_low: 2.0
+          percentile_high: 98.0
+          scope: valid
+    all_min_max:
+      description: "Comparison only: min–max every layer on valid pixels."
+      default:
+        method: min_max
+        scope: valid
   n_sites: 10
   min_separation_km: 10.0
   weights:
     illumination: 0.5
     hydrogen: 0.3
     earth_visibility: 0.2
+
+provenance:
+  illumination_affine_revision: pds3-pixel-center-v2
+
+hpc_studies:
+  clip_weight_monte_carlo:
+    seed: 20261012
+    draws:
+      pilot: 8
+      full: 500
+    weight_ranges:
+      illumination: [0.4, 0.6]
+      hydrogen: [0.2, 0.4]
+      earth_visibility: [0.1, 0.3]
+    normalize_weights_to_one: true
+    policies:
+      - legacy_global_2_98
+      - decided_per_layer
+      - all_min_max
+    clipped_policy: legacy_global_2_98
+    unclipped_policy: decided_per_layer
+    winner_class_radius_km: 10.0
 
 earth_visibility:
   # Approximation: 100 km ray toward sub-Earth (lon 0°, lat 0°) in the

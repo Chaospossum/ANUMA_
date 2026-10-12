@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -36,6 +37,7 @@ def _paths(cfg: dict, root: Path) -> dict[str, Path]:
         "grid": root / p["grid"],
         "quicklook": root / p["quicklook"],
         "grid_json": root / p["grid_json"],
+        "ingest_manifest": root / p["grid"] / "ingest-manifest.json",
         "artemis_geojson": root / p["artemis_geojson"],
     }
 
@@ -275,6 +277,22 @@ def run(cfg: dict, root: Path, synthetic: bool) -> None:
     save_layer("hydrogen", hydrogen, paths, "gray")
     save_layer("earth_visibility", vis, paths, "gray")
     write_artemis_geojson(cfg, paths["artemis_geojson"])
+    paths["ingest_manifest"].write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "created_at_utc": datetime.now(timezone.utc).isoformat(),
+                "synthetic": bool(synthetic),
+                "illumination_affine_revision": cfg["provenance"][
+                    "illumination_affine_revision"
+                ],
+                "resolution_m": grid.resolution_m,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
     print(f"Wrote grid {grid.width}×{grid.height} to {paths['grid']}")
 
 

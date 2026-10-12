@@ -8,6 +8,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from anuma.config import load_config
 from anuma.hpc_smoke import EXPECTED_RESOLUTION_M, REQUIRED_FILES, sha256_file
 
 
@@ -22,6 +23,7 @@ def main() -> None:
     output = args.output.resolve()
     file_names = {
         "grid": "grid.json",
+        "ingest_manifest": "ingest-manifest.json",
         "dem": "dem.npy",
         "slope": "slope.npy",
         "illumination": "illumination.npy",
@@ -46,11 +48,22 @@ def main() -> None:
     grid_meta = json.loads((grid_dir / "grid.json").read_text())
     if float(grid_meta.get("resolution_m", 0)) != EXPECTED_RESOLUTION_M:
         parser.error("grid.json does not declare a 240 m grid")
+    ingest_meta = json.loads((grid_dir / "ingest-manifest.json").read_text())
+    if ingest_meta.get("synthetic") is not False:
+        parser.error("synthetic ingest output cannot be used for an HPC study")
+    expected_revision = load_config()["provenance"]["illumination_affine_revision"]
+    if ingest_meta.get("illumination_affine_revision") != expected_revision:
+        parser.error("illumination manifest predates the affine fix; re-ingest first")
     manifest = {
         "schema_version": 1,
         "id": args.id,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "resolution_m": EXPECTED_RESOLUTION_M,
+        "provenance": {
+            "illumination_affine_revision": ingest_meta.get(
+                "illumination_affine_revision"
+            )
+        },
         "files": entries,
     }
     output.parent.mkdir(parents=True, exist_ok=True)

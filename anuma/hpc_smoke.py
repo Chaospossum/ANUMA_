@@ -28,12 +28,14 @@ SCHEMA_VERSION = 1
 EXPECTED_RESOLUTION_M = 240.0
 REQUIRED_FILES = (
     "grid",
+    "ingest_manifest",
     "dem",
     "slope",
     "illumination",
     "hydrogen",
     "earth_visibility",
 )
+ARRAY_FILES = ("dem", "slope", "illumination", "hydrogen", "earth_visibility")
 
 
 def sha256_file(path: Path) -> str:
@@ -86,6 +88,14 @@ def validate_input_manifest(path: Path) -> tuple[dict[str, Any], dict[str, Path]
     grid_meta = json.loads(resolved["grid"].read_text())
     if float(grid_meta.get("resolution_m", 0.0)) != EXPECTED_RESOLUTION_M:
         raise ValueError("grid.json is not a 240 m grid")
+    ingest_meta = json.loads(resolved["ingest_manifest"].read_text())
+    expected_revision = load_config()["provenance"]["illumination_affine_revision"]
+    if ingest_meta.get("illumination_affine_revision") != expected_revision:
+        raise ValueError(
+            "illumination manifest predates the affine fix; re-ingest is required"
+        )
+    if ingest_meta.get("synthetic") is not False:
+        raise ValueError("synthetic ingest manifests are not valid HPC inputs")
     return manifest, resolved
 
 
@@ -140,7 +150,7 @@ def run_smoke(input_manifest: Path, output_dir: Path, check_only: bool = False) 
     expected_shape = (int(grid_meta["height"]), int(grid_meta["width"]))
 
     layers: dict[str, np.ndarray] = {}
-    for name in REQUIRED_FILES[1:]:
+    for name in ARRAY_FILES:
         array = np.load(files[name], mmap_mode="r", allow_pickle=False)
         if array.shape != expected_shape:
             raise ValueError(

@@ -27,9 +27,36 @@ REQUIRED_ENV = (
     "ANUMA_ALLOCATION_EVIDENCE_FILE",
     "ANUMA_STORAGE_EVIDENCE_FILE",
 )
-JOB_NODE_HOURS = 0.5  # 1 node * 30 minutes (conservative allocation bound)
-JOB_CORE_HOURS = 2.0  # 4 requested CPU cores * 30 minutes
 OUTPUT_HEADROOM_BYTES = 100 * 1024 * 1024
+JOB_PROFILES = {
+    "smoke": {
+        "qos": "test",
+        "walltime": "00:30:00",
+        "walltime_minutes": 30,
+        "cpus": 4,
+        "memory": "16G",
+        "node_hours": 0.5,
+        "core_hours": 2.0,
+    },
+    "monte-carlo-pilot": {
+        "qos": "test",
+        "walltime": "00:30:00",
+        "walltime_minutes": 30,
+        "cpus": 4,
+        "memory": "16G",
+        "node_hours": 0.5,
+        "core_hours": 2.0,
+    },
+    "monte-carlo-full": {
+        "qos": "default",
+        "walltime": "04:00:00",
+        "walltime_minutes": 4 * 60,
+        "cpus": 4,
+        "memory": "32G",
+        "node_hours": 4.0,
+        "core_hours": 16.0,
+    },
+}
 QOS_MAX_WALL_MINUTES = {
     "dev": 6 * 60,
     "test": 30,
@@ -43,7 +70,6 @@ QOS_MAX_WALL_MINUTES = {
 DEFAULT_ENV = {
     "ANUMA_ACCOUNT": "p201619",
     "ANUMA_PARTITION": "cpu",
-    "ANUMA_QOS": "test",
     "ANUMA_SCRATCH_DIR": "/project/scratch/p201619",
     "ANUMA_DATA_ROOT": "/project/home/p201619/ANUMA_",
 }
@@ -105,6 +131,11 @@ def _load_fresh_evidence(path: Path, required: tuple[str, ...]) -> dict:
 def run_preflight(receipt_path: Path) -> dict:
     for name, value in DEFAULT_ENV.items():
         os.environ.setdefault(name, value)
+    job_profile = os.environ.get("ANUMA_JOB_PROFILE", "smoke")
+    if job_profile not in JOB_PROFILES:
+        fail(f"unknown ANUMA_JOB_PROFILE {job_profile!r}")
+    profile = JOB_PROFILES[job_profile]
+    os.environ.setdefault("ANUMA_QOS", str(profile["qos"]))
     missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
     if missing:
         fail("missing required environment variables: " + ", ".join(missing))
@@ -117,8 +148,10 @@ def run_preflight(receipt_path: Path) -> dict:
     qos = os.environ["ANUMA_QOS"]
     if qos not in QOS_MAX_WALL_MINUTES:
         fail(f"unknown ANUMA_QOS {qos!r}; use a documented MeluXina QOS")
-    if qos != "test":
-        fail("the guarded 30-minute batch smoke job requires the official test QOS")
+    if qos != profile["qos"]:
+        fail(f"{job_profile} requires QOS {profile['qos']!r}")
+    if int(profile["walltime_minutes"]) > QOS_MAX_WALL_MINUTES[qos]:
+        fail(f"{job_profile} walltime exceeds the {qos} QOS limit")
     association = run_checked(
         [
             "sacctmgr",
@@ -146,10 +179,10 @@ def run_preflight(receipt_path: Path) -> dict:
     if allocation["account"] != account:
         fail("allocation evidence account does not match ANUMA_ACCOUNT")
     remaining = float(allocation["remaining_cpu_node_hours"])
-    if not math.isfinite(remaining) or remaining < JOB_NODE_HOURS:
+    if not math.isfinite(remaining) or remaining < float(profile["node_hours"]):
         fail(
             f"remaining allocation {remaining} CPU node-hours is below "
-            f"required {JOB_NODE_HOURS}"
+            f"required {profile['node_hours']}"
         )
     storage = _load_fresh_evidence(
         Path(os.environ["ANUMA_STORAGE_EVIDENCE_FILE"]),
@@ -194,6 +227,7 @@ def run_preflight(receipt_path: Path) -> dict:
         "account": account,
         "partition": partition,
         "qos": qos,
+        "job_profile": job_profile,
         "input_manifest": str(input_manifest),
         "input_manifest_sha256": sha256_file(input_manifest),
         "data_root": str(data_root),
@@ -205,10 +239,11 @@ def run_preflight(receipt_path: Path) -> dict:
         "allocation_evidence": allocation,
         "storage_evidence": storage,
         "git_commit": git_commit,
-        "job_node_hours_cap": JOB_NODE_HOURS,
-        "job_core_hours": JOB_CORE_HOURS,
-        "job_walltime": "00:30:00",
-        "job_cpus": 4,
+        "job_node_hours_cap": profile["node_hours"],
+        "job_core_hours": profile["core_hours"],
+        "job_walltime": profile["walltime"],
+        "job_cpus": profile["cpus"],
+        "job_memory": profile["memory"],
     }
     canonical = json.dumps(receipt, sort_keys=True).encode()
     receipt["receipt_sha256"] = hashlib.sha256(canonical).hexdigest()

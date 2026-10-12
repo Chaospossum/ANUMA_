@@ -23,7 +23,7 @@ from anuma.export import sites_csv, sites_geojson
 from anuma.grid import Grid
 from anuma.heatmap import render_png
 from anuma.ingest import write_artemis_geojson
-from anuma.score import artemis_overlap, normalize, rank_sites, score
+from anuma.score import artemis_overlap, hard_mask, normalize, rank_sites, score
 
 INGEST_COMMAND = "python3 -m anuma.ingest"
 REQUIRED_FOR_SCORE = ("slope", "illumination", "hydrogen", "earth_visibility")
@@ -290,7 +290,14 @@ def create_app() -> FastAPI:
             raise _not_ingested([name])
         mode = cfg["layers"][name].get("mode")
         if mode:
-            painted = normalize(array, mode, cfg=cfg)
+            painted = normalize(
+                array,
+                mode,
+                layer_name=name,
+                policy=cfg["scoring"]["default_normalization_policy"],
+                valid_mask=hard_mask(store["layers"]["slope"], cfg=cfg),
+                cfg=cfg,
+            )
         else:
             painted = array
         png = render_png(painted, cmap="gray")

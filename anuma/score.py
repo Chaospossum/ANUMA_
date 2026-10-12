@@ -25,6 +25,7 @@ class ScoreResult:
     hard_mask: np.ndarray
     weights: dict[str, float]
     grid: Grid
+    normalization_policy: str
     cfg: dict = field(repr=False)
     ranking_inputs: dict[str, np.ndarray] = field(repr=False)
 
@@ -46,30 +47,56 @@ def hard_mask(
     return finite & (slope <= float(max_slope_deg))
 
 
+def normalization_rule(cfg: dict, policy: str, layer_name: str) -> dict:
+    """Resolve one layer's declared rule for a named normalization policy."""
+    policies = cfg["scoring"]["normalization_policies"]
+    if policy not in policies:
+        raise ValueError(f"Unknown normalization policy: {policy!r}")
+    policy_cfg = policies[policy]
+    rule = (policy_cfg.get("layers") or {}).get(layer_name, policy_cfg.get("default"))
+    if not isinstance(rule, dict):
+        raise ValueError(f"Policy {policy!r} has no rule for layer {layer_name!r}")
+    return rule
+
+
 def normalize(
     layer: np.ndarray,
     mode: str,
+    *,
+    layer_name: str,
+    policy: str,
+    valid_mask: np.ndarray | None = None,
     cfg: dict | None = None,
 ) -> np.ndarray:
-    """Scale a layer to 0–1 with 2nd/98th percentile clip from config."""
+    """Scale one layer to 0–1 using its configured policy rule."""
     cfg = _cfg(cfg)
-    low_p = float(cfg["scoring"]["percentile_low"])
-    high_p = float(cfg["scoring"]["percentile_high"])
+    rule = normalization_rule(cfg, policy, layer_name)
     out = np.full(layer.shape, np.nan, dtype=np.float32)
     finite = np.isfinite(layer)
+    if rule.get("scope", "valid") == "hard_mask":
+        if valid_mask is None:
+            raise ValueError(f"{layer_name} normalization requires the hard mask")
+        finite &= valid_mask
     if not finite.any():
         return out
     values = layer[finite].astype(np.float64)
-    p_low = float(np.percentile(values, low_p))
-    p_high = float(np.percentile(values, high_p))
-    span = p_high - p_low
-    clipped = np.clip(layer.astype(np.float64), p_low, p_high)
+    method = rule["method"]
+    if method == "min_max":
+        low = float(np.min(values))
+        high = float(np.max(values))
+    elif method == "percentile":
+        low = float(np.percentile(values, float(rule["percentile_low"])))
+        high = float(np.percentile(values, float(rule["percentile_high"])))
+    else:
+        raise ValueError(f"Unknown normalization method: {method!r}")
+    span = high - low
+    clipped = np.clip(layer.astype(np.float64), low, high)
     if span == 0.0:
         scaled = np.full(layer.shape, 0.5, dtype=np.float64)
     elif mode == "higher_better":
-        scaled = (clipped - p_low) / span
+        scaled = (clipped - low) / span
     elif mode == "lower_better":
-        scaled = (p_high - clipped) / span
+        scaled = (high - clipped) / span
     else:
         raise ValueError(f"Unknown normalize mode: {mode!r}")
     out[finite] = scaled[finite].astype(np.float32)
@@ -82,9 +109,12 @@ def score(
     hard: dict | None = None,
     grid: Grid | None = None,
     cfg: dict | None = None,
+    normalization_policy: str | None = None,
 ) -> ScoreResult:
     """Weighted sum of normalized soft layers, masked by slope and no-data."""
     cfg = _cfg(cfg)
+    if normalization_policy is None:
+        normalization_policy = str(cfg["scoring"]["default_normalization_policy"])
     if weights is None:
         weights = dict(cfg["scoring"]["weights"])
     if hard is None:
@@ -107,7 +137,14 @@ def score(
         if name not in layers:
             raise KeyError(f"weighted layer {name!r} missing from layers")
         mode = cfg["layers"][name]["mode"]
-        norm = normalize(layers[name], mode, cfg=cfg)
+        norm = normalize(
+            layers[name],
+            mode,
+            layer_name=name,
+            policy=normalization_policy,
+            valid_mask=mask,
+            cfg=cfg,
+        )
         normalized[name] = norm
         mask = mask & np.isfinite(layers[name]) & np.isfinite(norm)
         combined = combined + float(weight) * norm.astype(np.float64)
@@ -118,6 +155,7 @@ def score(
         hard_mask=mask,
         weights={k: float(v) for k, v in weights.items()},
         grid=grid,
+        normalization_policy=normalization_policy,
         cfg=cfg,
         ranking_inputs={
             name: layers[name]
