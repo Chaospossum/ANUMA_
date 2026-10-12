@@ -196,34 +196,11 @@ def synthetic_layers(grid: Grid) -> dict[str, np.ndarray]:
 
 
 def write_artemis_geojson(cfg: dict, dest: Path) -> None:
-    """Names and source URL only. NASA has not published centres."""
-    art = cfg["artemis3"]
-    features = []
-    for name in art["regions"]:
-        features.append(
-            {
-                "type": "Feature",
-                "properties": {
-                    "name": name,
-                    "approximate": art["approximate"],
-                    "coordinate_status": art["coordinate_status"],
-                    "source": art["source_url"],
-                },
-                "geometry": None,
-            }
-        )
-    fc = {
-        "type": "FeatureCollection",
-        "properties": {
-            "approximate": art["approximate"],
-            "source": art["source_url"],
-            "announced": art["announced"],
-            "note": art["note"].strip(),
-        },
-        "features": features,
-    }
+    """Write cited approximate points. Names without a cited point stay null."""
+    from anuma.artemis import feature_collection
+
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(json.dumps(fc, indent=2) + "\n")
+    dest.write_text(json.dumps(feature_collection(cfg), indent=2) + "\n")
 
 
 def mask_outside_cap(array: np.ndarray, grid: Grid, lat_max: float) -> np.ndarray:

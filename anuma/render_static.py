@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 import numpy as np
 
+from anuma.artemis import distinction, feature_collection
 from anuma.config import load_config, repo_root
 from anuma.export import artemis_ranking_csv, sites_csv
 from anuma.grid import Grid
@@ -65,21 +65,7 @@ def export_figures(
         raise ValueError("Grid layer shape does not match the configured grid.")
     result = score(layers, weights=weights, grid=grid, cfg=cfg)
     sites = rank_sites(result)
-    artemis_path = repo_root() / cfg["paths"]["artemis_geojson"]
-    if artemis_path.is_file():
-        artemis = json.loads(artemis_path.read_text())
-    else:
-        artemis = {
-            "type": "FeatureCollection",
-            "features": [
-                {
-                    "type": "Feature",
-                    "properties": {"name": name},
-                    "geometry": None,
-                }
-                for name in cfg["artemis3"]["regions"]
-            ],
-        }
+    artemis = feature_collection(cfg)
     overlap = artemis_overlap(sites, artemis, result=result)
     ranked_sites = overlap["sites"]
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -101,8 +87,8 @@ def export_figures(
             {
                 "regions": overlap["regions"],
                 "coordinate_status": art.get("coordinate_status"),
-                "source": art.get("source_url"),
-                "note": (art.get("note") or "").strip(),
+                "source": art["point_source"]["doi"],
+                "note": distinction(cfg),
             }
         )
     )

@@ -99,13 +99,23 @@ def artemis_ranking_csv(artemis: dict) -> bytes:
             {
                 "rank": region.get("rank"),
                 "region": region.get("name"),
+                "best_score": _finite(region.get("best_score")),
                 "mean_score": _finite(region.get("mean_score")),
-                "coordinate_status": artemis.get("coordinate_status"),
+                "coordinate_status": region.get("coordinate_status")
+                or artemis.get("coordinate_status"),
                 "source": artemis.get("source"),
                 "note": artemis.get("note"),
             }
         )
     return _csv(
         records,
-        ["rank", "region", "mean_score", "coordinate_status", "source", "note"],
+        [
+            "rank",
+            "region",
+            "best_score",
+            "mean_score",
+            "coordinate_status",
+            "source",
+            "note",
+        ],
     )

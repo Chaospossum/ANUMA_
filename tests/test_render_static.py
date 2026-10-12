@@ -63,9 +63,14 @@ def test_export_figures_from_small_npy_files(tmp_path):
     regions = list(
         csv.DictReader(io.StringIO((output_dir / "artemis_ranking.csv").read_text()))
     )
-    assert len(regions) == 9
-    assert all(region["rank"] == "" for region in regions)
-    assert all(region["coordinate_status"] == "not_published_by_nasa" for region in regions)
+    assert len(regions) == 17
+    unpublished = [region for region in regions if region["coordinate_status"] == "not_published"]
+    pointed = [region for region in regions if region["coordinate_status"] == "approximate_point"]
+    assert len(unpublished) == 4
+    assert len(pointed) == 13
+    assert all(region["rank"] == "" for region in unpublished)
+    assert all(region["rank"] != "" for region in pointed)
+    assert "best_score" in regions[0]
 
 
 def test_load_weights_rejects_unknown_public_layer(tmp_path):

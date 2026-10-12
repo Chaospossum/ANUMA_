@@ -7,7 +7,6 @@ with the ingest command. They do not invent or score `--synthetic` layers.
 from __future__ import annotations
 
 import base64
-import json
 import os
 from pathlib import Path
 from typing import Annotated, Any
@@ -18,12 +17,12 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from anuma.artemis import distinction, feature_collection
 from anuma.config import load_config, repo_root
 from anuma.export import sites_csv, sites_geojson
 from anuma.grid import Grid
 from anuma.heatmap import render_png
-from anuma.ingest import write_artemis_geojson
-from anuma.score import artemis_overlap, hard_mask, normalize, rank_sites, score
+from anuma.score import apply_keepout, artemis_overlap, hard_mask, normalize, rank_sites, score
 
 INGEST_COMMAND = "python3 -m anuma.ingest"
 REQUIRED_FOR_SCORE = ("slope", "illumination", "hydrogen", "earth_visibility")
@@ -36,10 +35,25 @@ class HardBody(BaseModel):
     max_slope_deg: float | None = None
 
 
+class KeepOutPoint(BaseModel):
+    lon: float
+    lat: float
+
+
+class KeepOutBody(BaseModel):
+    """User landing points. Radius is required; there is no default."""
+
+    points: list[KeepOutPoint] = Field(default_factory=list)
+    radius_km: float | None = None
+    mode: str = "hard"
+    penalty: float | None = None
+
+
 class ScoreBody(BaseModel):
     weights: dict[str, Annotated[float, Field(ge=0.0)]] | None = None
     hard: HardBody | None = None
     n: int | None = Field(default=None, ge=1, le=50)
+    keepout: KeepOutBody | None = None
 
 
 def data_root() -> Path:
@@ -145,7 +159,10 @@ def _artemis_payload(overlap: dict, cfg: dict) -> dict:
             {
                 "name": row.get("name"),
                 "mean_score": _finite_or_none(row.get("mean_score")),
+                "best_score": _finite_or_none(row.get("best_score")),
                 "rank": row.get("rank"),
+                "coordinate_status": row.get("coordinate_status"),
+                "lists": row.get("lists"),
             }
         )
     art = cfg["artemis3"]
@@ -153,18 +170,32 @@ def _artemis_payload(overlap: dict, cfg: dict) -> dict:
         "regions": regions,
         "approximate": art.get("approximate"),
         "coordinate_status": art.get("coordinate_status"),
-        "source": art.get("source_url"),
-        "note": (art.get("note") or "").strip(),
+        "source": art["lists"]["2024"]["source_url"],
+        "point_source": art["point_source"]["citation"],
+        "note": distinction(cfg),
     }
 
 
 def _artemis_feature_collection(cfg: dict, root: Path) -> dict:
-    path = _paths(cfg, root)["artemis_geojson"]
-    if path.is_file():
-        return json.loads(path.read_text())
-    tmp = root / cfg["paths"]["artemis_geojson"]
-    write_artemis_geojson(cfg, tmp)
-    return json.loads(tmp.read_text())
+    """Cited points come from config, not from a stale on-disk copy."""
+    del root
+    return feature_collection(cfg)
+
+
+def _with_keepout(result, body: ScoreBody | None):
+    if body is None or body.keepout is None:
+        return result
+    spec = body.keepout
+    try:
+        return apply_keepout(
+            result,
+            [(point.lon, point.lat) for point in spec.points],
+            spec.radius_km,
+            spec.mode,
+            spec.penalty,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
@@ -194,6 +225,7 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
         )
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = _with_keepout(result, body)
     sites = rank_sites(result, n=n)
     geojson = _artemis_feature_collection(cfg, root)
     overlap = artemis_overlap(sites, geojson, result=result)

@@ -49,6 +49,7 @@ Verified 28 September 2026. Product names and URLs are in `config/layers.yaml`. 
 
 ## Artemis III regions (overlay)
 
-- **List (28 October 2024):** Peak near Cabeus B; Haworth; Malapert Massif; Mons Mouton Plateau; Mons Mouton; Nobile Rim 1; Nobile Rim 2; de Gerlache Rim 2; Slater Plain
-- **URL:** https://www.nasa.gov/news-release/nasa-provides-update-on-artemis-iii-moon-landing-regions/
-- **Coordinates:** not published on nasa.gov. `data/artemis3_regions.geojson` stores names only, `geometry: null`, marked approximate.
+- **2022 list (13, includes Connecting Ridge):** https://www.nasa.gov/news-release/nasa-identifies-candidate-regions-for-landing-next-americans-on-moon/
+- **2024 list (9, does not include Connecting Ridge; includes de Gerlache Rim 2):** Peak near Cabeus B; Haworth; Malapert Massif; Mons Mouton Plateau; Mons Mouton; Nobile Rim 1; Nobile Rim 2; de Gerlache Rim 2; Slater Plain. https://www.nasa.gov/news-release/nasa-provides-update-on-artemis-iii-moon-landing-regions/
+- **Centres:** not published on nasa.gov. NASA SVS 5013 shows the 13 regions and does not publish numeric coordinates. https://svs.gsfc.nasa.gov/5013/
+- **Approximate points:** Goossens, S. J., et al. (2025), *Planet. Sci. J.* 6, 191, Table 1. https://doi.org/10.3847/PSJ/adf05f. Mean Earth sites for the original 13 names, not NASA polygons. Peak near Cabeus B, Mons Mouton Plateau, Mons Mouton, and Slater Plain have no cited point; geometry stays null.
