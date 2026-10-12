@@ -22,6 +22,7 @@ def main() -> None:
     output = args.output.resolve()
     file_names = {
         "grid": "grid.json",
+        "dem": "dem.npy",
         "slope": "slope.npy",
         "illumination": "illumination.npy",
         "hydrogen": "hydrogen.npy",

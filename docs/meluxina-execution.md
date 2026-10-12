@@ -98,7 +98,8 @@ account from unrelated example commands.
 
 - `hpc/bootstrap.sh`: creates the minimal pinned Python environment.
 - `hpc/discover-software.sh`: records stable-release module discovery.
-- `hpc/requirements-hpc.lock`: exact direct and transitive versions.
+- `hpc/requirements-hpc.lock`: exact core versions and Python 3.12 Linux-wheel
+  hashes; bootstrap installs it with `--require-hashes`.
 - `hpc/build-input-manifest.py`: checksums an existing 240 m grid.
 - `hpc/preflight.py`: read-only Slurm, allocation, quota, path, and data checks.
 - `hpc/submit-smoke.sh`: accepts only a preflight receipt less than 24 hours old.
@@ -136,7 +137,7 @@ bash hpc/discover-software.sh \
 ```
 
 The discovery script uses `module spider` and does not load staging or install
-anything. Select a stable-release Python 3.11+ interpreter from the recorded
+anything. Select a stable-release Python 3.12 interpreter from the recorded
 results, then create the project-local fallback environment on project storage:
 
 ```bash
@@ -149,20 +150,24 @@ cat "$ANUMA_VENV/anuma-environment.json"
 The lock fixes package versions. The generated environment record captures the
 actual interpreter, platform, stable module list/versions, lock checksum, and
 installed distributions. Bootstrap refuses to run without a SLURM compute
-allocation. It does not install system packages. Wheels are selected for the
-current platform, so this is version-reproducible rather than bit-identical
-across different operating systems or CPU architectures.
+allocation. It does not install system packages. The package's base dependency
+set is the minimal scoring core; ingest and web dependencies are explicit
+optional groups. The committed HPC lock pins the complete core dependency
+closure plus the build backend by version and wheel SHA-256, uses
+`--require-hashes`, and performs the editable install offline without build
+isolation before running `pip check`.
 
 If and only if discovery proves a required package is absent from release,
 document that package in `ANUMA_STAGING_JUSTIFICATION` before using staging.
 The environment record preserves that justification. The guarded smoke job
 itself rejects staging modules.
 
-## Stage and pin the 240 m inputs
+## Ingest, transfer, and pin the 240 m inputs
 
-The required files are `grid.json`, `slope.npy`, `illumination.npy`,
-`hydrogen.npy`, and `earth_visibility.npy`. The manifest must live in the grid
-directory or one of its parents; paths outside the manifest tree are rejected.
+The required derived files are `grid.json`, `dem.npy`, `slope.npy`,
+`illumination.npy`, `hydrogen.npy`, and `earth_visibility.npy`. The manifest
+must live in the grid directory or one of its parents; paths outside the
+manifest tree are rejected.
 
 Source rasters and derived arrays are deliberately ignored by Git. A fresh
 clone therefore is not score-ready. On a compute allocation, check presence:
@@ -170,15 +175,34 @@ clone therefore is not score-ready. On a compute allocation, check presence:
 ```bash
 cd /project/home/p201619/ANUMA_
 python -m anuma.hpc_data_check --root "$PWD"
-python -m anuma.hpc_data_check --root "$PWD" --require-ready
+python -m anuma.hpc_data_check --root "$PWD" --require-ready \
+  --manifest-output data/data-presence-manifest.json
 ```
 
 The first command reports every required raw and derived file. The second
-fails until the source rasters have been ingested, expected source sizes match,
-all derived grids exist, and no raw/grid data is tracked by Git. Ingest is
-data-intensive and must run as a separately reviewed compute job—not directly
-on a login node. The scoring preflight repeats this gate and then verifies
-checksums and shapes from the input manifest.
+fails until the source rasters have been ingested, configured source sizes and
+known publisher-file hashes match, all derived grids exist, and no raw/grid
+data is tracked by Git. It writes SHA-256 for every raw and derived file; the
+DEM currently has no configured upstream digest, so its recorded digest is a
+transfer-integrity pin, not publisher authentication.
+
+There are two approved production paths:
+
+1. **Approved workstation:** after the illumination-registration correction is
+   merged, ingest on a machine allowed to download and process the 2.5 GiB DEM.
+   Generate both manifests, transfer `data/raw/`, `data/grid/`, and the
+   manifests to `/project/home/p201619/ANUMA_/data/`, then rerun
+   `hpc_data_check --require-ready` inside a `cpudev` compute allocation. The
+   before/after manifest SHA-256 values must match.
+2. **MeluXina compute job:** use a separately reviewed, bounded one-node CPU
+   job (normally `default` QOS) to download and ingest directly into project
+   storage, then generate both manifests. Do not perform downloads, raster
+   processing, hashing, or environment installation on a login node.
+
+Do not create the reference manifest from the current misregistered
+illumination ingest identified by the audit. The data chain remains blocked
+until that correction is merged and its ingest test passes. The guarded smoke
+job remains download-free and accepts only the verified staged outputs.
 
 ```bash
 .venv-hpc/bin/python hpc/build-input-manifest.py \

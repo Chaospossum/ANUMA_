@@ -40,11 +40,15 @@ Raw source rasters and derived grids are intentionally excluded from Git. A
 clone alone cannot be scored. Check an HPC staging area with:
 
 ```bash
-python3 -m anuma.hpc_data_check --root "$PWD" --require-ready
+python3 -m anuma.hpc_data_check --root "$PWD" --require-ready \
+  --manifest-output data/data-presence-manifest.json
 ```
 
-On MeluXina, ingest and verification are data-intensive compute-node work; do
-not run them on `login.lxp.lu`.
+Ingest either on an approved workstation followed by checksummed transfer, or
+in a separately reviewed one-node MeluXina compute job. Ingest, downloads,
+hashing, and environment installation are not login-node work. Do not stage a
+reference grid until the illumination-registration correction documented by
+the HPC audit is merged and verified.
 
 ## Serve the UI
 

@@ -21,21 +21,22 @@ fi
 
 "${bootstrap_python}" - <<'PY'
 import sys
-if sys.version_info < (3, 11):
-    raise SystemExit("ANUMA requires Python 3.11 or newer")
+if sys.version_info[:2] != (3, 12):
+    raise SystemExit("The hash-pinned ANUMA HPC environment requires Python 3.12.x")
 print(f"Bootstrapping with Python {sys.version.split()[0]}")
 PY
 "${bootstrap_python}" -m ensurepip --version >/dev/null 2>&1 || {
   echo "The selected Python cannot create a venv (ensurepip is unavailable)." >&2
-  echo "Choose a cluster-supported Python 3.11+ with venv support; do not install system packages on a login node." >&2
+  echo "Choose the discovered stable-release Python 3.12 with venv support; do not install system packages on a login node." >&2
   exit 2
 }
 
 "${bootstrap_python}" -m venv "${venv}"
 "${venv}/bin/python" -m pip install --disable-pip-version-check \
-  --only-binary=:all: --requirement "${repo_root}/hpc/requirements-hpc.lock"
+  --only-binary=:all: --require-hashes \
+  --requirement "${repo_root}/hpc/requirements-hpc.lock"
 "${venv}/bin/python" -m pip install --disable-pip-version-check \
-  --no-deps --editable "${repo_root}"
+  --no-index --no-build-isolation --no-deps --editable "${repo_root}"
 "${venv}/bin/python" -m pip check
 
 "${venv}/bin/python" - "${repo_root}" "${venv}" "${module_record}" <<'PY'

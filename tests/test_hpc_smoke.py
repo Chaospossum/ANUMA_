@@ -29,7 +29,7 @@ def _fixture_manifest(tmp_path):
     grid.write_text(
         json.dumps({"resolution_m": 240.0, "height": 2, "width": 3}) + "\n"
     )
-    names = ("slope", "illumination", "hydrogen", "earth_visibility")
+    names = ("dem", "slope", "illumination", "hydrogen", "earth_visibility")
     for index, name in enumerate(names):
         np.save(tmp_path / f"{name}.npy", np.full((2, 3), index, dtype=np.float32))
     files = {"grid": {"path": "grid.json", "sha256": _sha(grid)}}

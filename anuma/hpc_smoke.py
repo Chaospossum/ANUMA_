@@ -28,6 +28,7 @@ SCHEMA_VERSION = 1
 EXPECTED_RESOLUTION_M = 240.0
 REQUIRED_FILES = (
     "grid",
+    "dem",
     "slope",
     "illumination",
     "hydrogen",
