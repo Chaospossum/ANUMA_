@@ -370,8 +370,12 @@ def _advance_sunlight_block(
         azimuth = np.mod(
             np.rad2deg(np.arctan2(east_component, north_component)), 360.0
         )
+        # The horizon cube is indexed clockwise from grid +y. On the south
+        # polar stereographic grid (lon_0 = 0) local north at longitude L
+        # points along grid azimuth L, so grid azimuth = local azimuth + L.
+        grid_azimuth = azimuth + longitude
         index = np.rint(
-            np.mod(azimuth - azimuth_origin_deg, 360.0)
+            np.mod(grid_azimuth - azimuth_origin_deg, 360.0)
             * azimuth_count
             / 360.0
         ).astype(np.int64) % azimuth_count
@@ -532,6 +536,12 @@ def _load_sunlight_checkpoint(
         total = np.array(state["total"], dtype=np.float64, copy=True)
         current_dark = np.array(state["current_dark"], dtype=np.int64, copy=True)
         longest_dark = np.array(state["longest_dark"], dtype=np.int64, copy=True)
+        # The state file carries its own epoch index, so a kill between the
+        # state and progress writes cannot replay a chunk on resume.
+        if "next_epoch" in state.files:
+            if int(state["epoch_count"]) != epoch_count:
+                raise ValueError("sunlight checkpoint epoch count does not match")
+            next_epoch = int(state["next_epoch"])
     if total.shape != shape or current_dark.shape != shape or longest_dark.shape != shape:
         raise ValueError("sunlight checkpoint shape does not match the grid")
     return total, current_dark, longest_dark, next_epoch
@@ -554,6 +564,8 @@ def _save_sunlight_checkpoint(
             total=np.ascontiguousarray(total),
             current_dark=np.ascontiguousarray(current_dark),
             longest_dark=np.ascontiguousarray(longest_dark),
+            next_epoch=np.int64(next_epoch),
+            epoch_count=np.int64(epoch_count),
         )
     os.replace(temporary, state_path)
     _atomic_json(

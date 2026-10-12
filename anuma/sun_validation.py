@@ -81,6 +81,7 @@ def run_validation(
         checkpoint_dir=checkpoint_dir / "horizons",
         log_path=log_path,
     )
+    _require_lon0_zero(grid)
     lon, lat = grid.lonlat_arrays()
     vectors = sun_vectors_from_spice(
         epochs,
@@ -172,6 +173,17 @@ def run_validation(
     return report
 
 
+def _require_lon0_zero(grid: Grid) -> None:
+    """The Sun lookup rotates local azimuth by longitude, valid for lon_0 = 0."""
+    from pyproj import CRS
+
+    params = CRS.from_proj4(grid.proj4).to_dict()
+    if params.get("proj") != "stere" or float(params.get("lat_0", 0.0)) != -90.0:
+        raise ValueError("sun validation needs a south polar stereographic grid")
+    if float(params.get("lon_0", 0.0)) != 0.0:
+        raise ValueError("sun validation assumes lon_0 = 0 for the azimuth rotation")
+
+
 def _sample_epochs(epoch_meta: dict, count: int) -> tuple[list[str], int]:
     span = window_span_seconds(epoch_meta)
     full_count = hourly_count(span)
@@ -240,6 +252,7 @@ def run_pilot(
         aberration_correction=str(sun_cfg["aberration_correction"]),
     )
     spice_seconds = time.perf_counter() - spice_started
+    _require_lon0_zero(grid)
     lon, lat = grid.lonlat_arrays()
     eval_started = time.perf_counter()
     evaluate_sunlight(

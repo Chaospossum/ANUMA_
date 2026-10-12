@@ -325,3 +325,57 @@ def test_missing_role_or_checksum_mismatch_refuses_before_spiceypy(
             mismatched,
             required_roles=roles,
         )
+
+
+def _local_sun_vector(lon_deg, lat_deg, local_azimuth_deg, elevation_deg):
+    lon, lat = np.deg2rad(lon_deg), np.deg2rad(lat_deg)
+    az, el = np.deg2rad(local_azimuth_deg), np.deg2rad(elevation_deg)
+    east = np.array([-np.sin(lon), np.cos(lon), 0.0])
+    north = np.array(
+        [-np.sin(lat) * np.cos(lon), -np.sin(lat) * np.sin(lon), np.cos(lat)]
+    )
+    up = np.array(
+        [np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)]
+    )
+    return np.cos(el) * (np.sin(az) * east + np.cos(az) * north) + np.sin(el) * up
+
+
+def test_sun_lookup_rotates_local_azimuth_by_longitude():
+    # Wall only toward grid +x (cube azimuth 90). At longitude 90 local north
+    # points along grid +x, so a Sun due local north is blocked and a Sun due
+    # local south (grid azimuth 270) is not.
+    horizons = np.full((360, 1, 1), -90.0, dtype=np.float32)
+    horizons[85:96] = 30.0
+    lon = np.array([[90.0]])
+    lat = np.array([[-85.0]])
+    north_sun = _local_sun_vector(90.0, -85.0, 0.0, 5.0)[None, :]
+    south_sun = _local_sun_vector(90.0, -85.0, 180.0, 5.0)[None, :]
+    blocked = evaluate_sunlight(horizons, lon, lat, north_sun, cadence_hours=1.0)
+    clear = evaluate_sunlight(horizons, lon, lat, south_sun, cadence_hours=1.0)
+    assert blocked["percent_time_lit"][0, 0] == 0.0
+    assert clear["percent_time_lit"][0, 0] == 100.0
+    # At longitude 0 local north is grid azimuth 0, which has no wall.
+    zero = evaluate_sunlight(
+        horizons,
+        np.array([[0.0]]),
+        lat,
+        _local_sun_vector(0.0, -85.0, 0.0, 5.0)[None, :],
+        cadence_hours=1.0,
+    )
+    assert zero["percent_time_lit"][0, 0] == 100.0
+
+
+def test_sunlight_resume_trusts_the_state_epoch_over_a_stale_progress_file(tmp_path):
+    from anuma.sun import _load_sunlight_checkpoint, _save_sunlight_checkpoint
+
+    shape = (2, 3)
+    total = np.arange(6, dtype=np.float64).reshape(shape)
+    zeros = np.zeros(shape, dtype=np.int64)
+    _save_sunlight_checkpoint(tmp_path, total, zeros, zeros, 32, 64)
+    # Simulate a kill after the state write but before the progress write.
+    (tmp_path / "sunlight-progress.json").write_text(
+        json.dumps({"next_epoch": 16, "epoch_count": 64})
+    )
+    loaded_total, _, _, next_epoch = _load_sunlight_checkpoint(tmp_path, shape, 64)
+    assert next_epoch == 32
+    assert np.array_equal(loaded_total, total)

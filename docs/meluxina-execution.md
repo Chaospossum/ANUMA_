@@ -270,6 +270,15 @@ export ANUMA_PREFLIGHT_RECEIPT="$HOME/<the-new-pilot-receipt>.json"
 bash hpc/submit-sun-validation.sh pilot
 ```
 
+Production may set `ANUMA_HORIZON_SEED_DIR` to the `checkpoint/horizons`
+directory of an earlier Stage A job whose horizon code is unchanged. The job
+copies the finished `azimuth-NNN.npy` files, writes their checksums to
+`horizon-seed.txt`, and computes only the missing azimuths. Job `5333886`
+(commit `5eadb43`) looked up the horizon with local azimuth instead of grid
+azimuth (local + longitude on this `lon_0 = 0` grid). The horizon cube itself
+does not depend on that lookup, so the plan is to stop that job once its
+horizon azimuths are complete and seed the rerun with them.
+
 Production repeats that sequence with `ANUMA_JOB_PROFILE=sun-validation`,
 `ANUMA_QOS=default`, and `bash hpc/submit-sun-validation.sh production`.
 

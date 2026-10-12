@@ -144,6 +144,29 @@ test -d "${ANUMA_SCRATCH_DIR}"
 test -w "${ANUMA_SCRATCH_DIR}"
 test ! -e "${output_dir}"
 
+# Optional reuse of finished horizon azimuths from an earlier job of this
+# stage. The horizon code must be unchanged since that job; the copied files
+# and their checksums are recorded beside the output.
+if [[ -n "${ANUMA_HORIZON_SEED_DIR:-}" ]]; then
+  [[ "${ANUMA_STUDY_MODE}" == "production" ]] || {
+    echo "horizon seed is only allowed in production" >&2
+    exit 2
+  }
+  test -d "${ANUMA_HORIZON_SEED_DIR}"
+  mkdir -p -- "${output_dir}/checkpoint/horizons"
+  shopt -s nullglob
+  seeds=("${ANUMA_HORIZON_SEED_DIR}"/azimuth-[0-9][0-9][0-9].npy)
+  shopt -u nullglob
+  (( ${#seeds[@]} > 0 )) || { echo "horizon seed directory is empty" >&2; exit 2; }
+  cp -- "${seeds[@]}" "${output_dir}/checkpoint/horizons/"
+  {
+    printf 'source=%s\n' "$(cd "${ANUMA_HORIZON_SEED_DIR}" && pwd -P)"
+    printf 'copied_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'azimuth_files=%s\n' "${#seeds[@]}"
+    (cd "${output_dir}/checkpoint/horizons" && sha256sum azimuth-*.npy)
+  } > "${output_dir}/horizon-seed.txt"
+fi
+
 cd "${repo_root}"
 srun --ntasks=1 --cpus-per-task=128 \
   "${ANUMA_PYTHON}" -m anuma.sun_validation \
