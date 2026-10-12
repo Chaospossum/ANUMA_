@@ -2,6 +2,10 @@
 
 Landing-site decision support for the lunar south pole. The mission case is still open.
 
+ANUMA is an independent student project. It is not affiliated with or endorsed
+by ispace, ESA, or the MAGPIE mission team. Names are used only to describe the
+challenge and mission context.
+
 Phases 1–5 are in this tree: ingest, scoring, FastAPI, the map UI at
 `http://localhost:8000`, and static figure export.
 
@@ -79,6 +83,9 @@ python3 -m uvicorn anuma.api:app --host 127.0.0.1 --port 8000
 Open `http://localhost:8000`. The page scores automatically with the configured
 defaults and displays the combined map and ranked sites. If the real grids are
 missing, the page deliberately remains empty and shows the ingest command.
+After scoring, **Download CSV** and **Download GeoJSON** export the current
+ranked sites. The equivalent API calls are `POST /score.csv` and
+`POST /score.geojson`, using the same JSON body as `POST /score`.
 
 ## Render static figures
 
@@ -88,9 +95,11 @@ After ingest, render the configured demonstration weights:
 python3 -m anuma.render_static --weights config/demo_weights.yaml
 ```
 
-The command reads `data/grid/*.npy` and writes `out/static/score.png` plus
-`illumination.png`, `hydrogen.png`, and `earth_visibility.png`, each showing
-the normalized criterion used by scoring. It prints every written path. Use
+The command reads `data/grid/*.npy` and writes `out/static/score_heatmap.png`
+with numbered ranked sites, `slope_mask.png`, `sites.csv`,
+`artemis_ranking.csv`, the unannotated `score.png`, and normalized criterion
+figures. Artemis rows remain unranked when NASA coordinates are unavailable;
+the exporter does not invent geometry. It prints every written path. Use
 `--grid-dir PATH` and `--output-dir PATH` to override those directories.
 
 ## Ten-line UI demo
@@ -130,3 +139,11 @@ Moon south polar stereographic, `+proj=stere +lat_0=-90 +lon_0=0 +R=1737400 +uni
 Artemis III region names are in `data/artemis3_regions.geojson`. NASA has not published centre coordinates; geometries are null and the file is marked approximate.
 
 Layer URLs, citations, and thresholds live in `config/layers.yaml`. See `SOURCES.md` for the jury list.
+
+## Licensing
+
+No repository-wide software licence has been selected because this checkout
+does not establish the authors' authority or preferred terms. Third-party
+runtime assets retain their own permissive licences under
+`static/vendor/LICENSES/`; see `static/vendor/NOTICE.txt` for versions and
+sources.

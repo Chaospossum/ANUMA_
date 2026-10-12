@@ -4,5 +4,10 @@ Vendored runtime assets. No CDN at page load.
 - Proj4js 2.15.0 — https://github.com/proj4js/proj4js — MIT
 - Proj4Leaflet 1.0.2 — https://github.com/kartena/Proj4Leaflet — BSD-2-Clause
 - Outfit (latin 400–700) — https://github.com/Outfitio/Outfit-Fonts — SIL OFL 1.1
+  Copyright 2021 The Outfit Project Authors.
   Geometric sans close to ispace.com (the site loads Outfit). Not an ispace logo or wordmark file.
 - IBM Plex Mono (latin 400/500) — https://github.com/IBM/plex — SIL OFL 1.1
+  Copyright © 2017 IBM Corp. with Reserved Font Name "Plex".
+
+Full licence texts are in LICENSES/. No repository-wide licence is implied by
+the third-party licences.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import csv
 import io
 import os
 import time
@@ -165,6 +166,32 @@ def test_score_returns_heatmap_sites_and_artemis(client_ingested: TestClient):
     assert all(region["rank"] is None for region in body["artemis"]["regions"])
 
 
+def test_ranked_site_downloads(client_ingested: TestClient):
+    request = {
+        "weights": {"illumination": 0.5, "hydrogen": 0.3, "earth_visibility": 0.2},
+        "hard": {"max_slope_deg": 8},
+        "n": 10,
+    }
+    csv_response = client_ingested.post("/score.csv", json=request)
+    assert csv_response.status_code == 200
+    assert csv_response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in csv_response.headers["content-disposition"]
+    rows = list(csv.DictReader(io.StringIO(csv_response.text)))
+    assert [row["rank"] for row in rows] == ["1", "2"]
+    assert rows[0]["nearest_artemis_region"] == ""
+    assert float(rows[0]["latitude_deg"]) < -80.0
+
+    geo_response = client_ingested.post("/score.geojson", json=request)
+    assert geo_response.status_code == 200
+    assert geo_response.headers["content-type"].startswith("application/geo+json")
+    collection = geo_response.json()
+    assert collection["type"] == "FeatureCollection"
+    assert len(collection["features"]) == 2
+    assert collection["features"][0]["geometry"]["type"] == "Point"
+    assert collection["features"][0]["properties"]["rank"] == 1
+    assert "Lunar longitude/latitude" in collection["coordinate_reference"]
+
+
 def test_layer_png_greyscale(client_ingested: TestClient):
     response = client_ingested.get("/layer/illumination.png")
     assert response.status_code == 200
@@ -215,8 +242,13 @@ def test_index_folio_is_local():
     assert "/vendor/proj4leaflet.js" in text
     assert "cdn" not in text.lower()
     assert "unpkg" not in text.lower()
+    assert "Download CSV" in text
+    assert "Not affiliated with or" in text
     css = client.get("/style.css")
     assert css.status_code == 200
     assert "Outfit" in css.text
     assert "Cormorant" not in css.text
     assert "cdn" not in css.text.lower()
+    assert client.get("/docs").status_code == 404
+    assert client.get("/redoc").status_code == 404
+    assert client.get("/openapi.json").status_code == 404

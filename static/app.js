@@ -22,6 +22,8 @@
     earthVal: document.getElementById("w-earth-val"),
     slope: document.getElementById("max-slope"),
     score: document.getElementById("btn-score"),
+    csv: document.getElementById("btn-csv"),
+    geojson: document.getElementById("btn-geojson"),
     layer: document.getElementById("layer-select"),
     artemis: document.getElementById("artemis-toggle"),
     sites: document.getElementById("sites"),
@@ -280,6 +282,34 @@
     };
   }
 
+  function currentRequest() {
+    return {
+      weights: currentWeights(),
+      hard: { max_slope_deg: Number(els.slope.value) },
+      n: (meta.defaults && meta.defaults.n) || 10,
+    };
+  }
+
+  async function downloadRanking(path, filename) {
+    var response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(currentRequest()),
+    });
+    if (!response.ok) {
+      throw new Error("Export failed (HTTP " + response.status + ")");
+    }
+    var blob = await response.blob();
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   function applyDefaults(info) {
     var weights = (info.defaults && info.defaults.weights) || {};
     if (weights.illumination != null) {
@@ -359,16 +389,14 @@
 
   async function runScore() {
     els.score.disabled = true;
+    els.csv.disabled = true;
+    els.geojson.disabled = true;
     els.score.textContent = "Scoring";
     try {
       var response = await fetch("/score", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          weights: currentWeights(),
-          hard: { max_slope_deg: Number(els.slope.value) },
-          n: (meta.defaults && meta.defaults.n) || 10,
-        }),
+        body: JSON.stringify(currentRequest()),
       });
       var payload = await response.json();
       if (response.status === 412) {
@@ -392,6 +420,8 @@
       selectedRank = null;
       renderSites(payload.sites);
       renderArtemis(payload.artemis);
+      els.csv.disabled = false;
+      els.geojson.disabled = false;
     } catch (err) {
       showVeil("Score failed", String(err), "", "");
     } finally {
@@ -481,6 +511,16 @@
       slider.addEventListener("input", syncSliderLabels);
     });
     els.score.addEventListener("click", runScore);
+    els.csv.addEventListener("click", function () {
+      downloadRanking("/score.csv", "anuma-ranked-sites.csv").catch(function (err) {
+        showVeil("Export failed", String(err), "", "");
+      });
+    });
+    els.geojson.addEventListener("click", function () {
+      downloadRanking("/score.geojson", "anuma-ranked-sites.geojson").catch(function (err) {
+        showVeil("Export failed", String(err), "", "");
+      });
+    });
     els.layer.addEventListener("change", function () {
       showSingleLayer(els.layer.value);
     });

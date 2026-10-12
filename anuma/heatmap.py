@@ -72,3 +72,52 @@ def render_png(
     buf = io.BytesIO()
     fig.savefig(buf, format="png", transparent=True, pad_inches=0)
     return buf.getvalue()
+
+
+def render_ranked_png(
+    array: np.ndarray,
+    sites: list[dict],
+    cmap: str = "viridis",
+    max_dim: int = 1600,
+) -> bytes:
+    """Render a score heatmap with numbered ranked-site markers."""
+    original = np.asarray(array, dtype=np.float64)
+    data = _downsample(original, max_dim)
+    finite = np.isfinite(data)
+    h, w = data.shape
+    fig = Figure(figsize=(10, 10), dpi=160)
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot(1, 1, 1)
+    cmap_obj = matplotlib.colormaps[cmap].with_extremes(bad="#f7f7f7")
+    if finite.any():
+        image = ax.imshow(
+            np.ma.masked_invalid(data),
+            cmap=cmap_obj,
+            origin="upper",
+            interpolation="nearest",
+            vmin=float(np.min(data[finite])),
+            vmax=float(np.max(data[finite])),
+        )
+        fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04, label="weighted score")
+    row_scale = h / original.shape[0]
+    col_scale = w / original.shape[1]
+    for rank, site in enumerate(sites, start=1):
+        x = (float(site["col"]) + 0.5) * col_scale - 0.5
+        y = (float(site["row"]) + 0.5) * row_scale - 0.5
+        ax.annotate(
+            str(rank),
+            (x, y),
+            ha="center",
+            va="center",
+            fontsize=7,
+            fontweight="bold",
+            color="#161921",
+            bbox={"boxstyle": "circle,pad=0.25", "fc": "white", "ec": "#161921", "lw": 0.8},
+        )
+    ax.set_title("ANUMA ranked landing-site screening")
+    ax.set_xlabel("grid column")
+    ax.set_ylabel("grid row")
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png")
+    return buf.getvalue()

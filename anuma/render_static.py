@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
 
 from anuma.config import load_config, repo_root
+from anuma.export import artemis_ranking_csv, sites_csv
 from anuma.grid import Grid
-from anuma.heatmap import render_png
+from anuma.heatmap import render_png, render_ranked_png
 from anuma.quicklook import write_quicklook
-from anuma.score import score
+from anuma.score import artemis_overlap, rank_sites, score
 
 
 def load_weights(path: Path, cfg: dict) -> dict[str, float]:
@@ -42,7 +44,7 @@ def export_figures(
     output_dir: Path,
     cfg: dict | None = None,
 ) -> list[Path]:
-    """Score saved arrays and write the combined and normalized PNG figures."""
+    """Score saved arrays and write figures plus portable ranking tables."""
     cfg = cfg if cfg is not None else load_config()
     weights = load_weights(weights_path, cfg)
     names = ["slope", *weights]
@@ -51,16 +53,59 @@ def export_figures(
         joined = ", ".join(f"{name}.npy" for name in missing)
         raise FileNotFoundError(f"Missing grid layer(s) in {grid_dir}: {joined}")
 
-    layers = {name: np.load(grid_dir / f"{name}.npy") for name in names}
+    layers = {
+        name: np.load(grid_dir / f"{name}.npy", allow_pickle=False) for name in names
+    }
     shapes = {array.shape for array in layers.values()}
     if len(shapes) != 1 or any(array.ndim != 2 for array in layers.values()):
         raise ValueError("Grid layers must be same-shaped 2-D arrays.")
 
-    result = score(layers, weights=weights, grid=Grid(cfg), cfg=cfg)
+    grid = Grid(cfg)
+    if next(iter(shapes)) != (grid.height, grid.width):
+        raise ValueError("Grid layer shape does not match the configured grid.")
+    result = score(layers, weights=weights, grid=grid, cfg=cfg)
+    sites = rank_sites(result)
+    artemis_path = repo_root() / cfg["paths"]["artemis_geojson"]
+    if artemis_path.is_file():
+        artemis = json.loads(artemis_path.read_text())
+    else:
+        artemis = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {"name": name},
+                    "geometry": None,
+                }
+                for name in cfg["artemis3"]["regions"]
+            ],
+        }
+    overlap = artemis_overlap(sites, artemis, result=result)
+    ranked_sites = overlap["sites"]
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    written = [output_dir / "score.png"]
+    written = [
+        output_dir / "score.png",
+        output_dir / "score_heatmap.png",
+        output_dir / "slope_mask.png",
+        output_dir / "sites.csv",
+        output_dir / "artemis_ranking.csv",
+    ]
     written[0].write_bytes(render_png(result.combined, cmap="viridis"))
+    written[1].write_bytes(render_ranked_png(result.combined, ranked_sites))
+    written[2].write_bytes(render_png(result.hard_mask.astype(np.float32), cmap="gray"))
+    written[3].write_bytes(sites_csv(ranked_sites))
+    art = cfg["artemis3"]
+    written[4].write_bytes(
+        artemis_ranking_csv(
+            {
+                "regions": overlap["regions"],
+                "coordinate_status": art.get("coordinate_status"),
+                "source": art.get("source_url"),
+                "note": (art.get("note") or "").strip(),
+            }
+        )
+    )
     for name, normalized in result.normalized.items():
         path = output_dir / f"{name}.png"
         write_quicklook(normalized, path, cmap="viridis")
