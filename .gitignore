@@ -10,3 +10,8 @@ data/quicklook/
 out/
 agent-tools/
 .DS_Store
+
+# MeluXina local artefacts
+.venv-hpc-ingest/
+data/*.json
+data/artemis3_regions.geojson
