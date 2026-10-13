@@ -147,14 +147,14 @@ test ! -e "${output_dir}"
 
 cd "${repo_root}"
 if [[ "${ANUMA_STUDY_MODE}" == "pilot" ]]; then
-  srun --ntasks=1 --cpus-per-task=128 \
+  srun --export=ALL --ntasks=1 --cpus-per-task=128 \
     "${ANUMA_PYTHON}" -m anuma.stage_b \
     --mode pilot \
     --dem "${ANUMA_DEM}" \
     --output-dir "${output_dir}" \
     --workers 128
 else
-  srun --ntasks=1 --cpus-per-task=128 \
+  srun --export=ALL --ntasks=1 --cpus-per-task=128 \
     "${ANUMA_PYTHON}" -m anuma.stage_b \
     --mode production \
     --dem "${ANUMA_DEM}" \
