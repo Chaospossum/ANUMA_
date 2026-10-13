@@ -95,6 +95,10 @@ command -v module >/dev/null 2>&1 || {
   echo "Environment Modules is unavailable on the compute node" >&2
   exit 2
 }
+# .venv-hpc-ingest was built on this Python module; without it the
+# interpreter loads the system libpython and numpy crashes (job 5334407).
+module load env/release/2024.1
+module load Python/3.12.3-GCCcore-13.3.0
 module -t list > "${job_tmp}/module-list.txt" 2>&1
 if grep -q 'env/staging/2025\.1' "${job_tmp}/module-list.txt"; then
   echo "Stage B requires stable release modules, not staging" >&2
@@ -113,7 +117,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, sys.argv[2])
-from anuma.stage_b import require_stage_a_acceptance
+from anuma.stage_b_gate import require_stage_a_acceptance
 
 path = Path(sys.argv[1])
 receipt = json.loads(path.read_text())

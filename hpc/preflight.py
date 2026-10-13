@@ -302,7 +302,7 @@ def run_preflight(receipt_path: Path) -> dict:
         # The pilot may measure tiles before Stage A finishes, but it cannot
         # authorize production.
         if job_profile == "stage-b":
-            from anuma.stage_b import FROZEN_STOP_RMSE, require_stage_a_acceptance
+            from anuma.stage_b_gate import FROZEN_STOP_RMSE, require_stage_a_acceptance
 
             acceptance = Path(
                 os.environ.get(

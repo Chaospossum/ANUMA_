@@ -39,11 +39,14 @@ ANUMA_SCRATCH_DIR="${ANUMA_SCRATCH_DIR:-/project/scratch/p201619}"
 ANUMA_DEM="${ANUMA_DEM:-${repo_root}/data/raw/LDEM_80S_20MPP_ADJ.TIF}"
 ANUMA_STAGE_A_ACCEPTANCE="${ANUMA_STAGE_A_ACCEPTANCE:-${repo_root}/out/sun-validation/validation-report.json}"
 ANUMA_PYTHON="${ANUMA_PYTHON:-${repo_root}/.venv-hpc-ingest/bin/python}"
+# The job interpreter needs the env/release/2024.1 Python module, which exists
+# only on compute nodes. Login-node checks use the system-Python environment.
+ANUMA_CHECK_PYTHON="${ANUMA_CHECK_PYTHON:-${repo_root}/.venv-hpc-sun/bin/python}"
 ANUMA_STUDY_MODE="${mode}"
 export ANUMA_ACCOUNT ANUMA_PARTITION ANUMA_SCRATCH_DIR ANUMA_PYTHON ANUMA_STUDY_MODE
 export ANUMA_DEM ANUMA_STAGE_A_ACCEPTANCE
 
-"${ANUMA_PYTHON}" - \
+"${ANUMA_CHECK_PYTHON}" - \
   "${ANUMA_PREFLIGHT_RECEIPT}" "${repo_root}" "${profile}" "${qos}" \
   "${node_hours}" "${core_hours}" "${walltime}" "${memory}" <<'PY'
 import hashlib
@@ -56,7 +59,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, sys.argv[2])
-from anuma.stage_b import FROZEN_STOP_RMSE, require_stage_a_acceptance
+from anuma.stage_b_gate import FROZEN_STOP_RMSE, require_stage_a_acceptance
 
 path = Path(sys.argv[1]).resolve()
 repo = Path(sys.argv[2])

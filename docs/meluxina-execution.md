@@ -353,7 +353,7 @@ export ANUMA_JOB_PROFILE=stage-b-pilot
 export ANUMA_QOS=test
 export ANUMA_ACCOUNT=p201619
 export ANUMA_DEM=/project/home/p201619/ANUMA_/data/raw/LDEM_80S_20MPP_ADJ.TIF
-.venv-hpc-ingest/bin/python hpc/preflight.py \
+.venv-hpc-sun/bin/python hpc/preflight.py \
   --receipt "$HOME/anuma-stage-b-pilot-$(date -u +%Y%m%dT%H%M%SZ).json"
 export ANUMA_PREFLIGHT_RECEIPT="$HOME/<the-new-pilot-receipt>.json"
 bash hpc/submit-stage-b.sh pilot
@@ -373,8 +373,8 @@ passed; point `ANUMA_STAGE_A_ACCEPTANCE` at the real
 ```bash
 export ANUMA_JOB_PROFILE=stage-b
 export ANUMA_QOS=default
-export ANUMA_STAGE_A_ACCEPTANCE=/project/home/p201619/ANUMA_/out/sun-validation/<job>/validation-report.json
-.venv-hpc-ingest/bin/python hpc/preflight.py \
+export ANUMA_STAGE_A_ACCEPTANCE=/project/home/p201619/ANUMA_/out/hpc/sun-validation-production-5334265/validation-report.json
+.venv-hpc-sun/bin/python hpc/preflight.py \
   --receipt "$HOME/anuma-stage-b-$(date -u +%Y%m%dT%H%M%SZ).json"
 export ANUMA_PREFLIGHT_RECEIPT="$HOME/<the-new-production-receipt>.json"
 bash hpc/submit-stage-b.sh production

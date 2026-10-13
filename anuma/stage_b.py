@@ -26,6 +26,7 @@ import yaml
 from anuma.config import load_config, repo_root
 from anuma.grid import Grid
 from anuma.hpc_smoke import sha256_file, validate_input_manifest
+from anuma.stage_b_gate import FROZEN_STOP_RMSE, require_stage_a_acceptance  # noqa: F401
 from anuma.score import hard_mask, rank_sites, score
 from anuma.slope20 import (
     compute_slope_tiled,
@@ -35,7 +36,6 @@ from anuma.slope20 import (
     compute_tile_slope,
 )
 
-FROZEN_STOP_RMSE = 0.05
 SOFT_LAYERS = ("illumination", "hydrogen", "earth_visibility")
 
 
@@ -52,27 +52,6 @@ def load_demo_weights(path: Path | None = None) -> dict[str, float]:
     if not isinstance(weights, dict):
         raise ValueError("demo_weights.yaml must contain a weights mapping")
     return {str(name): float(value) for name, value in weights.items()}
-
-
-def require_stage_a_acceptance(path: Path, *, stop_rmse: float = FROZEN_STOP_RMSE) -> dict:
-    """Refuse Stage B unless Stage A recorded a pass at the frozen RMSE gate."""
-    path = Path(path)
-    if not path.is_file():
-        raise ValueError(f"Stage A acceptance record is missing: {path}")
-    report = json.loads(path.read_text())
-    if float(stop_rmse) != FROZEN_STOP_RMSE:
-        raise ValueError("Stage B must not change stop_rmse from 0.05")
-    metrics = report.get("metrics") or {}
-    if float(metrics.get("stop_rmse", -1)) != FROZEN_STOP_RMSE:
-        raise ValueError("Stage A record stop_rmse must remain 0.05")
-    if report.get("status") != "passed" or metrics.get("passed") is not True:
-        raise ValueError("Stage A acceptance record has not passed")
-    rmse = float(metrics.get("rmse", float("inf")))
-    if not np.isfinite(rmse) or rmse > FROZEN_STOP_RMSE:
-        raise ValueError(
-            f"Stage A RMSE {rmse} exceeds the frozen stop_rmse {FROZEN_STOP_RMSE}"
-        )
-    return report
 
 
 def dem_affine(dem_path: Path) -> tuple[object, int, int]:
