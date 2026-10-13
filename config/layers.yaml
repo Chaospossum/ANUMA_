@@ -18,6 +18,8 @@ paths:
 hard:
   max_slope_deg: 8.0
   goal_slope_deg: 5.0
+  # Slope must pass at every pixel centre within this distance; 0 checks the pixel alone.
+  slope_radius_m: 0.0
 
 scoring:
   default_normalization_policy: decided_per_layer

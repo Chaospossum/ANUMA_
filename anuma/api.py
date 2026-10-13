@@ -33,6 +33,7 @@ _STORE: dict[str, Any] = {}
 
 class HardBody(BaseModel):
     max_slope_deg: float | None = None
+    slope_radius_m: float | None = Field(default=None, ge=0.0)
 
 
 class KeepOutPoint(BaseModel):
@@ -209,7 +210,12 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
         if body.hard is not None and body.hard.max_slope_deg is not None
         else float(cfg["hard"]["max_slope_deg"])
     )
-    n = body.n if body.n is not None else int(cfg["scoring"]["n_sites"])
+    slope_radius = (
+        body.hard.slope_radius_m
+        if body.hard is not None and body.hard.slope_radius_m is not None
+        else float(cfg["hard"]["slope_radius_m"])
+    )
+    n =body.n if body.n is not None else int(cfg["scoring"]["n_sites"])
     layers = store["layers"]
     needed = ["slope", *weights.keys()]
     absent = [name for name in needed if name not in layers]
@@ -219,7 +225,7 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
         result = score(
             layers,
             weights=weights,
-            hard={"max_slope_deg": max_slope},
+            hard={"max_slope_deg": max_slope, "slope_radius_m": slope_radius},
             grid=store["grid"],
             cfg=cfg,
         )
@@ -281,6 +287,7 @@ def create_app() -> FastAPI:
             "defaults": {
                 "weights": dict(cfg["scoring"]["weights"]),
                 "max_slope_deg": float(cfg["hard"]["max_slope_deg"]),
+                "slope_radius_m": float(cfg["hard"]["slope_radius_m"]),
                 "n": int(cfg["scoring"]["n_sites"]),
             },
             "layers": layers,

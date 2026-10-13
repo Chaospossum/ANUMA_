@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+from scipy.ndimage import distance_transform_edt
 
 from anuma.config import load_config
 from anuma.grid import Grid
@@ -38,13 +39,36 @@ def hard_mask(
     slope: np.ndarray,
     max_slope_deg: float | None = None,
     cfg: dict | None = None,
+    slope_radius_m: float | None = None,
+    resolution_m: float | None = None,
 ) -> np.ndarray:
-    """True where slope is finite and at or below the HLS threshold."""
+    """True where slope is finite and at or below the HLS threshold.
+
+    With ``slope_radius_m`` > 0 a pixel passes only if every pixel whose
+    centre lies within that distance of its own centre also passes. Pixel
+    centres beyond the array edge count as failing, because their slope is
+    unknown. ``resolution_m`` is the pixel size of ``slope`` and is required
+    whenever the radius is positive.
+    """
     cfg = _cfg(cfg)
     if max_slope_deg is None:
         max_slope_deg = float(cfg["hard"]["max_slope_deg"])
+    if slope_radius_m is None:
+        slope_radius_m = float(cfg["hard"].get("slope_radius_m", 0.0))
+    radius = float(slope_radius_m)
+    if not np.isfinite(radius) or radius < 0.0:
+        raise ValueError("slope_radius_m must be finite and non-negative")
     finite = np.isfinite(slope)
-    return finite & (slope <= float(max_slope_deg))
+    passing = finite & (slope <= float(max_slope_deg))
+    if radius == 0.0:
+        return passing
+    if resolution_m is None:
+        raise ValueError("resolution_m is required when slope_radius_m is positive")
+    # Distance from each pixel centre to the nearest failing centre, with a
+    # failing one-pixel frame standing in for the area off the grid.
+    padded = np.pad(passing, 1, constant_values=False)
+    distance_m = distance_transform_edt(padded, sampling=float(resolution_m))[1:-1, 1:-1]
+    return distance_m > radius
 
 
 def normalization_rule(cfg: dict, policy: str, layer_name: str) -> dict:
@@ -130,7 +154,13 @@ def score(
             raise ValueError(f"weight for {name!r} must be finite and non-negative")
         validated_weights[name] = value
     weights = validated_weights
-    mask = hard_mask(layers["slope"], hard.get("max_slope_deg"), cfg=cfg)
+    mask = hard_mask(
+        layers["slope"],
+        hard.get("max_slope_deg"),
+        cfg=cfg,
+        slope_radius_m=hard.get("slope_radius_m"),
+        resolution_m=grid.resolution_m,
+    )
     normalized: dict[str, np.ndarray] = {}
     combined = np.zeros(layers["slope"].shape, dtype=np.float64)
     for name, weight in weights.items():

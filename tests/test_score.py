@@ -52,6 +52,63 @@ def test_hard_mask_slope_and_nodata(cfg):
     assert mask.tolist() == [[False, True], [True, False], [False, True]]
     default = hard_mask(slope, cfg=cfg)
     assert np.array_equal(default, mask)
+    zero = hard_mask(slope, limit, cfg=cfg, slope_radius_m=0.0)
+    assert np.array_equal(zero, mask)
+
+
+def test_hard_mask_radius_fails_near_steep_or_missing_cells(cfg):
+    slope = np.ones((9, 9), dtype=np.float32)
+    slope[4, 4] = 20.0
+    slope[2, 6] = np.nan
+
+    rook = hard_mask(slope, 8.0, cfg=cfg, slope_radius_m=240.0, resolution_m=240.0)
+    assert not rook[4, 4]
+    assert not rook[3, 4] and not rook[5, 4] and not rook[4, 3] and not rook[4, 5]
+    assert rook[3, 3] and rook[2, 4]
+    assert not rook[2, 6] and not rook[1, 6] and not rook[2, 7]
+    # Cell centres one step off the array are unknown, so the edge ring fails.
+    assert not rook[0, 3] and not rook[8, 3] and not rook[3, 0] and not rook[3, 8]
+    assert rook[1, 2]
+
+    wider = hard_mask(slope, 8.0, cfg=cfg, slope_radius_m=340.0, resolution_m=240.0)
+    assert not wider[3, 3]
+    assert wider[2, 4]
+    assert not hard_mask(slope, 8.0, cfg=cfg, slope_radius_m=480.0, resolution_m=240.0)[2, 4]
+
+    finer = hard_mask(slope, 8.0, cfg=cfg, slope_radius_m=30.0, resolution_m=20.0)
+    assert not finer[3, 4]
+    assert finer[2, 4]
+    assert not hard_mask(slope, 8.0, cfg=cfg, slope_radius_m=40.0, resolution_m=20.0)[2, 4]
+
+
+def test_hard_mask_radius_rejects_bad_input(cfg):
+    slope = np.ones((3, 3), dtype=np.float32)
+    with pytest.raises(ValueError, match="non-negative"):
+        hard_mask(slope, 8.0, cfg=cfg, slope_radius_m=-1.0, resolution_m=240.0)
+    with pytest.raises(ValueError, match="resolution_m"):
+        hard_mask(slope, 8.0, cfg=cfg, slope_radius_m=240.0)
+
+
+def test_score_slope_radius_uses_grid_resolution(grid, cfg):
+    row, col = _pixel(grid, 0.0, -87.0)
+    shape = (grid.height, grid.width)
+    slope = np.full(shape, np.nan, dtype=np.float32)
+    soft = np.full(shape, np.nan, dtype=np.float32)
+    slope[row - 3 : row + 4, col - 3 : col + 4] = 1.0
+    soft[row - 3 : row + 4, col - 3 : col + 4] = 50.0
+    slope[row, col + 2] = 20.0
+    layers = {
+        "slope": slope,
+        "illumination": soft.copy(),
+        "hydrogen": soft.copy(),
+        "earth_visibility": soft.copy(),
+    }
+    weights = cfg["scoring"]["weights"]
+    for radius, passes in ((0.0, True), (240.0, True), (480.0, False)):
+        hard = {"max_slope_deg": 8.0, "slope_radius_m": radius}
+        result = score(layers, weights, hard, grid=grid, cfg=cfg)
+        assert bool(result.hard_mask[row, col]) is passes
+        assert bool(np.isfinite(result.combined[row, col])) is passes
 
 
 def test_normalize_higher_and_lower(cfg):

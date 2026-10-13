@@ -113,6 +113,33 @@ def test_score_not_ingested_returns_command(client_empty: TestClient):
     assert "python3 -m anuma.ingest" in detail["message"]
 
 
+def test_score_slope_radius_masks_isolated_cells(client_ingested: TestClient):
+    request = {
+        "weights": {"illumination": 0.5, "hydrogen": 0.3, "earth_visibility": 0.2},
+        "hard": {"max_slope_deg": 8, "slope_radius_m": 0},
+        "n": 10,
+    }
+    assert len(client_ingested.post("/score", json=request).json()["sites"]) == 2
+    # Each fixture peak is one finite cell among no-data cells.
+    request["hard"]["slope_radius_m"] = 240
+    response = client_ingested.post("/score", json=request)
+    assert response.status_code == 200, response.text
+    assert response.json()["sites"] == []
+
+
+def test_score_rejects_negative_slope_radius(client_ingested: TestClient):
+    response = client_ingested.post(
+        "/score", json={"hard": {"max_slope_deg": 8, "slope_radius_m": -1}}
+    )
+    assert response.status_code == 422
+
+
+def test_layers_reports_slope_radius_default(client_empty: TestClient):
+    cfg = load_config()
+    body = client_empty.get("/layers").json()
+    assert body["defaults"]["slope_radius_m"] == float(cfg["hard"]["slope_radius_m"])
+
+
 def test_layer_png_not_ingested(client_empty: TestClient):
     response = client_empty.get("/layer/illumination.png")
     assert response.status_code == 412

@@ -21,6 +21,7 @@
     hydroVal: document.getElementById("w-hydro-val"),
     earthVal: document.getElementById("w-earth-val"),
     slope: document.getElementById("max-slope"),
+    slopeRadius: document.getElementById("slope-radius"),
     score: document.getElementById("btn-score"),
     csv: document.getElementById("btn-csv"),
     geojson: document.getElementById("btn-geojson"),
@@ -200,14 +201,36 @@
     return "unpublished";
   }
 
-  function renderSites(sites) {
+  // L.circle measures with Earth's radius under Proj4Leaflet, so the ring is
+  // traced in the grid's stereographic metres instead.
+  function radiusRing(site, radiusM) {
+    var projection = map.options.crs.projection;
+    var centre = projection.project(L.latLng(site.lat, site.lon));
+    var ring = [];
+    var i;
+    for (i = 0; i < 64; i += 1) {
+      var angle = (2 * Math.PI * i) / 64;
+      ring.push(
+        projection.unproject(
+          L.point(
+            centre.x + radiusM * Math.cos(angle),
+            centre.y + radiusM * Math.sin(angle)
+          )
+        )
+      );
+    }
+    return ring;
+  }
+
+  function renderSites(sites, slopeRadius) {
     els.sites.innerHTML = "";
+    if (siteLayer) {
+      map.removeLayer(siteLayer);
+      siteLayer = null;
+    }
     if (!sites || !sites.length) {
       emptySites("No sites passed the slope mask.");
       return;
-    }
-    if (siteLayer) {
-      map.removeLayer(siteLayer);
     }
     siteLayer = L.layerGroup().addTo(map);
     var weights = currentWeights();
@@ -238,9 +261,18 @@
       tr.addEventListener("click", function () {
         selectedRank = index;
         map.setView([site.lat, site.lon], Math.max(map.getZoom(), 4));
-        renderSites(sites);
+        renderSites(sites, slopeRadius);
       });
       els.sites.appendChild(tr);
+
+      if (selectedRank === index && slopeRadius > 0) {
+        L.polygon(radiusRing(site, slopeRadius), {
+          color: "#e60019",
+          weight: 1.5,
+          fillOpacity: 0.08,
+          interactive: false,
+        }).addTo(siteLayer);
+      }
 
       L.marker([site.lat, site.lon], {
         icon: L.divIcon({
@@ -253,7 +285,7 @@
         .on("click", function () {
           selectedRank = index;
           map.setView([site.lat, site.lon], Math.max(map.getZoom(), 4));
-          renderSites(sites);
+          renderSites(sites, slopeRadius);
         })
         .addTo(siteLayer);
     });
@@ -285,7 +317,10 @@
   function currentRequest() {
     return {
       weights: currentWeights(),
-      hard: { max_slope_deg: Number(els.slope.value) },
+      hard: {
+        max_slope_deg: Number(els.slope.value),
+        slope_radius_m: Number(els.slopeRadius.value),
+      },
       n: (meta.defaults && meta.defaults.n) || 10,
     };
   }
@@ -323,6 +358,9 @@
     }
     if (info.defaults && info.defaults.max_slope_deg != null) {
       els.slope.value = info.defaults.max_slope_deg;
+    }
+    if (info.defaults && info.defaults.slope_radius_m != null) {
+      els.slopeRadius.value = info.defaults.slope_radius_m;
     }
     syncSliderLabels();
   }
@@ -393,10 +431,11 @@
     els.geojson.disabled = true;
     els.score.textContent = "Scoring";
     try {
+      var request = currentRequest();
       var response = await fetch("/score", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(currentRequest()),
+        body: JSON.stringify(request),
       });
       var payload = await response.json();
       if (response.status === 412) {
@@ -405,9 +444,16 @@
         return;
       }
       if (!response.ok) {
+        var message = Array.isArray(payload.detail)
+          ? payload.detail
+              .map(function (item) {
+                return (item.loc || []).slice(-1)[0] + ": " + item.msg;
+              })
+              .join("; ")
+          : payload.detail;
         showVeil(
           "Score failed",
-          payload.detail || payload.message || "The API returned an error.",
+          message || payload.message || "The API returned an error.",
           "",
           ""
         );
@@ -418,7 +464,7 @@
       setOverlay("data:image/png;base64," + payload.png, payload.bounds);
       els.layer.value = "score";
       selectedRank = null;
-      renderSites(payload.sites);
+      renderSites(payload.sites, request.hard.slope_radius_m);
       renderArtemis(payload.artemis);
       els.csv.disabled = false;
       els.geojson.disabled = false;
