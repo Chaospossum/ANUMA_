@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>anuma · MAGPIE landing-site scoring</title>
     <link rel="stylesheet" href="/vendor/leaflet.css" />
-    <link rel="stylesheet" href="/style.css?v=ispace" />
+    <link rel="stylesheet" href="/style.css?v=slope-radius" />
   </head>
   <body>
     <div class="app">
@@ -41,9 +41,17 @@
               </div>
             </div>
             <div class="field">
-              <label for="max-slope">Max slope (deg)</label>
-              <input id="max-slope" type="number" min="0" max="45" step="0.5" value="8" />
-              <p class="help">HLS default 8°. Goal 5°.</p>
+              <div class="field-pair">
+                <div>
+                  <label for="max-slope">Max slope (deg)</label>
+                  <input id="max-slope" type="number" min="0" max="45" step="0.5" value="8" />
+                </div>
+                <div>
+                  <label for="slope-radius">Slope radius (m)</label>
+                  <input id="slope-radius" type="number" min="0" step="10" value="0" />
+                </div>
+              </div>
+              <p class="help">Slope requirement must be valid in the circle defined by the radius.</p>
             </div>
             <div class="field">
               <label for="layer-select">Show single layer</label>
@@ -125,6 +133,6 @@
     <script src="/vendor/leaflet.js"></script>
     <script src="/vendor/proj4.js"></script>
     <script src="/vendor/proj4leaflet.js"></script>
-    <script src="/app.js?v=ispace"></script>
+    <script src="/app.js?v=slope-radius-ring-2"></script>
   </body>
 </html>

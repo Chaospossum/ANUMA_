@@ -197,7 +197,13 @@ select {
   border: 1px solid var(--line);
 }
 
-#max-slope {
+.field-pair {
+  display: flex;
+  gap: 12px;
+}
+
+#max-slope,
+#slope-radius {
   font-family: var(--mono);
   width: 5rem;
 }
