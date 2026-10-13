@@ -24,7 +24,7 @@ patterns already fix.
 
 3. **20 m versus 240 m grid nesting.**  
    The LDEM 20 m product is 30400² over ±304000 m. The ANUMA 240 m grid is
-   2534² over ±304080 m. They are not nested by an integer factor. Edge coarse
+   2534² over ±304080 m. They are nested by exactly 12 with an 80 m (4 fine pixel) origin offset. Edge coarse
    pixels and half-pixel offsets are a geometric fact of the two products.
    Confirm that comparing them by georeferenced centres (not a forced 12×12
    block reshape) is acceptable.
