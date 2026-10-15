@@ -252,7 +252,8 @@ otherwise unvalidated.
 
 The stability rule, DEM-noise model and ellipse check were frozen in
 [stage-d-plan.md](stage-d-plan.md) on 2026-10-15, before any noise run
-(config `hpc_studies.dem_noise`).
+(config `hpc_studies.dem_noise`). Implementation notes and launch commands:
+[stage-d-run.md](stage-d-run.md).
 
 Stage D may use up to all 128 cores of one node after the pilot demonstrates
 the need. It does not scale across nodes.

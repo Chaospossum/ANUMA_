@@ -103,7 +103,8 @@ hpc_studies:
     unclipped_policy: decided_per_layer
     winner_class_radius_km: 10.0
   # Stage D site-local LOLA DEM-noise study. Frozen on 2026-10-15 in
-  # docs/stage-d-plan.md before any noise run. No code reads this yet.
+  # docs/stage-d-plan.md before any noise run. Read by anuma/stage_d.py,
+  # which refuses any value that differs from the plan.
   # Do not tune these values after seeing noise results.
   dem_noise:
     frozen_on: "2026-10-15"

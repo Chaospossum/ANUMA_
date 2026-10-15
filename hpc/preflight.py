@@ -114,10 +114,31 @@ JOB_PROFILES = {
         "node_hours": 3.0,
         "core_hours": 384.0,
     },
+    # Stage D DEM-noise check: pilot 0.5 + production 1.5 = 2.0 node-hours,
+    # within the 2.0 node-hour production cap of docs/stage-d-plan.md.
+    "stage-d-pilot": {
+        "qos": "test",
+        "walltime": "00:30:00",
+        "walltime_minutes": 30,
+        "cpus": 128,
+        "memory": "240G",
+        "node_hours": 0.5,
+        "core_hours": 64.0,
+    },
+    "stage-d": {
+        "qos": "default",
+        "walltime": "01:30:00",
+        "walltime_minutes": 90,
+        "cpus": 128,
+        "memory": "240G",
+        "node_hours": 1.5,
+        "core_hours": 192.0,
+    },
 }
 SUN_PROFILES = frozenset({"sun-validation-pilot", "sun-validation"})
 STAGE_B_PROFILES = frozenset({"stage-b-pilot", "stage-b"})
 DAILY_LIT_PROFILES = {"daily-lit-pilot": "pilot", "daily-lit": "production"}
+STAGE_D_PROFILES = {"stage-d-pilot": "pilot", "stage-d": "production"}
 QOS_MAX_WALL_MINUTES = {
     "dev": 6 * 60,
     "test": 30,
@@ -186,6 +207,31 @@ def _load_fresh_evidence(path: Path, required: tuple[str, ...]) -> dict:
         "source": evidence["source"],
         "captured_at_utc": evidence["captured_at_utc"],
         **{key: evidence[key] for key in required if key not in ("source", "captured_at_utc")},
+    }
+
+
+def stage_d_input_paths(data_root: Path) -> dict[str, Path]:
+    """Stage D input locations; each can be overridden by its variable."""
+    hpc_out = data_root / "out" / "hpc"
+    return {
+        "raw_dir": Path(os.environ.get("ANUMA_STAGE_D_RAW_DIR", str(data_root / "data" / "raw"))),
+        "dem": Path(
+            os.environ.get(
+                "ANUMA_DEM", str(data_root / "data" / "raw" / "LDEM_80S_20MPP_ADJ.TIF")
+            )
+        ),
+        "stage_b_slope": Path(
+            os.environ.get(
+                "ANUMA_STAGE_B_SLOPE",
+                str(hpc_out / "stage-b-production-5334425" / "slope-20m.npy"),
+            )
+        ),
+        "mc_summary": Path(
+            os.environ.get(
+                "ANUMA_MC_SUMMARY",
+                str(hpc_out / "monte-carlo-full-5332991" / "study-summary.json"),
+            )
+        ),
     }
 
 
@@ -389,6 +435,24 @@ def run_preflight(receipt_path: Path) -> dict:
         daily_lit_pin["spice_coverage_window"] = coverage["window"]
         daily_lit_pin["spice_covers_window"] = coverage["covers_window"]
 
+    stage_d_pin: dict = {}
+    if job_profile in STAGE_D_PROFILES:
+        if account != "p201619":
+            fail("Stage D requires account p201619")
+        from anuma import stage_d_gate
+
+        paths = stage_d_input_paths(data_root)
+        try:
+            stage_d_pin = stage_d_gate.receipt_pin(
+                **paths, mode=STAGE_D_PROFILES[job_profile]
+            )
+            # Hashes the 20 m rasters and the Stage B slope. Run preflight on
+            # a cpudev allocation, never on a login node (plan gate 6).
+            stage_d_gate.verify_input_digests(stage_d_gate.expected_inputs(**paths))
+        except ValueError as exc:
+            fail(str(exc))
+        stage_d_pin["stage_d_inputs_verified"] = True
+
     receipt = {
         "schema_version": 1,
         "verified_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -416,6 +480,7 @@ def run_preflight(receipt_path: Path) -> dict:
         **sun_pin,
         **stage_b_pin,
         **daily_lit_pin,
+        **stage_d_pin,
     }
     canonical = json.dumps(receipt, sort_keys=True).encode()
     receipt["receipt_sha256"] = hashlib.sha256(canonical).hexdigest()
