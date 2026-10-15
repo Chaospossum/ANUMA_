@@ -92,6 +92,48 @@ hpc_studies:
     clipped_policy: legacy_global_2_98
     unclipped_policy: decided_per_layer
     winner_class_radius_km: 10.0
+  # Stage D site-local LOLA DEM-noise study. Frozen on 2026-10-15 in
+  # docs/stage-d-plan.md before any noise run. No code reads this yet.
+  # Do not tune these values after seeing noise results.
+  dem_noise:
+    frozen_on: "2026-10-15"
+    plan: docs/stage-d-plan.md
+    stability_rule:
+      source_study: clip_weight_monte_carlo
+      source_job: "5332991"
+      policy: decided_per_layer
+      min_top10_frequency: 0.80
+      rank_margin: 2            # default ranks n_sites-1 .. n_sites+2, i.e. 9-12
+      frozen_unstable_ids: ["779:1564", "1252:1287", "1277:1142", "1206:1114"]
+    controls:
+      top_ranks: 3
+      frozen_ids: ["1318:1219", "1292:1255", "1350:1392"]
+    noise_model:
+      error_filename: LDEM_80S_20MPP_ADJ_ERR.TIF
+      effres_filename: LDEM_80S_20MPP_ADJ_EFFRES.TIF
+      error_is_one_sigma: true  # assumption; Barker et al. (2023) do not say
+      distribution: gaussian
+      correlation: gaussian_kernel
+      kernel_sigma_source: effres_median_in_window
+      fallback_kernel_sigma_m: 40.0
+      rescale_to_error_map: true
+    ellipse:
+      radius_m: 1000.0
+      max_slope_deg_from: hard.max_slope_deg
+      min_fraction_at_or_below: 0.50
+    flip_unstable_fraction: 0.10
+    draws: 200
+    seed: 20261016
+    window_half_size_m: 5000.0
+    resolution_m: 20.0
+    slope_method: horn_3x3
+    zero_noise_slope_atol_deg: 1.0e-4
+    execution:
+      nodes: 1
+      pilot_qos: test
+      pilot_walltime: "00:30:00"
+      production_node_hours: 2.0
+      stage_node_hour_cap: 50.0
 
 earth_visibility:
   # Approximation: 100 km ray toward sub-Earth (lon 0°, lat 0°) in the
