@@ -1325,3 +1325,45 @@ body.present .place-label {
   color: var(--muted);
   font-size: 0.85em;
 }
+
+/* ---- Scenario changes on the map and in the table */
+
+.map-badge {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  z-index: 620;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 4px 10px;
+  background: var(--ink);
+  color: var(--white);
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.map-badge[hidden] {
+  display: none;
+}
+
+.was {
+  color: #9a9a9a;
+  font-family: var(--sans);
+  font-size: 0.8em;
+  font-weight: 400;
+}
+
+.sites-table .na {
+  font-family: var(--sans);
+  font-size: 0.85em;
+  white-space: normal;
+}
+
+.sites-table .rank .was {
+  display: block;
+}
+
+body.present .sites-table .rank .was {
+  display: inline;
+}

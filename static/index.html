@@ -161,6 +161,7 @@
               <p class="legend-note" id="legend-note">no colour (grey terrain) = fails slope rule</p>
               <p class="legend-note">Grey: LOLA elevation. Place names: approximate crater centres.</p>
             </div>
+            <p class="map-badge" id="window-badge" hidden></p>
             <div class="map-zoom">
               <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
               <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
@@ -200,6 +201,7 @@
             <span><b class="v v-fail">✗</b> fails</span>
             <span><b class="v v-edge">≈</b> borderline</span>
             <span><b class="v v-none">–</b> not checked</span>
+            <span id="legend-na" hidden><b class="na">n/a</b> not in that study (studies used the default scenario)</span>
             <span class="info">
               <button type="button" class="info-button" id="info-button" aria-expanded="false" aria-controls="table-note" aria-label="About these columns">i</button>
               <div class="info-pop" id="table-note" role="note" hidden></div>

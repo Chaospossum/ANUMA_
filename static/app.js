@@ -55,6 +55,8 @@
   var lastScenario = null;
   // A pinned site card for side-by-side comparison: a snapshot, kept across re-scores.
   var pinned = null;
+  var previousRanks = null;
+  var keepoutLayer = null;
   var cardsClosed = false;
   var MAX_MONTHS = 600;
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -462,6 +464,26 @@
     return null;
   }
 
+  function previousRankHtml(site, index) {
+    if (!previousRanks) {
+      return "";
+    }
+    var before = previousRanks[siteKey(site)];
+    if (before === index + 1) {
+      return "";
+    }
+    var text = before ? "was " + before : "new";
+    return ' <span class="was" title="Rank before the last scenario change">' + text + "</span>";
+  }
+
+  function scenarioNow() {
+    return lastScenario || { isDefault: true, slopeChanged: false, parts: [] };
+  }
+
+  function naHtml() {
+    return '<span class="na" title="n/a for this scenario: the site was not in the study, which used the default scenario">n/a</span>';
+  }
+
   // Verdict mark: shape + colour, with the word for screen readers and hover.
   var VERDICT = {
     pass: { mark: "✓", cls: "v-pass", word: "passes" },
@@ -488,10 +510,18 @@
       return verdictHtml("none", "", "Monte Carlo weight study not on this machine");
     }
     var row = stabilityRow(site);
+    var scenario = scenarioNow();
+    if (!scenario.isDefault && !row) {
+      return naHtml();
+    }
     // Every site that reached the top 10 in any draw is listed, so a
     // missing site was in the top 10 in none of the draws.
     var freq = row ? row.frequency : 0;
-    return (100 * freq).toFixed(freq === 1 || freq === 0 ? 0 : 1) + " %";
+    var text = (100 * freq).toFixed(freq === 1 || freq === 0 ? 0 : 1) + " %";
+    if (!scenario.isDefault) {
+      return '<span class="na" title="Measured for the default scenario only">' + text + "</span>";
+    }
+    return text;
   }
 
   // 20 m flat-ground check for the same 240 m cell only, so a neighbouring
@@ -522,7 +552,7 @@
   function flatCell(site) {
     var value = flatFraction(site);
     if (value == null) {
-      return verdictHtml("none", "", "not in the 20 m terrain check");
+      return scenarioNow().isDefault ? verdictHtml("none", "", "not in the 20 m terrain check") : naHtml();
     }
     var pct = Math.round(100 * value) + " %";
     var pass = value >= flatThreshold();
@@ -579,6 +609,9 @@
 
   function noiseCell(site) {
     var found = noiseCheck(site);
+    if (!found && !scenarioNow().isDefault) {
+      return naHtml();
+    }
     return verdictHtml(noiseKind(found), "", noiseWords(found));
   }
 
@@ -689,6 +722,69 @@
     if (document.body.classList.contains("cards-float")) {
       map.panBy([0, els.cards.offsetHeight / 2], { animate: false });
     }
+  }
+
+  // ---- Scenario on the map
+
+  // Keep-out disks around the Artemis III points the request avoided.
+  function drawKeepout(spec) {
+    if (keepoutLayer) {
+      map.removeLayer(keepoutLayer);
+      keepoutLayer = null;
+    }
+    if (!spec || !spec.points || !spec.points.length) {
+      return;
+    }
+    keepoutLayer = L.layerGroup().addTo(map);
+    var radiusM = 1000 * Number(spec.radius_km);
+    spec.points.forEach(function (point) {
+      L.polygon(radiusRing({ lat: point.lat, lon: point.lon }, radiusM), {
+        color: "#e60019",
+        weight: 1.5,
+        dashArray: "5 4",
+        fillColor: "url(#keepout-hatch)",
+        fillOpacity: 1,
+        interactive: false,
+      }).addTo(keepoutLayer);
+    });
+    ensureHatch();
+  }
+
+  // Red diagonal hatching for keep-out disks, defined once in Leaflet's SVG.
+  function ensureHatch() {
+    var svg = map.getPane("overlayPane").querySelector("svg");
+    if (!svg || svg.querySelector("#keepout-hatch")) {
+      return;
+    }
+    var ns = "http://www.w3.org/2000/svg";
+    var defs = svg.querySelector("defs") || svg.insertBefore(document.createElementNS(ns, "defs"), svg.firstChild);
+    var pattern = document.createElementNS(ns, "pattern");
+    pattern.setAttribute("id", "keepout-hatch");
+    pattern.setAttribute("patternUnits", "userSpaceOnUse");
+    pattern.setAttribute("width", "8");
+    pattern.setAttribute("height", "8");
+    pattern.setAttribute("patternTransform", "rotate(45)");
+    var bg = document.createElementNS(ns, "rect");
+    bg.setAttribute("width", "8");
+    bg.setAttribute("height", "8");
+    bg.setAttribute("fill", "rgba(230, 0, 25, 0.10)");
+    var line = document.createElementNS(ns, "rect");
+    line.setAttribute("width", "2");
+    line.setAttribute("height", "8");
+    line.setAttribute("fill", "rgba(230, 0, 25, 0.55)");
+    pattern.appendChild(bg);
+    pattern.appendChild(line);
+    defs.appendChild(pattern);
+  }
+
+  function renderWindowBadge(months) {
+    var badge = document.getElementById("window-badge");
+    if (!months) {
+      badge.hidden = true;
+      return;
+    }
+    badge.hidden = false;
+    badge.textContent = "Sunlight: " + windowLabel(months) + " (modelled daily)";
   }
 
   // ---- Site cards
@@ -999,6 +1095,7 @@
       tr.innerHTML =
         '<td class="num rank">' +
         pad2(index + 1) +
+        previousRankHtml(site, index) +
         '</td><td class="loc">' +
         fmtLocation(site.lat, site.lon) +
         '</td><td class="num score-cell">' +
@@ -1371,10 +1468,15 @@
     return MONTHS[Number(parts[1]) - 1] + " " + parts[0];
   }
 
+  // "Mar 2027", "Jan–Mar 2027", or "Nov 2027 – Feb 2028".
   function windowLabel(months) {
-    return months.start === months.end
-      ? monthText(months.start)
-      : monthText(months.start) + " – " + monthText(months.end);
+    if (months.start === months.end) {
+      return monthText(months.start);
+    }
+    if (months.start.slice(0, 4) === months.end.slice(0, 4)) {
+      return monthText(months.start).slice(0, 3) + "–" + monthText(months.end);
+    }
+    return monthText(months.start) + " – " + monthText(months.end);
   }
 
   function currentWindow() {
@@ -1653,11 +1755,24 @@
         els.layer.value = "score";
       }
       selectedRank = null;
+      // Ranks before a scenario change, shown in grey next to the new ranks.
+      var requestKey = JSON.stringify(request);
+      if (lastRequest && requestKey !== JSON.stringify(lastRequest) && currentSites) {
+        previousRanks = {};
+        currentSites.forEach(function (site, i) {
+          previousRanks[siteKey(site)] = i + 1;
+        });
+      } else if (!lastRequest) {
+        previousRanks = null;
+      }
+      lastRequest = request;
+      lastScenario = scenarioOf(request);
+      document.getElementById("legend-na").hidden = lastScenario.isDefault;
       renderSites(payload.sites, request.hard.slope_radius_m);
       renderCards();
       renderArtemis(payload.artemis);
-      lastRequest = request;
-      lastScenario = scenarioOf(request);
+      drawKeepout(request.keepout);
+      renderWindowBadge(request.illumination_months);
       renderAnswer(payload, request, seq);
       if (PARAMS.get("site") && !initialSiteShown) {
         initialSiteShown = true;
@@ -1971,7 +2086,41 @@
       showNotIngested(meta.ingest_command);
     } else {
       await runScore();
+      // A scenario in the URL is scored after the defaults, so the table
+      // shows the previous ranks: ?w=0.6,0.2,0.2&slope=6&keepout=5&start=2027-01&end=2027-03
+      if (applyUrlScenario()) {
+        await runScore({ keepLayer: true });
+      }
     }
+  }
+
+  function applyUrlScenario() {
+    var changed = false;
+    var w = (PARAMS.get("w") || "").split(",").map(Number);
+    if (w.length === 3 && w.every(function (x) { return x >= 0 && x <= 1; })) {
+      els.illum.value = w[0];
+      els.hydro.value = w[1];
+      els.earth.value = w[2];
+      syncSliderLabels();
+      changed = true;
+    }
+    if (PARAMS.get("slope")) {
+      els.slope.value = Number(PARAMS.get("slope"));
+      changed = true;
+    }
+    if (PARAMS.get("keepout")) {
+      els.keepout.checked = true;
+      els.keepoutRadius.value = Number(PARAMS.get("keepout"));
+      updateKeepoutNote();
+      changed = true;
+    }
+    if (PARAMS.get("start") && PARAMS.get("end")) {
+      els.windowStart.value = PARAMS.get("start");
+      els.windowEnd.value = PARAMS.get("end");
+      updateWindowNote();
+      changed = true;
+    }
+    return changed;
   }
 
   main();
