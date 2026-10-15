@@ -38,7 +38,7 @@ Sun above the modelled horizon.
 
 | Default rank | Cell | Longest dark | When (UTC; run end exclusive) | Longest sunlit | Lit (2026–2044) |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 1318:1219 | 198 h = 8.2 d | 2030-03-13 15Z → 03-21 21Z | 260 d (cap maximum) | 86.6 % |
+| 1 | 1318:1219 | 198 h = 8.3 d | 2030-03-13 15Z → 03-21 21Z | 260 d (cap maximum) | 86.6 % |
 | 2 | 1292:1255 | 65 h = 2.7 d (shortest longest night on the cap) | 2026-05-11 10Z → 05-14 03Z | 176 d | 90.0 % |
 | 3 | 1350:1392 (Peak Near Shackleton) | 138 h = 5.8 d | 2032-01-29 16Z → 02-04 10Z | 175 d | 88.0 % |
 | 4 | 753:1681 | 237 h = 9.9 d | 2032-02-02 00Z → 02-11 21Z | 24.6 d | 74.5 % |
