@@ -2,7 +2,11 @@
   "use strict";
 
   var PROJ4 = "+proj=stere +lat_0=-90 +lon_0=0 +R=1737400 +units=m +no_defs";
-  var TICKS = 10;
+  var VIRIDIS =
+    "linear-gradient(to right, #440154, #482878, #3e4989, #31688e, #26828e, " +
+    "#1f9e89, #35b779, #6ece58, #b5de2b, #fde725)";
+  var GREY = "linear-gradient(to right, #000000, #ffffff)";
+  var PRESENT_KEY = "anuma.presentation";
 
   var map = null;
   var overlay = null;
@@ -12,6 +16,12 @@
   var lastScore = null;
   var overlayUrl = null;
   var selectedRank = null;
+  var currentSites = null;
+  var currentRadius = 0;
+  // Monte Carlo top-10 frequency by "row:col", and the Stage B 20 m checks.
+  var stability = null;
+  var stabilityById = {};
+  var checks = null;
 
   var els = {
     illum: document.getElementById("w-illum"),
@@ -42,6 +52,13 @@
     zoomIn: document.getElementById("zoom-in"),
     zoomOut: document.getElementById("zoom-out"),
     status: document.getElementById("status"),
+    legendTitle: document.getElementById("legend-title"),
+    legendBar: document.getElementById("legend-bar"),
+    legendLow: document.getElementById("legend-low"),
+    legendHigh: document.getElementById("legend-high"),
+    legendNote: document.getElementById("legend-note"),
+    tableNote: document.getElementById("table-note"),
+    present: document.getElementById("present-toggle"),
   };
 
   function fmt(n) {
@@ -80,9 +97,13 @@
     els.veil.hidden = true;
   }
 
+  function columnCount() {
+    return document.querySelectorAll(".sites-table thead th").length;
+  }
+
   function emptySites(message) {
     els.sites.innerHTML =
-      '<tr><td class="empty" colspan="8">' + message + "</td></tr>";
+      '<tr><td class="empty" colspan="' + columnCount() + '">' + message + "</td></tr>";
   }
 
   function showNotIngested(command) {
@@ -120,7 +141,44 @@
     });
   }
 
-  function setOverlay(url, bounds) {
+  function layerLabel(name) {
+    return name === "dem" ? "DEM" : name.charAt(0).toUpperCase() + name.slice(1).replace(/_/g, " ");
+  }
+
+  // Score is viridis; single layers are grey, normalised to 0–1 when the
+  // layer has a scoring mode, so black is the worse end.
+  function updateLegend(name) {
+    if (name === "score") {
+      els.legendTitle.textContent = "Combined score";
+      els.legendBar.style.background = VIRIDIS;
+      els.legendLow.textContent = "low";
+      els.legendHigh.textContent = "high";
+      els.legendNote.textContent = "white = fails slope rule";
+      return;
+    }
+    var info = ((meta && meta.layers) || []).filter(function (layer) {
+      return layer.name === name;
+    })[0] || {};
+    var unit = info.unit ? " (" + info.unit + ")" : "";
+    els.legendTitle.textContent = layerLabel(name) + unit;
+    els.legendBar.style.background = GREY;
+    if (info.mode === "lower_better") {
+      els.legendLow.textContent = "high";
+      els.legendHigh.textContent = "low";
+    } else {
+      els.legendLow.textContent = "low";
+      els.legendHigh.textContent = "high";
+    }
+    if (name === "slope") {
+      els.legendNote.textContent = "normalised; white = flattest, blank = fails slope rule";
+    } else if (info.mode) {
+      els.legendNote.textContent = "normalised; black = worse, blank = no data";
+    } else {
+      els.legendNote.textContent = "blank = no data";
+    }
+  }
+
+  function setOverlay(url, bounds, name) {
     if (overlay) {
       map.removeLayer(overlay);
       overlay = null;
@@ -134,6 +192,7 @@
       pane: "overlayPane",
     });
     overlay.addTo(map);
+    updateLegend(name || "score");
   }
 
   function addPoleMarker() {
@@ -181,15 +240,211 @@
     els.coords.textContent = fmtLat(latlng.lat) + "  " + fmtLon(latlng.lng);
   }
 
-  function ticksHtml(value, weight) {
-    var frac = weight > 0 ? value / weight : 0;
-    var nOn = Math.round(Math.max(0, Math.min(1, frac)) * TICKS);
-    var html = '<span class="ticks">';
+  function contribCell(value) {
+    return value == null ? "–" : Number(value).toFixed(2);
+  }
+
+  function siteKey(site) {
+    return site.row + ":" + site.col;
+  }
+
+  function winnerFrequency(site) {
+    var winners = (stability && stability.winners) || [];
     var i;
-    for (i = 0; i < TICKS; i += 1) {
-      html += '<span class="tick' + (i < nOn ? " on" : "") + '"></span>';
+    for (i = 0; i < winners.length; i += 1) {
+      if (winners[i].row === site.row && winners[i].col === site.col) {
+        return winners[i].frequency;
+      }
     }
-    return html + "</span>";
+    return null;
+  }
+
+  function stabilityCell(site) {
+    var row = stabilityById[siteKey(site)];
+    if (!row) {
+      return "–";
+    }
+    var text = (100 * row.frequency).toFixed(1) + " %";
+    var win = winnerFrequency(site);
+    if (win != null) {
+      return '<span title="Winner in ' + (100 * win).toFixed(1) + ' % of draws">' + text + "</span>";
+    }
+    return text;
+  }
+
+  // Nearest Stage B check within its match distance, compared in grid metres.
+  function stageBCheck(site) {
+    if (!checks || !checks.sites) {
+      return null;
+    }
+    var p = proj4(PROJ4, [site.lon, site.lat]);
+    var best = null;
+    var bestM = Infinity;
+    checks.sites.forEach(function (check) {
+      var q = proj4(PROJ4, [check.lon, check.lat]);
+      var d = Math.hypot(p[0] - q[0], p[1] - q[1]);
+      if (d < bestM) {
+        bestM = d;
+        best = check;
+      }
+    });
+    return bestM <= checks.match_km * 1000 ? best : null;
+  }
+
+  function flagHtml(site) {
+    var check = stageBCheck(site);
+    if (!check) {
+      return "";
+    }
+    var flag = checks.flag;
+    var value = check.fraction_le_8deg[flag.field];
+    if (!(value < flag.below)) {
+      return "";
+    }
+    var title =
+      flag.text + ": " + Math.round(100 * value) + " % of 20 m pixels ≤ 8° within 1 km (job " +
+      checks.source.job + ")";
+    return ' <span class="flag" title="' + title + '" aria-label="' + title + '">⚠</span>';
+  }
+
+  function renderTableNote() {
+    var parts = [];
+    if (stability && stability.available) {
+      var text =
+        "Top-10 %: share of " + stability.draw_count + " weight draws (job " +
+        stability.job_id + ") with the site in the top 10; " + stability.note + ".";
+      var winner = (stability.winners || [])[0];
+      var index = -1;
+      if (winner && currentSites) {
+        currentSites.forEach(function (site, i) {
+          if (site.row === winner.row && site.col === winner.col) {
+            index = i;
+          }
+        });
+      }
+      if (index >= 0) {
+        text += " Site " + pad2(index + 1) + " wins in " + (100 * winner.frequency).toFixed(1) + " % of draws.";
+      }
+      parts.push(text + " – = not in the study.");
+    } else {
+      parts.push("Top-10 %: Monte Carlo study not on disk.");
+    }
+    if (checks) {
+      parts.push(
+        "⚠ = " + checks.flag.text + ", job " + checks.source.job +
+        "; only the default top 10 were checked."
+      );
+    }
+    els.tableNote.textContent = parts.join(" ");
+  }
+
+  function isPresenting() {
+    return document.body.classList.contains("present");
+  }
+
+  function labelSize() {
+    return isPresenting() ? { w: 34, h: 24 } : { w: 26, h: 18 };
+  }
+
+  function overlaps(a, b) {
+    return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  }
+
+  // Put each rank label next to its dot, trying rings of offsets in rank
+  // order so a label does not cover another label or another site's dot.
+  function placeLabels(sites) {
+    var size = labelSize();
+    var gapY = size.h / 2 + 5;
+    var gapX = size.w / 2 + 6;
+    var directions = [[0, -1], [0, 1], [1, 0], [-1, 0], [1, -1], [-1, -1], [1, 1], [-1, 1]];
+    var candidates = [];
+    var ring;
+    for (ring = 1; ring <= 4; ring += 1) {
+      directions.forEach(function (d) {
+        candidates.push([d[0] * gapX * ring, d[1] * gapY * ring]);
+      });
+    }
+    var points = sites.map(function (site) {
+      return map.latLngToLayerPoint([site.lat, site.lon]);
+    });
+    var dots = points.map(function (pt) {
+      return { x: pt.x - 4, y: pt.y - 4, w: 8, h: 8 };
+    });
+    var placed = [];
+    return points.map(function (pt, index) {
+      var best = null;
+      var bestHits = Infinity;
+      candidates.some(function (offset) {
+        var box = {
+          x: pt.x + offset[0] - size.w / 2,
+          y: pt.y + offset[1] - size.h / 2,
+          w: size.w,
+          h: size.h,
+        };
+        var hits = placed.concat(dots.filter(function (_, j) {
+          return j !== index;
+        })).filter(function (other) {
+          return overlaps(box, other);
+        }).length;
+        if (hits < bestHits) {
+          bestHits = hits;
+          best = { offset: offset, box: box };
+        }
+        return hits === 0;
+      });
+      placed.push(best.box);
+      return best.offset;
+    });
+  }
+
+  function selectSite(index) {
+    var site = currentSites[index];
+    selectedRank = index;
+    map.setView([site.lat, site.lon], Math.max(map.getZoom(), 4));
+    renderSites(currentSites, currentRadius);
+  }
+
+  function drawMarkers() {
+    if (siteLayer) {
+      map.removeLayer(siteLayer);
+      siteLayer = null;
+    }
+    if (!currentSites || !currentSites.length) {
+      return;
+    }
+    siteLayer = L.layerGroup().addTo(map);
+    var size = labelSize();
+    var offsets = placeLabels(currentSites);
+    currentSites.forEach(function (site, index) {
+      if (selectedRank === index && currentRadius > 0) {
+        L.polygon(radiusRing(site, currentRadius), {
+          color: "#e60019",
+          weight: 1.5,
+          fillOpacity: 0.08,
+          interactive: false,
+        }).addTo(siteLayer);
+      }
+      var left = offsets[index][0] - size.w / 2;
+      var top = offsets[index][1] - size.h / 2;
+      L.marker([site.lat, site.lon], {
+        icon: L.divIcon({
+          className: "site-mark" + (selectedRank === index ? " active" : ""),
+          html:
+            '<svg class="site-leader" width="1" height="1"><line x1="0" y1="0" x2="' +
+            offsets[index][0] + '" y2="' + offsets[index][1] + '"></line></svg>' +
+            '<span class="site-dot"></span><span class="site-label" style="left:' +
+            left + "px;top:" + top + "px;width:" + size.w + "px;height:" + size.h +
+            "px;line-height:" + size.h + 'px">' + pad2(index + 1) + "</span>",
+          iconSize: [0, 0],
+          iconAnchor: [0, 0],
+        }),
+        zIndexOffset: 1000 - index,
+      })
+        .on("click", function () {
+          selectSite(index);
+        })
+        .addTo(siteLayer);
+    });
   }
 
   function artemisCell(site) {
@@ -224,17 +479,15 @@
 
   function renderSites(sites, slopeRadius) {
     els.sites.innerHTML = "";
-    if (siteLayer) {
-      map.removeLayer(siteLayer);
-      siteLayer = null;
-    }
-    if (!sites || !sites.length) {
+    currentSites = sites || [];
+    currentRadius = slopeRadius || 0;
+    renderTableNote();
+    if (!currentSites.length) {
+      drawMarkers();
       emptySites("No sites passed the slope mask.");
       return;
     }
-    siteLayer = L.layerGroup().addTo(map);
-    var weights = currentWeights();
-    sites.forEach(function (site, index) {
+    currentSites.forEach(function (site, index) {
       var contrib = site.contributions || {};
       var tr = document.createElement("tr");
       if (selectedRank === index) {
@@ -243,52 +496,30 @@
       tr.innerHTML =
         '<td class="num">' +
         pad2(index + 1) +
+        flagHtml(site) +
         '</td><td class="num">' +
         fmtLat(site.lat) +
         '</td><td class="num">' +
         fmtLon(site.lon) +
         '</td><td class="num">' +
         Number(site.total).toFixed(3) +
-        "</td><td>" +
-        ticksHtml(contrib.illumination || 0, weights.illumination || 1) +
-        "</td><td>" +
-        ticksHtml(contrib.hydrogen || 0, weights.hydrogen || 1) +
-        "</td><td>" +
-        ticksHtml(contrib.earth_visibility || 0, weights.earth_visibility || 1) +
-        "</td><td>" +
+        '</td><td class="num">' +
+        contribCell(contrib.illumination) +
+        '</td><td class="num">' +
+        contribCell(contrib.hydrogen) +
+        '</td><td class="num">' +
+        contribCell(contrib.earth_visibility) +
+        '</td><td class="num">' +
+        stabilityCell(site) +
+        '</td><td class="wrap">' +
         artemisCell(site) +
         "</td>";
       tr.addEventListener("click", function () {
-        selectedRank = index;
-        map.setView([site.lat, site.lon], Math.max(map.getZoom(), 4));
-        renderSites(sites, slopeRadius);
+        selectSite(index);
       });
       els.sites.appendChild(tr);
-
-      if (selectedRank === index && slopeRadius > 0) {
-        L.polygon(radiusRing(site, slopeRadius), {
-          color: "#e60019",
-          weight: 1.5,
-          fillOpacity: 0.08,
-          interactive: false,
-        }).addTo(siteLayer);
-      }
-
-      L.marker([site.lat, site.lon], {
-        icon: L.divIcon({
-          className: "site-mark",
-          html: "<span>" + pad2(index + 1) + "</span>",
-          iconSize: [22, 14],
-          iconAnchor: [11, 7],
-        }),
-      })
-        .on("click", function () {
-          selectedRank = index;
-          map.setView([site.lat, site.lon], Math.max(map.getZoom(), 4));
-          renderSites(sites, slopeRadius);
-        })
-        .addTo(siteLayer);
     });
+    drawMarkers();
   }
 
   function renderArtemis(artemis) {
@@ -400,6 +631,7 @@
       updateCoords(event.latlng);
     });
     map.on("zoomend moveend", updateScale);
+    map.on("zoomend", drawMarkers);
     if (window.ResizeObserver) {
       new ResizeObserver(function () {
         map.invalidateSize();
@@ -461,7 +693,7 @@
       }
       lastScore = payload;
       hideVeil();
-      setOverlay("data:image/png;base64," + payload.png, payload.bounds);
+      setOverlay("data:image/png;base64," + payload.png, payload.bounds, "score");
       els.layer.value = "score";
       selectedRank = null;
       renderSites(payload.sites, request.hard.slope_radius_m);
@@ -480,7 +712,7 @@
     if (name === "score") {
       if (lastScore) {
         hideVeil();
-        setOverlay("data:image/png;base64," + lastScore.png, lastScore.bounds);
+        setOverlay("data:image/png;base64," + lastScore.png, lastScore.bounds, "score");
       } else if (meta && !meta.ingested) {
         showNotIngested(meta.ingest_command);
       } else {
@@ -507,7 +739,7 @@
       var blob = await response.blob();
       var url = URL.createObjectURL(blob);
       hideVeil();
-      setOverlay(url, meta.bounds);
+      setOverlay(url, meta.bounds, name);
     } catch (err) {
       showVeil("Layer missing", String(err), "", "");
     }
@@ -552,7 +784,57 @@
     }).addTo(map);
   }
 
+  // Stability and the 20 m check only annotate the table; failures leave it plain.
+  async function loadAnnotations() {
+    try {
+      var response = await fetch("/stability.json");
+      stability = response.ok ? await response.json() : null;
+    } catch (err) {
+      stability = null;
+    }
+    stabilityById = {};
+    if (stability && stability.available) {
+      (stability.top10_membership_frequency || []).forEach(function (row) {
+        stabilityById[row.row + ":" + row.col] = row;
+      });
+    }
+    try {
+      var checkResponse = await fetch("/checks/stage-b-1km.json");
+      checks = checkResponse.ok ? await checkResponse.json() : null;
+    } catch (err) {
+      checks = null;
+    }
+  }
+
+  function setPresenting(on) {
+    // The page sizes in rem, so the root element carries the class too.
+    document.documentElement.classList.toggle("present", on);
+    document.body.classList.toggle("present", on);
+    els.present.setAttribute("aria-pressed", on ? "true" : "false");
+    try {
+      window.localStorage.setItem(PRESENT_KEY, on ? "1" : "0");
+    } catch (err) {
+      // Storage can be blocked; the toggle still works for this page.
+    }
+    if (map) {
+      map.invalidateSize();
+      drawMarkers();
+    }
+  }
+
+  function storedPresenting() {
+    try {
+      return window.localStorage.getItem(PRESENT_KEY) === "1";
+    } catch (err) {
+      return false;
+    }
+  }
+
   async function main() {
+    setPresenting(storedPresenting());
+    els.present.addEventListener("click", function () {
+      setPresenting(!isPresenting());
+    });
     [els.illum, els.hydro, els.earth].forEach(function (slider) {
       slider.addEventListener("input", syncSliderLabels);
     });
@@ -583,6 +865,7 @@
     applyDefaults(meta);
     fillLayerSelect(meta);
     initMap(meta);
+    await loadAnnotations();
 
     if (!meta.ingested) {
       showNotIngested(meta.ingest_command);

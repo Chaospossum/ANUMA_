@@ -5,13 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>anuma · lunar south-pole landing-site screening</title>
     <link rel="stylesheet" href="/vendor/leaflet.css" />
-    <link rel="stylesheet" href="/style.css?v=slope-radius" />
+    <link rel="stylesheet" href="/style.css?v=demo-ui" />
   </head>
   <body>
     <div class="app">
       <header class="header">
         <h1>anuma</h1>
-        <p class="subtitle">Student project · NeoSpace Challenge 2026 · 80°S–90°S</p>
+        <div class="header-right">
+          <p class="subtitle">Student project · NeoSpace Challenge 2026 · 80°S–90°S</p>
+          <button type="button" id="present-toggle" class="present-toggle" aria-pressed="false">
+            Presentation mode
+          </button>
+        </div>
       </header>
 
       <div class="workspace">
@@ -80,6 +85,14 @@
               <pre class="veil-cmd mono" id="veil-cmd" hidden></pre>
               <p class="veil-note" id="veil-note"></p>
             </div>
+            <div class="legend" id="legend" aria-live="polite">
+              <p class="legend-title" id="legend-title">Combined score</p>
+              <span class="legend-bar" id="legend-bar"></span>
+              <p class="legend-ends">
+                <span id="legend-low">low</span><span id="legend-high">high</span>
+              </p>
+              <p class="legend-note" id="legend-note">white = fails slope rule</p>
+            </div>
             <div class="map-zoom">
               <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
               <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
@@ -103,14 +116,16 @@
                   <th>Latitude</th>
                   <th>Longitude</th>
                   <th>Score</th>
-                  <th>Illumination</th>
-                  <th>Hydrogen</th>
-                  <th>Earth vis.</th>
-                  <th>Artemis III</th>
+                  <th title="Illumination contribution">Illum.</th>
+                  <th title="Hydrogen contribution">Hydr.</th>
+                  <th title="Earth-visibility contribution">Earth</th>
+                  <th title="Share of Monte Carlo weight draws with this site in the top 10">Top-10 %</th>
+                  <th class="wrap">Artemis III</th>
                 </tr>
               </thead>
               <tbody id="sites"></tbody>
             </table>
+            <p class="table-note" id="table-note"></p>
           </div>
           <div id="artemis-rail" hidden>
             <p class="help" id="artemis-note"></p>
@@ -131,6 +146,6 @@
     <script src="/vendor/leaflet.js"></script>
     <script src="/vendor/proj4.js"></script>
     <script src="/vendor/proj4leaflet.js"></script>
-    <script src="/app.js?v=slope-radius-ring-2"></script>
+    <script src="/app.js?v=demo-ui"></script>
   </body>
 </html>
