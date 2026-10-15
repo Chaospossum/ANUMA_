@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
+import math
 import os
 import re
 from datetime import date
@@ -36,6 +38,7 @@ _STORE: dict[str, Any] = {}
 _CUBES: dict[str, DailyLitCube] = {}
 _MONTH = re.compile(r"\A([0-9]{4})-([0-9]{2})\Z")
 DAILY_LIT_MISSING = "daily sunlight data not available on this machine"
+logger = logging.getLogger(__name__)
 
 
 class HardBody(BaseModel):
@@ -216,7 +219,8 @@ def _open_cube(cfg: dict, root: Path) -> DailyLitCube | None:
             return None
         try:
             cube = DailyLitCube(path)
-        except (FileNotFoundError, ValueError):
+        except (FileNotFoundError, ValueError) as exc:
+            logger.warning("daily-lit cube at %s could not be opened: %s", path, exc)
             return None
         _CUBES[key] = cube
     return cube
@@ -361,6 +365,9 @@ def _with_keepout(result, body: ScoreBody | None):
     if body is None or body.keepout is None:
         return result
     spec = body.keepout
+    numbers = [spec.radius_km, spec.penalty] + [v for p in spec.points for v in (p.lon, p.lat)]
+    if not all(math.isfinite(v) for v in numbers if v is not None):
+        raise HTTPException(status_code=400, detail="keepout values must be finite numbers")
     try:
         return apply_keepout(
             result,

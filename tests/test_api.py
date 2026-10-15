@@ -638,3 +638,11 @@ def test_month_window_without_cube_is_400(window_client):
         assert client.get("/layers").json()["illumination_window"]["available"] is False
         shutil.rmtree(cube_dir, ignore_errors=True)
         clear_cache()
+
+
+def test_keepout_rejects_non_finite_numbers(client_ingested: TestClient):
+    body = '{"keepout": {"points": [{"lon": NaN, "lat": -87.0}], "radius_km": 5.0, "mode": "hard"}}'
+    for path in ("/score", "/score.csv", "/score.geojson"):
+        response = client_ingested.post(path, content=body, headers={"content-type": "application/json"})
+        assert response.status_code == 400, path
+        assert "finite" in response.json()["detail"]
