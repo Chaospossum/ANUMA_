@@ -286,6 +286,16 @@ the need. It does not scale across nodes.
 - Reject more than one node, more than 128 workers, walltime over 50 hours, or
   any full-cap slope rerun per Monte Carlo draw.
 
+## Stage E (proposed) — 240 m daily lit hours
+
+Implemented, not run, not yet authorized. Stage E reuses the Stage A horizon
+cube and lit rule to store sunlit hours per UTC day for 2026-01-01 to
+2044-09-01, so the web GUI can average any date range. Pilot `test` ≤00:30
+plus production `default` ≤03:00 is at most 3.5 node-hours. That would come
+from the 55 held hours and needs an explicit reviewed reallocation before
+submission. Expected use is about 1.3 node-hours, scaled from Stage A. See
+[stage-e-daily-lit-plan.md](stage-e-daily-lit-plan.md).
+
 ## Review and release discipline
 
 Each stage produces evidence, not a mission claim. Review scientific outputs
