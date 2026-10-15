@@ -84,7 +84,8 @@ select {
 .app {
   height: 100dvh;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   background: var(--workspace);
 }
 
@@ -131,6 +132,43 @@ h1 {
   border-color: var(--ink);
   background: var(--ink);
   color: var(--white);
+}
+
+/* The answer in one sentence, above the map and table. */
+.answer {
+  padding: 8px 16px 7px;
+  background: var(--white);
+  border-bottom: 1px solid var(--line);
+  border-left: 5px solid var(--accent);
+}
+
+.answer p {
+  margin: 0;
+}
+
+.answer-main {
+  font-size: 1.05rem;
+  line-height: 1.35;
+}
+
+.answer-main b {
+  font-weight: 600;
+}
+
+.answer-meta {
+  margin-top: 2px !important;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.answer-meta .tag {
+  display: inline-block;
+  margin-right: 10px;
+}
+
+.answer-meta .changed {
+  color: var(--ink);
+  font-weight: 500;
 }
 
 .workspace {
@@ -901,7 +939,7 @@ body.present .sites-table {
 
 body.present .sites-table th,
 body.present .sites-table td {
-  padding: 6px 7px;
+  padding: 4px 7px;
 }
 
 body.present .table-legend {
@@ -910,6 +948,19 @@ body.present .table-legend {
 
 body.present .header {
   padding: 0.35rem 1rem;
+}
+
+body.present .answer {
+  padding: 6px 16px;
+}
+
+body.present .answer-main {
+  font-size: 19px;
+  line-height: 1.3;
+}
+
+body.present .answer-meta {
+  font-size: 14px;
 }
 
 body.present .site-label {
@@ -973,6 +1024,15 @@ body.present .bar-rule {
   display: inline;
 }
 
+body.present .legend-rule {
+  flex-basis: auto;
+}
+
+body.present .table-legend {
+  gap: 2px 14px;
+  padding: 4px 8px;
+}
+
 body.present .score-bar {
   display: flex;
 }
@@ -992,7 +1052,16 @@ body.present .sites-table .loc {
 }
 
 body.present .status {
-  padding: 4px 12px;
+  padding: 3px 12px;
+  font-size: 11px;
+}
+
+body.present .status > span {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 @media (max-width: 960px) {

@@ -571,6 +571,50 @@ def _scenario(payload: dict, body: ScoreBody | None) -> dict:
     }
 
 
+SITE_LAYERS = ("illumination", "slope", "earth_visibility", "hydrogen", "dem", "dem_error")
+
+
+def _site_values(row: int, col: int, window: MonthWindow | None) -> dict:
+    """Raw layer values in layer units at one grid cell, for the site card."""
+    cfg = _cfg()
+    root = data_root()
+    store = _load_store(cfg, root)
+    grid = store["grid"]
+    if not (0 <= row < grid.height and 0 <= col < grid.width):
+        raise HTTPException(
+            status_code=404,
+            detail=f"cell {row}:{col} is outside the {grid.height} x {grid.width} grid",
+        )
+    lon, lat = grid.to_lonlat(row + 0.5, col + 0.5)
+    values: dict[str, float | None] = {}
+    units: dict[str, str | None] = {}
+    for name in SITE_LAYERS:
+        array = store["layers"].get(name)
+        values[name] = None if array is None else _finite_or_none(array[row, col])
+        units[name] = cfg["layers"].get(name, {}).get("unit")
+    illumination = _default_window(cfg)
+    if window is not None:
+        _check_window(window, _window_bounds(cfg))
+        cube = _load_cube(cfg, root, (grid.height, grid.width))
+        _check_window(window, _window_bounds(cfg, cube))
+        start, end = window.days()
+        try:
+            hours = cube.lit_hours_mean(start, end, (slice(row, row + 1), slice(col, col + 1)))
+        except (FileNotFoundError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"daily sunlight cube: {exc}") from exc
+        values["illumination"] = _finite_or_none(float(hours[0, 0]) / 24.0)
+        illumination = {"source": "daily_lit", "start": window.start, "end": window.end}
+    return {
+        "row": row,
+        "col": col,
+        "lon": lon,
+        "lat": lat,
+        "values": values,
+        "units": units,
+        "illumination_window": illumination,
+    }
+
+
 def _display_range(cfg: dict, name: str, array: np.ndarray) -> tuple[float, float] | None:
     """Colour range in layer units over the pixels the PNG draws (nanmax blocks):
     finite minimum to the configured percentile."""
@@ -779,6 +823,24 @@ def create_app() -> FastAPI:
             painted = array
         png = render_png(painted, cmap="gray")
         return Response(content=png, media_type="image/png")
+
+    @app.get("/site/{row}/{col}")
+    def get_site(
+        row: int,
+        col: int,
+        start: Annotated[str | None, Query()] = None,
+        end: Annotated[str | None, Query()] = None,
+    ) -> dict:
+        window = None
+        if start is not None or end is not None:
+            if start is None or end is None:
+                raise HTTPException(status_code=400, detail="give both start and end months")
+            try:
+                window = MonthWindow(start=start, end=end)
+            except ValidationError as exc:
+                detail = "; ".join(item["msg"] for item in exc.errors())
+                raise HTTPException(status_code=400, detail=detail) from exc
+        return _site_values(row, col, window)
 
     @app.get("/stability.json")
     def get_stability() -> dict:

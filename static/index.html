@@ -22,6 +22,11 @@
         </div>
       </header>
 
+      <section class="answer" id="answer" aria-live="polite" aria-label="Answer">
+        <p class="answer-main" id="answer-main">Scoring the default scenario…</p>
+        <p class="answer-meta" id="answer-meta"></p>
+      </section>
+
       <div class="workspace">
         <section class="panel panel-form" id="rail" aria-label="Scenario">
           <form id="score-form" onsubmit="return false;">
@@ -199,8 +204,8 @@
               <div class="info-pop" id="table-note" role="note" hidden></div>
             </span>
             <span class="legend-rule contrib-rule">Sunlight, Hydrogen, Earth view: points each adds; Score is their sum.</span>
-            <span class="legend-rule bar-rule">Score bar: <i class="sw c-sun"></i> sunlight <i class="sw c-hyd"></i> hydrogen <i class="sw c-earth"></i> Earth view (full width = 1)</span>
-            <span class="legend-rule">Flat ground: share of 20 m pixels ≤ 8° within 1 km; passes at ≥ 50 %.</span>
+            <span class="legend-rule bar-rule">Score: <i class="sw c-sun"></i> sunlight <i class="sw c-hyd"></i> hydrogen <i class="sw c-earth"></i> Earth view</span>
+            <span class="legend-rule">Flat ground: % of 20 m pixels ≤ 8° within 1 km; passes at ≥ 50 %.</span>
           </div>
         </section>
       </div>

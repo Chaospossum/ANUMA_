@@ -694,3 +694,59 @@ def test_keepout_rejects_non_finite_numbers(client_ingested: TestClient):
         response = client_ingested.post(path, content=body, headers={"content-type": "application/json"})
         assert response.status_code == 400, path
         assert "finite" in response.json()["detail"]
+
+
+# ------------------------------------------------- site card values
+
+
+def test_site_returns_raw_layer_values(client_ingested: TestClient):
+    cfg = load_config()
+    grid = Grid(cfg)
+    row, col = _pixel(grid, 0.0, -87.0)
+    response = client_ingested.get(f"/site/{row}/{col}")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["row"], body["col"]) == (row, col)
+    # Raw layer units, not normalised scores.
+    assert body["values"]["illumination"] == 100.0
+    assert body["values"]["slope"] == 1.0
+    assert body["values"]["hydrogen"] == 100.0
+    assert body["values"]["earth_visibility"] == 100.0
+    # Layers missing on this machine are null, not invented.
+    assert body["values"]["dem"] is None
+    assert body["units"]["hydrogen"] == cfg["layers"]["hydrogen"]["unit"]
+    assert body["illumination_window"]["source"] == "published"
+    lon, lat = grid.to_lonlat(row + 0.5, col + 0.5)
+    assert body["lon"] == pytest.approx(lon) and body["lat"] == pytest.approx(lat)
+    # Matches the coordinates /score reports for the same cell.
+    sites = client_ingested.post("/score", json={}).json()["sites"]
+    top = next(s for s in sites if (s["row"], s["col"]) == (row, col))
+    assert body["lat"] == pytest.approx(top["lat"]) and body["lon"] == pytest.approx(top["lon"])
+
+
+def test_site_nan_cell_is_null(client_ingested: TestClient):
+    body = client_ingested.get("/site/0/0").json()
+    assert all(value is None for value in body["values"].values())
+
+
+@pytest.mark.parametrize("row,col", [(-1, 0), (0, 10**6), (10**6, 0)])
+def test_site_outside_grid_is_404(client_ingested: TestClient, row, col):
+    assert client_ingested.get(f"/site/{row}/{col}").status_code == 404
+
+
+def test_site_not_ingested_is_412(client_empty: TestClient):
+    assert client_empty.get("/site/0/0").status_code == 412
+
+
+def test_site_month_window_uses_cube(window_client):
+    client, data, valid, cube_dir = window_client
+    row, col = map(int, np.argwhere(valid)[0])
+    response = client.get(f"/site/{row}/{col}?start=2027-02&end=2027-03")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    expected = data[31:90, row, col].astype(np.float64).mean() / 24.0
+    assert body["values"]["illumination"] == pytest.approx(expected, abs=1e-6)
+    assert body["illumination_window"] == {"source": "daily_lit", "start": "2027-02", "end": "2027-03"}
+    assert client.get(f"/site/{row}/{col}?start=2027-02").status_code == 400
+    assert client.get(f"/site/{row}/{col}?start=2027-03&end=2027-02").status_code == 400
+    assert client.get(f"/site/{row}/{col}?start=2020-01&end=2020-02").status_code == 400

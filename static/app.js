@@ -35,6 +35,11 @@
   // Colour range of the last display-only layer PNG, from its response headers.
   var layerRange = null;
   var initialSiteShown = false;
+  // Raw layer values from /site, by "row:col|window".
+  var siteValueCache = {};
+  // The request behind the table on screen, and how it differs from the defaults.
+  var lastRequest = null;
+  var lastScenario = null;
   var MAX_MONTHS = 600;
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -74,6 +79,8 @@
     legendNote: document.getElementById("legend-note"),
     tableNote: document.getElementById("table-note"),
     infoButton: document.getElementById("info-button"),
+    answerMain: document.getElementById("answer-main"),
+    answerMeta: document.getElementById("answer-meta"),
     railToggle: document.getElementById("rail-toggle"),
     present: document.getElementById("present-toggle"),
     keepout: document.getElementById("keepout-toggle"),
@@ -761,6 +768,205 @@
     };
   }
 
+  // ---- Scenario vs study defaults
+
+  function normalisedWeights(weights) {
+    var total = 0;
+    Object.keys(weights).forEach(function (key) {
+      total += Number(weights[key]) || 0;
+    });
+    var out = {};
+    Object.keys(weights).forEach(function (key) {
+      out[key] = total > 0 ? (Number(weights[key]) || 0) / total : 0;
+    });
+    return out;
+  }
+
+  function weightText(weights) {
+    var w = normalisedWeights(weights);
+    return (
+      "sunlight " + Math.round(100 * (w.illumination || 0)) + " / hydrogen " +
+      Math.round(100 * (w.hydrogen || 0)) + " / Earth view " +
+      Math.round(100 * (w.earth_visibility || 0)) + " %"
+    );
+  }
+
+  // How a request differs from the defaults the studies were run with.
+  function scenarioOf(request) {
+    var defaults = (meta && meta.defaults) || {};
+    var parts = [];
+    var a = normalisedWeights(request.weights || {});
+    var b = normalisedWeights(defaults.weights || {});
+    var weightsChanged = Object.keys(Object.assign({}, a, b)).some(function (key) {
+      return Math.abs((a[key] || 0) - (b[key] || 0)) > 1e-6;
+    });
+    if (weightsChanged) {
+      parts.push("weights " + weightText(request.weights));
+    }
+    var slopeChanged = Number(request.hard.max_slope_deg) !== Number(defaults.max_slope_deg);
+    if (slopeChanged) {
+      parts.push("max slope " + request.hard.max_slope_deg + "°");
+    }
+    var radiusChanged = Number(request.hard.slope_radius_m) !== Number(defaults.slope_radius_m || 0);
+    if (radiusChanged) {
+      parts.push("slope checked within " + request.hard.slope_radius_m + " m");
+    }
+    if (request.keepout) {
+      parts.push(
+        "keep-out " + request.keepout.radius_km + " km around " + request.keepout.points.length +
+        " Artemis III points (" + (request.keepout.mode === "hard" ? "excluded" : "penalty " + request.keepout.penalty) + ")"
+      );
+    }
+    if (request.illumination_months) {
+      parts.push("sunlight " + windowLabel(request.illumination_months) + " (modelled daily)");
+    }
+    return {
+      isDefault: parts.length === 0,
+      // The 20 m checks were run at 8°; other slope limits make them moot.
+      slopeChanged: slopeChanged,
+      parts: parts,
+    };
+  }
+
+  function siteValueKey(site, months) {
+    return site.row + ":" + site.col + "|" + (months ? months.start + ".." + months.end : "");
+  }
+
+  async function siteValues(site, months) {
+    var key = siteValueKey(site, months);
+    if (siteValueCache[key]) {
+      return siteValueCache[key];
+    }
+    var path = "/site/" + site.row + "/" + site.col;
+    if (months) {
+      path += "?start=" + encodeURIComponent(months.start) + "&end=" + encodeURIComponent(months.end);
+    }
+    var response = await fetch(path);
+    if (!response.ok) {
+      return null;
+    }
+    var body = await response.json();
+    siteValueCache[key] = body;
+    return body;
+  }
+
+  // Nearest cited Artemis III point within 10 km, else coordinates.
+  function placeName(site) {
+    if (site.nearest && site.distance_km != null && site.distance_km <= 10) {
+      return (
+        "near " + escapeHtml(site.nearest) + " (" + Number(site.distance_km).toFixed(1) + " km)"
+      );
+    }
+    return "at " + fmtLocation(site.lat, site.lon);
+  }
+
+  function sunlightWords(values, months) {
+    var v = values && values.values ? values.values.illumination : null;
+    if (v == null) {
+      return "sunlight not checked";
+    }
+    return (
+      "lit " + Math.round(100 * v) + " % of " +
+      (months ? windowLabel(months) + " (modelled daily)" : "the time")
+    );
+  }
+
+  function earthWords(values) {
+    var v = values && values.values ? values.values.earth_visibility : null;
+    if (v == null) {
+      return "Earth view not checked";
+    }
+    return v >= 0
+      ? "Earth " + v.toFixed(1) + "° above the local horizon"
+      : "Earth hidden " + Math.abs(v).toFixed(1) + "° below the local horizon";
+  }
+
+  function flatWords(site, scenario) {
+    var value = flatFraction(site);
+    if (value == null) {
+      return scenario.isDefault ? "flat ground within 1 km not checked" : "flat ground within 1 km n/a for this scenario";
+    }
+    var pass = value >= flatThreshold();
+    return (
+      Math.round(100 * value) + " % flat ground within 1 km (20 m; " +
+      (pass ? "passes" : "fails") + " the 50 % rule)"
+    );
+  }
+
+  function robustWords(site, scenario) {
+    if (!stability || !stability.available) {
+      return "weight robustness not checked";
+    }
+    if (!scenario.isDefault) {
+      return "weight robustness n/a for this scenario";
+    }
+    var row = stabilityRow(site);
+    var freq = row ? row.frequency : 0;
+    return (
+      "in the top 10 in " + (100 * freq).toFixed(freq === 1 || freq === 0 ? 0 : 1) +
+      " % of " + stability.draw_count + " weight draws"
+    );
+  }
+
+  // The optional 20 m terrain gate from /score, read but never required.
+  function terrainGateText(payload) {
+    var gate = payload.terrain_gate;
+    if (gate == null) {
+      return "20 m terrain rule: not applied";
+    }
+    if (typeof gate === "boolean") {
+      return "20 m terrain rule: " + (gate ? "on" : "off");
+    }
+    if (typeof gate === "string") {
+      return "20 m terrain rule: " + gate;
+    }
+    if (gate.available === false) {
+      return "20 m terrain rule: unavailable";
+    }
+    var on = gate.applied != null ? gate.applied : gate.enabled != null ? gate.enabled : gate.on;
+    return "20 m terrain rule: " + (on === false ? "off" : "on");
+  }
+
+  async function renderAnswer(payload, request, seq) {
+    var scenario = scenarioOf(request);
+    var meta2 = [];
+    meta2.push('<span class="tag">' + escapeHtml(terrainGateText(payload)) + "</span>");
+    if (payload.ranking_basis) {
+      meta2.push('<span class="tag">Ranked on: ' + escapeHtml(String(payload.ranking_basis)) + "</span>");
+    }
+    meta2.push(
+      scenario.isDefault
+        ? '<span class="tag">Scenario: study defaults (' + escapeHtml(weightText(request.weights)) +
+            ", slope ≤ " + request.hard.max_slope_deg + "°, 18.6-yr average sunlight)</span>"
+        : '<span class="tag changed">Scenario: ' + escapeHtml(scenario.parts.join(" · ")) + "</span>"
+    );
+    els.answerMeta.innerHTML = meta2.join("");
+    var best = (payload.sites || [])[0];
+    if (!best) {
+      els.answerMain.textContent = "No site passes the slope rule in this scenario.";
+      return;
+    }
+    var months = request.illumination_months || null;
+    var head = "<b>Best screened site: #1 " + placeName(best) + "</b>";
+    els.answerMain.innerHTML = head + " — loading layer values…";
+    var values = null;
+    try {
+      values = await siteValues(best, months);
+    } catch (err) {
+      values = null;
+    }
+    if (seq !== scoreSeq) {
+      return;
+    }
+    els.answerMain.innerHTML =
+      head + " — " + [
+        sunlightWords(values, months),
+        earthWords(values),
+        flatWords(best, scenario),
+        robustWords(best, scenario),
+      ].join(", ") + ".";
+  }
+
   // ---- Artemis III keep-out
 
   function keepoutLists() {
@@ -1140,6 +1346,9 @@
       selectedRank = null;
       renderSites(payload.sites, request.hard.slope_radius_m);
       renderArtemis(payload.artemis);
+      lastRequest = request;
+      lastScenario = scenarioOf(request);
+      renderAnswer(payload, request, seq);
       if (PARAMS.get("site") && !initialSiteShown) {
         initialSiteShown = true;
         var wanted = Number(PARAMS.get("site")) - 1;
