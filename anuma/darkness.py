@@ -695,6 +695,11 @@ def config_path(path: Path | None = None) -> Path:
     return Path(path) if path else repo_root() / "config" / "darkness.yaml"
 
 
+def sun_config_path() -> Path:
+    """config/sun.yaml: disc radius, azimuth origin, frame, kernel roles."""
+    return repo_root() / "config" / "sun.yaml"
+
+
 def load_darkness_config(path: Path | None = None) -> dict:
     cfg = yaml.safe_load(config_path(path).read_text())
     if not isinstance(cfg, dict) or cfg.get("stage") != STAGE:
@@ -829,6 +834,7 @@ def receipt_pin(
         "darkness_config": str(cfg_path),
         "darkness_config_sha256": dl._sha256(cfg_path),
         "daily_lit_config_sha256": dl._sha256(daily_path),
+        "sun_config_sha256": dl._sha256(sun_config_path()),
         "darkness_mode": mode,
         "period_start_day": start.isoformat(),
         "period_end_day_exclusive": end.isoformat(),
@@ -1046,6 +1052,7 @@ def run_darkness(
         "kernel_manifest_sha256": dl._sha256(Path(kernel_manifest)),
         "darkness_config_sha256": dl._sha256(cfg_path),
         "daily_lit_config_sha256": dl._sha256(daily_path),
+        "sun_config_sha256": dl._sha256(sun_config_path()),
         "stage_e_manifest_sha256": stage_e["stage_e_manifest_sha256"],
         "period_start_day": start.isoformat(),
         "period_end_day_exclusive": end.isoformat(),
@@ -1131,6 +1138,10 @@ def run_darkness(
                 lo = month["first_hour"] - chunk_first_hour
                 if not 0 <= lo < len(vectors):
                     continue
+                if engine.hour != month["first_hour"] or lo + month["hours"] > len(vectors):
+                    raise RuntimeError(
+                        f"month {month['label']} is out of step with the hourly stream"
+                    )
                 clock = time.perf_counter()
                 triple, daily = engine.advance_month(vectors[lo : lo + month["hours"]])
                 seconds = time.perf_counter() - clock
@@ -1475,6 +1486,10 @@ def main(argv: list[str] | None = None) -> None:
         )
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
         parser.exit(2, f"darkness precondition failed: {exc}\n")
+    except RuntimeError as exc:
+        # Internal consistency failure during the run (e.g. the month loop
+        # out of step with the hourly stream): treated as a failed check.
+        parser.exit(3, f"darkness run failed: {exc}\n")
     print(json.dumps(report, indent=2, sort_keys=True, default=str))
     if args.mode == "pilot" and not report["projection"]["fits_production_cap"]:
         raise SystemExit(4)

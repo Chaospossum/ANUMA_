@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-from scipy.ndimage import distance_transform_edt
 
 from anuma.config import load_config
 from anuma.grid import Grid
@@ -66,6 +65,8 @@ def hard_mask(
         raise ValueError("resolution_m is required when slope_radius_m is positive")
     # Distance from each pixel centre to the nearest failing centre, with a
     # failing one-pixel frame standing in for the area off the grid.
+    from scipy.ndimage import distance_transform_edt
+
     padded = np.pad(passing, 1, constant_values=False)
     distance_m = distance_transform_edt(padded, sampling=float(resolution_m))[1:-1, 1:-1]
     return distance_m > radius

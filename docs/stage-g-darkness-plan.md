@@ -34,6 +34,9 @@ Everything that decides lit or unlit is Stage E's code path, unchanged:
 - **Sun:** `sun_vectors_from_spice` with the same kernel manifest. The
   manifest digest must equal Stage E's. There is one SPICE call per calendar
   year, as in Stage E, and coverage is checked by `require_spice_coverage`.
+  The SHA-256 of `config/sun.yaml` (disc radius, azimuth origin, frame,
+  aberration correction, kernel roles) is pinned in the receipt and the run
+  key as `sun_config_sha256`.
 - **Lit rule:** `anuma.sun._lit_mask`. An epoch is lit when any fraction of
   the ±0.27° disc is above the local horizon.
 - **Execution:** the same fork pool over row tiles (`_start_tile_pool`) with
@@ -192,7 +195,10 @@ manifest: pilot 8.1 GB (cumulative and the 2026 file), production 49.6 GB.
 
 These are fixed before any run and are not tuned afterwards. All are exact
 equalities. The pilot exits 4 when its projection does not fit, otherwise
-3 when any check fails. Production exits 3 when any check fails.
+3 when any check fails. Production exits 3 when any check fails. An
+internal consistency error during the run (a `RuntimeError`, for example the
+month loop out of step with the hourly stream) also exits 3. A refused input
+or pin exits 2.
 
 Both modes:
 
@@ -295,10 +301,19 @@ memory-mapped outputs.
 ## Commands (MeluXina, not run)
 
 Prerequisite: this branch is merged and checked out in
-`/project/home/p201619/ANUMA_` at a clean commit. `.venv-hpc-sun` has
-`spiceypy`, `numpy` and `pyyaml`. It ran Stage E's preflight and job on OS
-Python 3.12 with no module loaded. Stage G imports nothing else, so no
-scipy or rasterio is needed.
+`/project/home/p201619/ANUMA_` at a clean commit. Preflight and job use
+`.venv-hpc-sun` (OS Python 3.12, no module loaded), which has `spiceypy`,
+`numpy` and `pyyaml` but **no scipy**; `.venv-hpc-ingest` has scipy but
+**no spiceypy**, so neither venv has both. Stage G needs spiceypy, so it
+uses `.venv-hpc-sun`. This works only because the scipy import is lazy:
+`hpc/preflight.py` and `anuma.darkness` import `anuma.hpc_smoke`, which
+imported `anuma.score`, which imported `scipy.ndimage` at module level.
+Since this commit, `anuma.score` imports scipy inside `hard_mask` (only
+when a slope radius is used) and `run_smoke` imports `anuma.score` only
+after its `check_only` return. `tests/test_hpc_smoke.py::test_check_only_paths_import_without_scipy`
+blocks scipy in a subprocess and imports preflight, `anuma.daily_lit` and
+`anuma.darkness` and runs the check-only smoke, so a regression fails
+locally before it reaches MeluXina.
 
 Login node: capture `myquota` and refresh the allocation and storage
 evidence files (they must be under 24 hours old). `myquota` exists only on

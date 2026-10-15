@@ -187,3 +187,16 @@ pilot path took 11 s and projected 0.05 node-hours; the full production path
 (3,200 draws, serial then 8 workers) took 2 min 28 s, below that
 projection. On MeluXina, add hashing of about 18 GB of inputs. Production
 should need well under 0.25 node-hours of its 1.5 node-hour walltime.
+
+## Lesson: which venv can import what (added with Stage G)
+
+Neither MeluXina venv has everything: `.venv-hpc-sun` has spiceypy but no
+scipy, and `.venv-hpc-ingest` has scipy but no spiceypy. A module-level
+import chain can therefore break a job that never calls the missing package:
+`hpc/preflight.py` → `anuma.hpc_smoke` → `anuma.score` →
+`scipy.ndimage` would crash any spiceypy job (Stage E/G) at import time on
+`.venv-hpc-sun`. Keep optional heavy imports inside the functions that need
+them (`anuma.score.hard_mask` imports scipy itself; `run_smoke` imports
+`anuma.score` only after its check-only return), and keep the scipy-blocked
+subprocess test in `tests/test_hpc_smoke.py` passing. Before choosing a venv
+for a new stage, list what its import chain needs, not only what it calls.

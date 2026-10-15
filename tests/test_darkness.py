@@ -357,6 +357,7 @@ def test_pilot_passes_every_check_and_refuses_reuse(stage_e):
     assert report["period"]["hours"] == 2160
     assert [d["epochs"] for d in report["timings_seconds"]["dispatches"]] == [744, 672, 744]
     assert report["sample_checks"]["windows"] == 6
+    assert len(report["inputs"]["run_key"]["sun_config_sha256"]) == 64
     assert report["projection"]["projection_limit_node_hours"] == 2.4
     assert report["passed"] is True
     assert "monthly/dark-best.npy" in json.loads((out / "output-manifest.json").read_text())["outputs"]
@@ -457,6 +458,7 @@ def test_receipt_pin_rejects_drift(stage_e):
     assert pin["period_start_day"] == "2026-01-01"
     assert pin["period_end_day_exclusive"] == "2026-04-01"
     assert len(pin["stage_e_manifest_sha256"]) == 64
+    assert pin["sun_config_sha256"] == hashlib.sha256(dk.sun_config_path().read_bytes()).hexdigest()
     # The repository daily-lit config is not the one this Stage E ran with.
     with pytest.raises(ValueError, match="daily-lit.yaml differs"):
         dk.receipt_pin(**args)

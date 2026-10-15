@@ -113,9 +113,12 @@ def test_run_writes_ranking_and_output_manifest(
     module_list = tmp_path / "module-list.txt"
     module_list.write_text("env/release/2025.1\nPython/3.12.3\n")
     monkeypatch.setenv("ANUMA_MODULE_LIST_FILE", str(module_list))
-    monkeypatch.setattr(hpc_smoke, "score", lambda layers, grid, cfg: object())
+    import anuma.score
+
+    # run_smoke imports these lazily, so patch them where they are defined.
+    monkeypatch.setattr(anuma.score, "score", lambda layers, grid, cfg: object())
     monkeypatch.setattr(
-        hpc_smoke,
+        anuma.score,
         "rank_sites",
         lambda result: [{"row": 1, "col": 2, "total": 0.75}],
     )
@@ -153,3 +156,34 @@ def test_grid_metadata_rejects_changed_transform(tmp_path):
     path.write_text(json.dumps(body))
     with pytest.raises(ValueError, match="does not match"):
         Grid.from_json(path, cfg=load_config())
+
+
+def test_check_only_paths_import_without_scipy(tmp_path):
+    """.venv-hpc-sun has no scipy: preflight, Stage E/G and check-only smoke must not need it."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[1]
+    manifest = _fixture_manifest(tmp_path)
+    script = f"""
+import importlib.util, sys
+sys.modules["scipy"] = None  # any scipy import now raises ImportError
+sys.path.insert(0, {str(repo)!r})
+spec = importlib.util.spec_from_file_location("preflight", {str(repo / "hpc" / "preflight.py")!r})
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+import anuma.daily_lit, anuma.darkness, anuma.score
+from pathlib import Path
+from anuma import hpc_smoke
+hpc_smoke.Grid.from_json = classmethod(lambda cls, path, cfg=None: object())
+result = module.run_smoke(Path({str(manifest)!r}), Path({str(tmp_path / "unused")!r}), check_only=True)
+assert result == {{"status": "validated", "shape": [2, 3]}}, result
+assert "scipy.ndimage" not in sys.modules
+print("ok")
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, cwd=tmp_path
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "ok"

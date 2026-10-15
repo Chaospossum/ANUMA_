@@ -22,7 +22,6 @@ import numpy as np
 
 from anuma.config import load_config, repo_root
 from anuma.grid import Grid
-from anuma.score import rank_sites, score
 
 SCHEMA_VERSION = 1
 EXPECTED_RESOLUTION_M = 240.0
@@ -162,6 +161,10 @@ def run_smoke(input_manifest: Path, output_dir: Path, check_only: bool = False) 
 
     if check_only:
         return {"status": "validated", "shape": list(expected_shape)}
+
+    # Imported here so check-only callers (preflight, Stage E/G jobs) run in
+    # environments without scipy, such as .venv-hpc-sun.
+    from anuma.score import rank_sites, score
 
     output_dir = output_dir.resolve()
     if output_dir.exists() and any(output_dir.iterdir()):
