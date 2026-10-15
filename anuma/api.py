@@ -12,7 +12,7 @@ import logging
 import math
 import os
 import re
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -25,9 +25,11 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from anuma.artemis import distinction, feature_collection
 from anuma.config import load_config, repo_root
 from anuma.daily_lit import INDEX_NAME, DailyLitCube
+from anuma.darkness import INDEX_NAME as DARKNESS_INDEX
+from anuma.darkness import DarknessCube
 from anuma.export import sites_csv, sites_geojson
 from anuma.grid import Grid
-from anuma.heatmap import displayed, render_png
+from anuma.heatmap import displayed, render_png, render_ramp_png
 from anuma.score import (
     apply_keepout,
     artemis_overlap,
@@ -63,8 +65,19 @@ GATED_BASIS = "slope_and_terrain_1km"
 
 _STORE: dict[str, Any] = {}
 _CUBES: dict[str, DailyLitCube] = {}
+_DARKNESS: dict[str, DarknessCube] = {}
 _MONTH = re.compile(r"\A([0-9]{4})-([0-9]{2})\Z")
 DAILY_LIT_MISSING = "daily sunlight data not available on this machine"
+DARKNESS_MISSING = "darkness (Stage G) data not available on this machine"
+# Stage G display layers: not in cfg["layers"], never scored.
+DARKNESS_LAYERS = {
+    "longest_dark": "Longest continuous darkness (days), {period} modelled",
+    "longest_lit": "Longest continuous sunlight (days), {period} modelled",
+}
+# Grey ramps (low end, high end) and the never-lit colour, as RGB.
+DARK_RAMP = ((242, 242, 242), (77, 77, 77))
+LIT_RAMP = ((77, 77, 77), (242, 242, 242))
+NEVER_LIT_RGB = (0, 0, 0)
 logger = logging.getLogger(__name__)
 
 
@@ -142,6 +155,7 @@ def data_root() -> Path:
 def clear_cache() -> None:
     _STORE.clear()
     _CUBES.clear()
+    _DARKNESS.clear()
 
 
 def _cfg() -> dict:
@@ -155,6 +169,7 @@ def _paths(cfg: dict, root: Path) -> dict[str, Path]:
         "grid_json": root / p["grid_json"],
         "artemis_geojson": root / p["artemis_geojson"],
         "daily_lit": root / p["daily_lit"],
+        "darkness": root / p["darkness"] if p.get("darkness") else None,
     }
 
 
@@ -507,6 +522,221 @@ def _default_window(cfg: dict) -> dict:
     return {"source": "published", "label": cfg["illumination_window"]["default_label"]}
 
 
+# ---- Stage G darkness (display and per-site facts; never scored)
+
+
+def _darkness_spec(cfg: dict) -> dict:
+    return cfg.get("darkness") or {}
+
+
+def _open_darkness(cfg: dict, root: Path, shape: tuple[int, int] | None = None) -> dict:
+    """``{"cube": DarknessCube | None, "available": bool, "reason": str | None}``.
+
+    Missing, unreadable or wrongly shaped output is unavailable, never an error.
+    """
+    path = _paths(cfg, root)["darkness"]
+    if path is None:
+        return {"cube": None, "available": False, "reason": "paths.darkness is not configured"}
+    key = str(path.resolve())
+    cube = _DARKNESS.get(key)
+    if cube is None:
+        if not (path / DARKNESS_INDEX).is_file():
+            return {"cube": None, "available": False, "reason": f"{DARKNESS_MISSING} ({path})"}
+        try:
+            cube = DarknessCube(path)
+            for name in ("dark_hours", "dark_start", "dark_flags", "lit_hours", "lit_flags"):
+                cube.period(name, (slice(0, 1), slice(0, 1)))
+        except (OSError, KeyError, ValueError) as exc:
+            logger.warning("darkness output at %s could not be opened: %s", path, exc)
+            return {"cube": None, "available": False, "reason": f"{DARKNESS_MISSING}: {exc}"}
+        _DARKNESS[key] = cube
+    if shape is not None and tuple(cube.valid.shape) != tuple(shape):
+        return {
+            "cube": None,
+            "available": False,
+            "reason": f"darkness shape {tuple(cube.valid.shape)} does not match grid {tuple(shape)}",
+        }
+    return {"cube": cube, "available": True, "reason": None}
+
+
+def _monthly_ready(cube: DarknessCube) -> bool:
+    return all((cube.root / name).is_file() for name in cube.index["monthly"].values())
+
+
+def _darkness_meta(cfg: dict, root: Path, info: dict) -> dict:
+    spec = _darkness_spec(cfg)
+    cube = info["cube"]
+    meta = {
+        "available": info["available"],
+        "reason": info["reason"],
+        "job": spec.get("job"),
+        "period_label": spec.get("period_label"),
+        "note": spec.get("note"),
+        "dark_display_max_days": _finite_or_none(spec.get("dark_display_max_days")),
+        "lit_display_max_days": _finite_or_none(spec.get("lit_display_max_days")),
+        "monthly_available": False,
+        "period": None,
+    }
+    if cube is not None:
+        meta["monthly_available"] = _monthly_ready(cube)
+        meta["period"] = {
+            "start_day_utc": cube.start.isoformat(),
+            "end_day_exclusive_utc": cube.end.isoformat(),
+            "hours": cube.total_hours,
+        }
+    return meta
+
+
+def _hour_utc(cube: DarknessCube, hour: int) -> str:
+    start = datetime(cube.start.year, cube.start.month, cube.start.day, tzinfo=timezone.utc)
+    return (start + timedelta(hours=int(hour))).strftime("%Y-%m-%dT%H:%MZ")
+
+
+def _days(hours: int | None) -> float | None:
+    return None if hours is None else round(hours / 24.0, 3)
+
+
+def _cube_months(window: MonthWindow) -> tuple[str, str]:
+    """The UI's inclusive month range as the reader's [start, end) months."""
+    start, end = window.days()
+    return _month_text(start), _month_text(end)
+
+
+DARKNESS_FIELDS = (
+    "longest_dark_hours",
+    "longest_dark_days",
+    "longest_dark_censored",
+    "never_lit",
+    "longest_dark_start_utc",
+    "longest_dark_end_utc",
+    "longest_lit_hours",
+    "longest_lit_days",
+    "longest_lit_censored",
+    "window_longest_dark_hours",
+    "window_longest_dark_days",
+    "window_longest_dark_censored",
+    "window_never_lit",
+)
+
+
+def _site_darkness(cube: DarknessCube | None, row: int, col: int, window: MonthWindow | None) -> dict:
+    """Per-site Stage G facts; every field null when the data or pixel is missing.
+
+    ``window_*`` describe the month window (runs clipped to it); they stay
+    null without a window or when its month files are not on this machine.
+    """
+    out: dict[str, Any] = dict.fromkeys(DARKNESS_FIELDS)
+    if cube is None or not bool(cube.valid[row, col]):
+        return out
+    cell = (slice(row, row + 1), slice(col, col + 1))
+    dark = int(cube.period("dark_hours", cell)[0, 0])
+    lit = int(cube.period("lit_hours", cell)[0, 0])
+    out.update(
+        longest_dark_hours=dark,
+        longest_dark_days=_days(dark),
+        longest_dark_censored=bool(cube.period("dark_flags", cell)[0, 0] != 0) and dark > 0,
+        never_lit=lit == 0,
+        longest_lit_hours=lit,
+        longest_lit_days=_days(lit),
+        longest_lit_censored=bool(cube.period("lit_flags", cell)[0, 0] != 0) and lit > 0,
+    )
+    if dark > 0:
+        start = int(cube.period("dark_start", cell)[0, 0])
+        out["longest_dark_start_utc"] = _hour_utc(cube, start)
+        out["longest_dark_end_utc"] = _hour_utc(cube, start + dark)
+    if window is not None:
+        try:
+            summary = cube.window_summary(*_cube_months(window), cell)
+        except (FileNotFoundError, ValueError) as exc:
+            logger.info("darkness window %s..%s not answered: %s", window.start, window.end, exc)
+            return out
+        best = int(summary["longest_dark_hours"][0, 0])
+        out.update(
+            window_longest_dark_hours=best,
+            window_longest_dark_days=_days(best),
+            window_longest_dark_censored=bool(summary["edge_censored"][0, 0]),
+            window_never_lit=best == summary["hours"],
+        )
+    return out
+
+
+def _darkness_window_status(cube: DarknessCube | None, window: MonthWindow | None) -> dict | None:
+    if window is None:
+        return None
+    status = {"start": window.start, "end": window.end, "available": False, "reason": None}
+    if cube is None:
+        status["reason"] = DARKNESS_MISSING
+        return status
+    try:
+        # A one-pixel probe: month files are needed unless the window is whole years.
+        cube.window_summary(*_cube_months(window), (slice(0, 1), slice(0, 1)))
+    except FileNotFoundError:
+        status["reason"] = "monthly darkness files are not on this machine; whole calendar years only"
+        return status
+    except ValueError as exc:
+        status["reason"] = str(exc)
+        return status
+    status["available"] = True
+    return status
+
+
+def _darkness_png(cfg: dict, root: Path, store: dict, name: str, window: MonthWindow | None) -> Response:
+    grid = store["grid"]
+    info = _open_darkness(cfg, root, (grid.height, grid.width))
+    cube = info["cube"]
+    if cube is None:
+        raise HTTPException(status_code=404, detail=f"{name} is not available: {info['reason']}")
+    spec = _darkness_spec(cfg)
+    headers = {"X-Anuma-Display-Only": "true", "X-Anuma-Unit": "days", "X-Anuma-Range-Basis": "fixed"}
+    cache = store.setdefault("darkness_png", {})
+    key = (name, None if window is None else (window.start, window.end))
+    if key in cache:
+        png, headers = cache[key]
+        return Response(content=png, media_type="image/png", headers=headers)
+    if name == "longest_lit":
+        if window is not None:
+            raise HTTPException(
+                status_code=400, detail="start/end months apply only to illumination and longest_dark"
+            )
+        hours = cube.period("lit_hours").astype(np.float64)
+        never = cube.valid & (hours == 0)
+        top = float(spec.get("lit_display_max_days", 30.0))
+        low_rgb, high_rgb = LIT_RAMP
+    else:
+        if window is None:
+            hours = cube.period("dark_hours").astype(np.float64)
+            span = cube.total_hours
+        else:
+            status = _darkness_window_status(cube, window)
+            if not status["available"]:
+                raise HTTPException(status_code=400, detail=f"darkness window: {status['reason']}")
+            try:
+                summary = cube.window_summary(*_cube_months(window))
+            except (FileNotFoundError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=f"darkness window: {exc}") from exc
+            hours = summary["longest_dark_hours"].astype(np.float64)
+            span = summary["hours"]
+            headers["X-Anuma-Window"] = f"{window.start}..{window.end}"
+        never = cube.valid & (hours == span)
+        top = float(spec.get("dark_display_max_days", 45.0))
+        low_rgb, high_rgb = DARK_RAMP
+    days = np.where(cube.valid, hours / 24.0, np.nan)
+    png = render_ramp_png(
+        days, never, low_rgb=low_rgb, high_rgb=high_rgb, flag_rgb=NEVER_LIT_RGB, vmin=0.0, vmax=top
+    )
+    headers.update(
+        {
+            "X-Anuma-Range-Min": "0",
+            "X-Anuma-Range-Max": f"{top:g}",
+            "X-Anuma-Never-Lit-Pixels": str(int(never.sum())),
+        }
+    )
+    if len(cache) >= 6:
+        cache.pop(next(iter(cache)))
+    cache[key] = (png, headers)
+    return Response(content=png, media_type="image/png", headers=headers)
+
+
 def _finite_or_none(value: Any) -> float | None:
     if value is None:
         return None
@@ -533,6 +763,7 @@ def _site_payload(site: dict) -> dict:
         "nearest": site.get("nearest"),
         "distance_km": _finite_or_none(site.get("distance_km")),
         "terrain_1km_fraction": _finite_or_none(site.get("terrain_1km_fraction")),
+        **{name: site.get(name) for name in DARKNESS_FIELDS},
     }
 
 
@@ -729,9 +960,14 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
     if terrain["available"]:
         for site in sites:
             site["terrain_1km_fraction"] = float(terrain["array"][site["row"], site["col"]])
+    grid = store["grid"]
+    darkness = _open_darkness(cfg, root, (grid.height, grid.width))
+    dark_window = _darkness_window_status(darkness["cube"], body.illumination_months)
+    use_window = body.illumination_months if dark_window and dark_window["available"] else None
+    for site in sites:
+        site.update(_site_darkness(darkness["cube"], site["row"], site["col"], use_window))
     geojson = _artemis_feature_collection(cfg, root)
     overlap = artemis_overlap(sites, geojson, result=result)
-    grid = store["grid"]
     payload = {
         "bounds": [grid.xmin, grid.ymin, grid.xmax, grid.ymax],
         "sites": [_site_payload(s) for s in overlap["sites"]],
@@ -745,6 +981,12 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
         "weights_used": weights,
         "hard_used": {"max_slope_deg": float(max_slope), "slope_radius_m": float(slope_radius)},
         "score_range": _score_range(result.combined),
+        "darkness": {
+            "available": darkness["available"],
+            "reason": darkness["reason"],
+            "job": _darkness_spec(cfg).get("job"),
+            "window": dark_window,
+        },
     }
     if include_png:
         png = render_png(result.combined, cmap="viridis")
@@ -802,6 +1044,9 @@ def _site_values(row: int, col: int, window: MonthWindow | None) -> dict:
             raise HTTPException(status_code=400, detail=f"daily sunlight cube: {exc}") from exc
         values["illumination"] = _finite_or_none(float(hours[0, 0]) / 24.0)
         illumination = {"source": "daily_lit", "start": window.start, "end": window.end}
+    dark = _open_darkness(cfg, root, (grid.height, grid.width))
+    dark_window = _darkness_window_status(dark["cube"], window)
+    use_window = window if dark_window and dark_window["available"] else None
     return {
         "row": row,
         "col": col,
@@ -810,6 +1055,12 @@ def _site_values(row: int, col: int, window: MonthWindow | None) -> dict:
         "values": values,
         "units": units,
         "illumination_window": illumination,
+        "darkness": _site_darkness(dark["cube"], row, col, use_window),
+        "darkness_status": {
+            "available": dark["available"],
+            "reason": dark["reason"],
+            "window": dark_window,
+        },
     }
 
 
@@ -907,6 +1158,25 @@ def create_app() -> FastAPI:
                     command=None if available else STAGE_F_COMMAND,
                 )
             layers.append(entry)
+        shape = None if missing else (grid.height, grid.width)
+        darkness = _darkness_meta(cfg, root, _open_darkness(cfg, root, shape))
+        for name, label in DARKNESS_LAYERS.items():
+            layers.append(
+                {
+                    "name": name,
+                    "label": label.format(period=darkness["period_label"] or "2026–2044"),
+                    "unit": "days",
+                    "mode": None,
+                    "citation": "ANUMA Stage G model, job " + str(darkness["job"]),
+                    "present": darkness["available"],
+                    "display_only": True,
+                    "darkness": True,
+                    "scored": False,
+                    "available": darkness["available"] and not missing,
+                    "windowed": name == "longest_dark",
+                    "command": None,
+                }
+            )
         return {
             "ingested": not missing,
             "missing": missing,
@@ -924,6 +1194,7 @@ def create_app() -> FastAPI:
             },
             "illumination_window": _window_meta(cfg, root),
             "terrain_gate": _terrain_summary(cfg, terrain),
+            "darkness": darkness,
             "studies_ranking_basis": (
                 STUDIES_RANKING_BASIS
                 if missing
@@ -964,9 +1235,10 @@ def create_app() -> FastAPI:
     ) -> Response:
         window = None
         if start is not None or end is not None:
-            if name != "illumination":
+            if name not in ("illumination", "longest_dark"):
                 raise HTTPException(
-                    status_code=400, detail="start/end months apply only to illumination"
+                    status_code=400,
+                    detail="start/end months apply only to illumination and longest_dark",
                 )
             if start is None or end is None:
                 raise HTTPException(status_code=400, detail="give both start and end months")
@@ -981,6 +1253,11 @@ def create_app() -> FastAPI:
             return Response(content=png, media_type="image/png")
         cfg = _cfg()
         root = data_root()
+        if name in DARKNESS_LAYERS:
+            store = _load_store(cfg, root)
+            if window is not None:
+                _check_window(window, _window_bounds(cfg))
+            return _darkness_png(cfg, root, store, name, window)
         if name not in cfg["layers"]:
             raise HTTPException(status_code=404, detail=f"Unknown layer {name!r}")
         store = _load_store(cfg, root)

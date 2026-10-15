@@ -261,6 +261,24 @@
         "passes at ≥ " + cut + " %; a hard rule, not scored; blank = no data";
       return;
     }
+    if (info.darkness) {
+      // Stage G days on a fixed grey ramp; never-lit pixels in black.
+      var dm = name === "longest_dark" ? currentWindow() : null;
+      var period = dm ? windowLabel(dm) : (meta.darkness && meta.darkness.period_label) || "2026–2044";
+      var dark = name === "longest_dark";
+      els.legendTitle.textContent =
+        (dark ? "Longest continuous darkness" : "Longest continuous sunlight") + " (days), " + period + " modelled";
+      els.legendBar.style.background = dark
+        ? "linear-gradient(to right, #f2f2f2, #4d4d4d)"
+        : "linear-gradient(to right, #4d4d4d, #f2f2f2)";
+      els.legendLow.textContent = "0";
+      els.legendHigh.textContent = "≥ " + (layerRange ? fmtRange(layerRange.max) : dark ? "45" : "30");
+      els.legendNote.innerHTML =
+        '<i class="sw sw-never"></i>never lit' + (dm ? " in this window" : "") +
+        "; " + (dark ? "white = shortest darkness" : "white = longest sunlight") +
+        "; display only, not scored; blank = no data";
+      return;
+    }
     if (info.display_only) {
       // Raw values on a fixed range in metres; not normalised, not scored.
       var u = info.unit ? " " + info.unit : "";
@@ -457,6 +475,132 @@
 
   function contribCell(value) {
     return value == null ? "–" : Number(value).toFixed(2);
+  }
+
+  // ---- Stage G darkness (per site, from /score; never scored)
+
+  // Longest dark stretch shown for a site: the month window's when one is
+  // active, else 2026–2044. null when the server has no darkness data.
+  function darkOf(site, months) {
+    if (!site) {
+      return null;
+    }
+    if (months) {
+      if (site.window_longest_dark_hours == null) {
+        return null;
+      }
+      return {
+        hours: site.window_longest_dark_hours,
+        censored: !!site.window_longest_dark_censored,
+        never: !!site.window_never_lit,
+        months: months,
+      };
+    }
+    if (site.longest_dark_hours == null) {
+      return null;
+    }
+    return {
+      hours: site.longest_dark_hours,
+      censored: !!site.longest_dark_censored,
+      never: !!site.never_lit,
+      months: null,
+    };
+  }
+
+  function daysText(hours) {
+    return (hours / 24).toFixed(1);
+  }
+
+  function darkWhy(months) {
+    var dark = (lastScore && lastScore.darkness) || {};
+    if (!dark.available) {
+      return dark.reason || "darkness data not on this machine";
+    }
+    if (months && dark.window && !dark.window.available) {
+      return dark.window.reason || "not available for this window";
+    }
+    return "not available";
+  }
+
+  function darkCell(site, months) {
+    var d = darkOf(site, months);
+    if (!d) {
+      return '<span class="na" title="' + escapeHtml(darkWhy(months)) + '">–</span>';
+    }
+    if (d.never) {
+      return '<span class="dark-never" title="no sunlit hour in ' +
+        (months ? escapeHtml(windowLabel(months)) : "2026–2044") + '">never lit</span>';
+    }
+    var title = (d.censored ? "touches the edge of the period; may be longer. " : "") +
+      d.hours + " h" + (months ? " in " + windowLabel(months) : ", 2026–2044");
+    return '<span title="' + escapeHtml(title) + '">' + (d.censored ? "≥ " : "") + daysText(d.hours) + '<span class="unit"> d</span></span>';
+  }
+
+  var MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  // "29 Jan–4 Feb 2032" from the run's first hour and its exclusive end hour
+  // (the last dark sample is one hour before the end).
+  function spanText(startIso, endIso) {
+    var a = new Date(startIso.replace(/Z$/, ":00Z"));
+    var b = new Date(new Date(endIso.replace(/Z$/, ":00Z")).getTime() - 3600 * 1000);
+    if (isNaN(a.getTime()) || isNaN(b.getTime())) {
+      return "";
+    }
+    var d1 = a.getUTCDate(), m1 = MONTH_SHORT[a.getUTCMonth()], y1 = a.getUTCFullYear();
+    var d2 = b.getUTCDate(), m2 = MONTH_SHORT[b.getUTCMonth()], y2 = b.getUTCFullYear();
+    if (y1 !== y2) {
+      return d1 + " " + m1 + " " + y1 + "–" + d2 + " " + m2 + " " + y2;
+    }
+    if (m1 !== m2) {
+      return d1 + " " + m1 + "–" + d2 + " " + m2 + " " + y2;
+    }
+    return d1 === d2 ? d1 + " " + m1 + " " + y1 : d1 + "–" + d2 + " " + m1 + " " + y1;
+  }
+
+  function darkFacts(card) {
+    var site = card.site;
+    var out = "";
+    if (site.longest_dark_hours == null) {
+      return fact("Longest darkness", '<span class="na">' + escapeHtml(darkWhy(null)) + "</span>");
+    }
+    var full;
+    if (site.never_lit) {
+      full = "never lit 2026–2044";
+    } else {
+      full = (site.longest_dark_censored ? "≥ " : "") + daysText(site.longest_dark_hours) + " days";
+      if (site.longest_dark_start_utc && site.longest_dark_end_utc) {
+        full += " (" + spanText(site.longest_dark_start_utc, site.longest_dark_end_utc) + ")";
+      }
+    }
+    if (card.months) {
+      var w = darkOf(site, card.months);
+      var head = !w
+        ? '<span class="na">' + escapeHtml(windowLabel(card.months)) + ": " + escapeHtml(darkWhy(card.months)) + "</span>"
+        : (w.never ? "never lit" : (w.censored ? "≥ " : "") + daysText(w.hours) + " days") +
+          " in " + escapeHtml(windowLabel(card.months));
+      out += fact("Longest darkness", head + ' <span class="na">(2026–2044: ' + escapeHtml(full) + ")</span>");
+    } else {
+      out += fact("Longest darkness", escapeHtml(full));
+    }
+    out += fact(
+      "Longest sunlight",
+      site.longest_lit_hours === 0
+        ? "never lit"
+        : (site.longest_lit_censored ? "≥ " : "") + (site.longest_lit_hours / 24).toFixed(0) + " days"
+    );
+    return out;
+  }
+
+  function darkWords(site, months) {
+    var d = darkOf(site, months);
+    if (!d) {
+      return null;
+    }
+    var where = months ? " in " + windowLabel(months) : "";
+    if (d.never) {
+      return "never lit" + (months ? " in " + windowLabel(months) : " 2026–2044");
+    }
+    return "longest dark stretch " + (d.censored ? "≥ " : "") + daysText(d.hours) + " days" + where;
   }
 
   function siteKey(site) {
@@ -738,6 +882,11 @@
     } else {
       parts.push("<p><b>Weight-robust</b>: Monte Carlo weight study not on this machine.</p>");
     }
+    parts.push(
+      "<p><b>Longest dark</b>: longest run of consecutive hours with no part of the Sun above the " +
+      "modelled 240 m horizon, 2026–2044 (or inside the sunlight month window), in days. " +
+      "Hourly samples (±1 h); ≥ = the run touches the edge of the period. Not scored.</p>"
+    );
     if (checks) {
       parts.push(
         "<p><b>Flat ground 1 km</b>: share of 20 m LOLA pixels at or below 8° within 1 km " +
@@ -923,6 +1072,7 @@
         : "lit " + (100 * v.illumination).toFixed(0) + " % of " +
             (card.months ? escapeHtml(windowLabel(card.months)) + " (modelled daily)" : "the time (18.6-yr average)")
     );
+    out += darkFacts(card);
     out += fact(
       "Slope (240 m)",
       v.slope == null
@@ -1213,6 +1363,8 @@
         scoreBar(contrib) +
         '</td><td class="num contrib">' +
         contribCell(contrib.illumination) +
+        '</td><td class="num dark-col">' +
+        darkCell(site, lastRequest && lastRequest.illumination_months) +
         '</td><td class="num contrib">' +
         contribCell(contrib.hydrogen) +
         '</td><td class="num contrib">' +
@@ -1596,10 +1748,11 @@
     els.answerMain.innerHTML =
       head + " — " + [
         sunlightWords(values, months),
+        darkWords(best, months),
         earthWords(values, true),
         flatWords(best, scenario),
         robustWords(best, scenario),
-      ].join(", ") + ".";
+      ].filter(Boolean).join(", ") + ".";
   }
 
   // ---- Artemis III keep-out
@@ -2077,7 +2230,7 @@
     }
     try {
       var path = "/layer/" + encodeURIComponent(name) + ".png";
-      var months = name === "illumination" ? currentWindow() : null;
+      var months = name === "illumination" || name === "longest_dark" ? currentWindow() : null;
       if (months) {
         path += "?start=" + encodeURIComponent(months.start) + "&end=" + encodeURIComponent(months.end);
       }
@@ -2362,6 +2515,22 @@
         await runScore({ keepLayer: true });
       }
       applyUrlSite();
+      applyUrlLayer();
+    }
+  }
+
+  // ?layer=longest_dark shows one map layer after scoring (demos, screenshots).
+  function applyUrlLayer() {
+    var name = PARAMS.get("layer");
+    if (!name) {
+      return;
+    }
+    var option = Array.prototype.filter.call(els.layer.options, function (opt) {
+      return opt.value === name && !opt.disabled;
+    })[0];
+    if (option) {
+      els.layer.value = name;
+      showSingleLayer(name);
     }
   }
 

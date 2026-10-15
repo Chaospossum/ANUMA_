@@ -628,6 +628,9 @@ select {
 .sites-table .loc {
   font-family: var(--mono);
   font-size: 0.95em;
+  /* Latitude over longitude when the panel is narrow, so the table fits. */
+  white-space: normal;
+  min-width: 4.5em;
 }
 
 .sites-table .num {
@@ -941,9 +944,18 @@ body.present .sites-table {
   font-size: 18px;
 }
 
+/* Smaller headers keep nine columns inside 1280 px without side-scrolling. */
+body.present .sites-table th {
+  font-size: 0.85em;
+}
+
 body.present .sites-table th,
 body.present .sites-table td {
-  padding: 3px 7px;
+  padding: 3px 4px;
+}
+
+body.present .sites-table .score-bar {
+  min-width: 3.8em;
 }
 
 body.present .table-legend {
@@ -1053,6 +1065,7 @@ body.present .a-dist {
 body.present .sites-table .loc {
   font-family: var(--sans);
   font-size: 1em;
+  white-space: nowrap;
 }
 
 body.present .status {
@@ -1434,4 +1447,24 @@ body.present .present-csv {
 
 .site-mark.dim {
   opacity: 0.3;
+}
+
+/* Stage G longest darkness: a table column and the never-lit legend swatch. */
+.sites-table .dark-col {
+  white-space: nowrap;
+}
+
+.dark-never {
+  font-size: 0.85em;
+  color: var(--muted);
+}
+
+.sw-never {
+  background: #000;
+  margin-left: 0;
+}
+
+.sites-table .dark-col .unit {
+  font-family: var(--sans);
+  font-size: 0.85em;
 }

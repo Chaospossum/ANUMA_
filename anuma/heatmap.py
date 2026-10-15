@@ -81,6 +81,49 @@ def render_png(
     return buf.getvalue()
 
 
+FLAG_INDEX = 254
+
+
+def render_ramp_png(
+    array: np.ndarray,
+    flag: np.ndarray,
+    *,
+    low_rgb: tuple[int, int, int],
+    high_rgb: tuple[int, int, int],
+    flag_rgb: tuple[int, int, int],
+    vmin: float,
+    vmax: float,
+    max_dim: int = PNG_MAX_DIM,
+) -> bytes:
+    """A linear two-colour ramp with one extra colour for ``flag`` pixels.
+
+    NaN pixels are transparent; flagged pixels (finite or not) take
+    ``flag_rgb``. Values outside [vmin, vmax] take the end colours. One image
+    pixel per array cell up to ``max_dim``, like ``render_png``.
+    """
+    data = _downsample(np.asarray(array, dtype=np.float64), max_dim)
+    marks = _downsample(np.where(np.asarray(flag, dtype=bool), 1.0, 0.0), max_dim) > 0.5
+    finite = np.isfinite(data)
+    levels = FLAG_INDEX
+    index = np.full(data.shape, TRANSPARENT_INDEX, dtype=np.uint8)
+    if finite.any():
+        hi = float(vmax) if float(vmax) > float(vmin) else float(vmin) + 1.0
+        scaled = np.clip((data[finite] - float(vmin)) / (hi - float(vmin)), 0.0, 1.0)
+        index[finite] = np.minimum((scaled * levels).astype(np.int64), levels - 1)
+    index[marks] = FLAG_INDEX
+    t = np.linspace(0.0, 1.0, levels)[:, None]
+    ramp = np.rint((1.0 - t) * np.array(low_rgb) + t * np.array(high_rgb)).astype(np.uint8)
+    palette = np.zeros((256, 3), dtype=np.uint8)
+    palette[:levels] = ramp
+    palette[FLAG_INDEX] = flag_rgb
+    image = Image.fromarray(index, "P")
+    image.putpalette(palette.ravel().tolist())
+    alpha = bytes([255] * (FLAG_INDEX + 1) + [0])
+    buf = io.BytesIO()
+    image.save(buf, format="png", transparency=alpha, compress_level=6)
+    return buf.getvalue()
+
+
 def render_ranked_png(
     array: np.ndarray,
     sites: list[dict],

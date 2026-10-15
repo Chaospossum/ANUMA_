@@ -16,6 +16,8 @@ paths:
   artemis_geojson: data/artemis3_regions.geojson
   # Stage E daily lit hours (job 5342908); read from the data root like the grid.
   daily_lit: out/hpc/daily-lit-production-5342908
+  # Stage G longest dark and lit periods (job 5345264); read from the data root.
+  darkness: out/hpc/darkness-production-5345264
 
 hard:
   max_slope_deg: 8.0
@@ -109,6 +111,16 @@ illumination_window:
   last_month: "2044-08"
   default_label: "18.6-yr average (published map)"
   note: "Scenario window, not mission dates"
+
+# Stage G display layers (/layer/longest_dark.png, /layer/longest_lit.png).
+# Display only, not scored. Values above display_max_days take the end colour;
+# never-lit pixels are drawn in their own colour.
+darkness:
+  job: "5345264"
+  period_label: "2026–2044"
+  dark_display_max_days: 45.0
+  lit_display_max_days: 30.0
+  note: "ANUMA model on the 240 m Stage A horizon; lit = any sliver of the Sun above the horizon"
 
 provenance:
   illumination_affine_revision: pds3-pixel-center-v2
