@@ -12,6 +12,9 @@
       <header class="header">
         <h1>anuma</h1>
         <div class="header-right">
+          <button type="button" id="rail-toggle" class="present-toggle rail-toggle" aria-expanded="true" aria-controls="rail">
+            Scenario ◂
+          </button>
           <p class="subtitle">Student project · NeoSpace Challenge 2026 · 80°S–90°S</p>
           <button type="button" id="present-toggle" class="present-toggle" aria-pressed="false">
             Presentation mode
@@ -20,8 +23,9 @@
       </header>
 
       <div class="workspace">
-        <section class="panel panel-form" aria-label="Scoring parameters">
+        <section class="panel panel-form" id="rail" aria-label="Scenario">
           <form id="score-form" onsubmit="return false;">
+            <div class="rail-scroll">
             <div class="field">
               <label for="w-illum">Illumination</label>
               <div class="control-row">
@@ -118,10 +122,18 @@
                 Show Artemis III regions
               </label>
             </div>
-            <button type="button" id="btn-score" class="primary">Score</button>
-            <div class="export-actions" aria-label="Download ranked sites">
-              <button type="button" id="btn-csv" disabled>Download CSV</button>
-              <button type="button" id="btn-geojson" disabled>Download GeoJSON</button>
+            <details class="field regions" id="artemis-rail" hidden>
+              <summary>Artemis III regions</summary>
+              <p class="help" id="artemis-note"></p>
+              <ol id="artemis-list" class="artemis-list"></ol>
+            </details>
+            </div>
+            <div class="rail-actions">
+              <button type="button" id="btn-score" class="primary">Score</button>
+              <div class="export-actions" aria-label="Download ranked sites">
+                <button type="button" id="btn-csv" disabled>Download CSV</button>
+                <button type="button" id="btn-geojson" disabled>Download GeoJSON</button>
+              </div>
             </div>
           </form>
         </section>
@@ -163,24 +175,32 @@
               <thead>
                 <tr>
                   <th>#</th>
-                  <th>Latitude</th>
-                  <th>Longitude</th>
+                  <th>Location</th>
                   <th>Score</th>
-                  <th title="Illumination contribution">Illum.</th>
-                  <th title="Hydrogen contribution">Hydr.</th>
-                  <th title="Earth-visibility contribution">Earth</th>
-                  <th title="Share of Monte Carlo weight draws with this site in the top 10">Top-10 %</th>
-                  <th title="1 km slope rule under the published LOLA height error (Stage D)">Noise</th>
+                  <th class="contrib">Sunlight</th>
+                  <th class="contrib">Hydrogen</th>
+                  <th class="contrib">Earth<br />view</th>
+                  <th>Weight-<br />robust</th>
+                  <th>Flat ground<br />1 km</th>
+                  <th>DEM-<br />noise</th>
                   <th class="wrap">Artemis III</th>
                 </tr>
               </thead>
               <tbody id="sites"></tbody>
             </table>
-            <p class="table-note" id="table-note"></p>
           </div>
-          <div id="artemis-rail" hidden>
-            <p class="help" id="artemis-note"></p>
-            <ul id="artemis-list" class="artemis-list"></ul>
+          <div class="table-legend" id="table-legend">
+            <span><b class="v v-pass">✓</b> passes</span>
+            <span><b class="v v-fail">✗</b> fails</span>
+            <span><b class="v v-edge">≈</b> borderline</span>
+            <span><b class="v v-none">–</b> not checked</span>
+            <span class="info">
+              <button type="button" class="info-button" id="info-button" aria-expanded="false" aria-controls="table-note" aria-label="About these columns">i</button>
+              <div class="info-pop" id="table-note" role="note" hidden></div>
+            </span>
+            <span class="legend-rule contrib-rule">Sunlight, Hydrogen, Earth view: points each adds; Score is their sum.</span>
+            <span class="legend-rule bar-rule">Score bar: <i class="sw c-sun"></i> sunlight <i class="sw c-hyd"></i> hydrogen <i class="sw c-earth"></i> Earth view (full width = 1)</span>
+            <span class="legend-rule">Flat ground: share of 20 m pixels ≤ 8° within 1 km; passes at ≥ 50 %.</span>
           </div>
         </section>
       </div>

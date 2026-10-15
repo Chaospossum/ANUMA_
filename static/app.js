@@ -7,6 +7,9 @@
     "#1f9e89, #35b779, #6ece58, #b5de2b, #fde725)";
   var GREY = "linear-gradient(to right, #000000, #ffffff)";
   var PRESENT_KEY = "anuma.presentation";
+  var RAIL_KEY = "anuma.rail";
+  // URL switches for demos and screenshots: ?present=1&rail=0&site=1
+  var PARAMS = new URLSearchParams(window.location.search);
 
   var map = null;
   var overlay = null;
@@ -31,6 +34,7 @@
   var layerSeq = 0;
   // Colour range of the last display-only layer PNG, from its response headers.
   var layerRange = null;
+  var initialSiteShown = false;
   var MAX_MONTHS = 600;
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -69,6 +73,8 @@
     legendHigh: document.getElementById("legend-high"),
     legendNote: document.getElementById("legend-note"),
     tableNote: document.getElementById("table-note"),
+    infoButton: document.getElementById("info-button"),
+    railToggle: document.getElementById("rail-toggle"),
     present: document.getElementById("present-toggle"),
     keepout: document.getElementById("keepout-toggle"),
     keepoutBody: document.getElementById("keepout-body"),
@@ -97,6 +103,16 @@
     var wrapped = ((lon + 180) % 360 + 360) % 360 - 180;
     var hemi = wrapped < 0 ? "W" : "E";
     return Math.abs(wrapped).toFixed(4) + "°" + hemi;
+  }
+
+  // "89.45°S 137.3°W": 0.01° of latitude and 0.1° of longitude are both
+  // a few hundred metres this close to the pole.
+  function fmtLocation(lat, lon) {
+    var wrapped = ((lon + 180) % 360 + 360) % 360 - 180;
+    return (
+      Math.abs(lat).toFixed(2) + "°" + (lat <= 0 ? "S" : "N") + " " +
+      Math.abs(wrapped).toFixed(1) + "°" + (wrapped < 0 ? "W" : "E")
+    );
   }
 
   function pad2(n) {
@@ -322,6 +338,22 @@
     els.coords.textContent = fmtLat(latlng.lat) + "  " + fmtLon(latlng.lng);
   }
 
+  // Score split into its three parts; the full bar width is a score of 1.
+  function scoreBar(contrib) {
+    var parts = [
+      ["illumination", "c-sun"],
+      ["hydrogen", "c-hyd"],
+      ["earth_visibility", "c-earth"],
+    ];
+    var html = parts
+      .map(function (part) {
+        var value = Math.max(0, Number(contrib[part[0]]) || 0);
+        return '<i class="' + part[1] + '" style="width:' + (100 * Math.min(1, value)).toFixed(1) + '%"></i>';
+      })
+      .join("");
+    return '<span class="score-bar" aria-hidden="true">' + html + "</span>";
+  }
+
   function contribCell(value) {
     return value == null ? "–" : Number(value).toFixed(2);
   }
@@ -341,25 +373,44 @@
     return null;
   }
 
-  function stabilityCell(site) {
-    var row = stabilityById[siteKey(site)];
-    if (!row) {
-      return "–";
-    }
-    var text = (100 * row.frequency).toFixed(1) + " %";
-    var win = winnerFrequency(site);
-    if (win != null) {
-      return '<span title="Winner in ' + (100 * win).toFixed(1) + ' % of draws">' + text + "</span>";
-    }
-    return text;
+  // Verdict mark: shape + colour, with the word for screen readers and hover.
+  var VERDICT = {
+    pass: { mark: "✓", cls: "v-pass", word: "passes" },
+    fail: { mark: "✗", cls: "v-fail", word: "fails" },
+    edge: { mark: "≈", cls: "v-edge", word: "borderline" },
+    none: { mark: "–", cls: "v-none", word: "not checked" },
+  };
+
+  function verdictHtml(kind, extra, title) {
+    var v = VERDICT[kind];
+    var label = escapeHtml(title || v.word);
+    return (
+      '<span class="v ' + v.cls + '" title="' + label + '" aria-label="' + label + '">' +
+      v.mark + "</span>" + (extra ? " " + extra : "")
+    );
   }
 
-  // Nearest Stage B check within its match distance, compared in grid metres.
+  function stabilityRow(site) {
+    return stabilityById[siteKey(site)] || null;
+  }
+
+  function stabilityCell(site) {
+    if (!stability || !stability.available) {
+      return verdictHtml("none", "", "Monte Carlo weight study not on this machine");
+    }
+    var row = stabilityRow(site);
+    // Every site that reached the top 10 in any draw is listed, so a
+    // missing site was in the top 10 in none of the draws.
+    var freq = row ? row.frequency : 0;
+    return (100 * freq).toFixed(freq === 1 || freq === 0 ? 0 : 1) + " %";
+  }
+
+  // 20 m flat-ground check for the same 240 m cell only, so a neighbouring
+  // cell never inherits a check.
   function stageBCheck(site) {
     if (!checks || !checks.sites) {
       return null;
     }
-    // Same 240 m cell only, so a neighbouring cell never inherits a check.
     var found = null;
     checks.sites.forEach(function (check) {
       if (check.row === site.row && check.col === site.col) {
@@ -369,99 +420,114 @@
     return found;
   }
 
-  function flagHtml(site) {
-    var check = stageBCheck(site);
-    if (!check) {
-      return "";
-    }
-    var flag = checks.flag;
-    var value = check.fraction_le_8deg[flag.field];
-    if (!(value < flag.below)) {
-      return "";
-    }
-    var title =
-      flag.text + ": " + Math.round(100 * value) + " % of 20 m pixels ≤ 8° within 1 km (job " +
-      checks.source.job + ")";
-    title = escapeHtml(title);
-    return ' <span class="flag" title="' + title + '" aria-label="' + title + '">⚠</span>';
+  function flatThreshold() {
+    return (noiseChecks && noiseChecks.threshold) || 0.5;
   }
 
-  // Stage D verdict for the same 240 m cell only; untested sites get a dash.
-  function noiseCell(site) {
+  // Share of 20 m pixels at or below 8° within 1 km, or null if unchecked.
+  function flatFraction(site) {
+    var check = stageBCheck(site);
+    return check ? check.fraction_le_8deg.within_1km : null;
+  }
+
+  function flatCell(site) {
+    var value = flatFraction(site);
+    if (value == null) {
+      return verdictHtml("none", "", "not in the 20 m terrain check");
+    }
+    var pct = Math.round(100 * value) + " %";
+    var pass = value >= flatThreshold();
+    return verdictHtml(
+      pass ? "pass" : "fail",
+      pct,
+      (pass ? "passes" : "fails") + ": " + pct + " of 20 m pixels within 1 km are ≤ 8°"
+    );
+  }
+
+  // DEM-noise verdict for the same 240 m cell only.
+  function noiseCheck(site) {
     var found = null;
     ((noiseChecks && noiseChecks.sites) || []).forEach(function (check) {
       if (check.row === site.row && check.col === site.col) {
         found = check;
       }
     });
+    return found;
+  }
+
+  // passes / fails in every draw; otherwise borderline (on the 50 % line,
+  // or a mix of passing and failing draws).
+  function noiseKind(found) {
     if (!found) {
-      return '<span title="Not in the DEM-noise study">–</span>';
+      return "none";
     }
-    var text = noiseChecks.text || {};
-    var passPct = (100 * found.pass_rate).toFixed(1);
-    var zeroPct = (100 * found.zero_noise_within_1km).toFixed(1);
-    var symbol;
-    var title;
     if (found.noise_unstable) {
-      symbol = "≈";
-      title = text.unstable;
-    } else if (found.pass_rate === 1) {
-      symbol = "✓";
-      title = text.stable_pass;
-    } else if (found.pass_rate === 0) {
-      symbol = "✗";
-      title = text.stable_fail;
-    } else {
-      // Tested and stable by the Stage D rule, but neither all-pass nor all-fail.
-      symbol = "·";
-      title =
-        "stable by the Stage D rule; passes in " + passPct + " % of " + noiseChecks.draws +
-        " draws (no noise " + zeroPct + " %)";
+      return "edge";
     }
-    if (symbol !== "·") {
-      title +=
-        " (" + passPct + " % of " + noiseChecks.draws + " draws pass; no noise " + zeroPct + " %)";
+    if (found.pass_rate === 1) {
+      return "pass";
     }
-    title = escapeHtml(title);
-    return '<span class="noise" title="' + title + '" aria-label="' + title + '">' + symbol + "</span>";
+    if (found.pass_rate === 0) {
+      return "fail";
+    }
+    return "edge";
+  }
+
+  function noiseWords(found) {
+    if (!found) {
+      return "not checked";
+    }
+    var kind = noiseKind(found);
+    var pass = (100 * found.pass_rate).toFixed(0) + " % of " + noiseChecks.draws + " draws pass";
+    if (kind === "pass") {
+      return "passes in every one of " + noiseChecks.draws + " DEM-noise draws";
+    }
+    if (kind === "fail") {
+      return "fails in every one of " + noiseChecks.draws + " DEM-noise draws";
+    }
+    return "borderline: " + pass + (found.noise_unstable ? "; sits on the 50 % line" : "");
+  }
+
+  function noiseCell(site) {
+    var found = noiseCheck(site);
+    return verdictHtml(noiseKind(found), "", noiseWords(found));
   }
 
   function renderTableNote() {
     var parts = [];
+    parts.push(
+      "<p><b>Score</b> 0–1: weighted sum of normalised sunlight, hydrogen and Earth view. " +
+      "Sites must pass the slope rule on the 240 m grid. Ranked sites are at least 10 km apart.</p>"
+    );
     if (stability && stability.available) {
       var text =
-        "Top-10 %: share of " + stability.draw_count + " weight draws (job " +
-        stability.job_id + ") with the site in the top 10; " + stability.note + ".";
+        "<p><b>Weight-robust</b>: share of " + stability.draw_count +
+        " random weight sets (each weight varied by ±0.1, job " + escapeHtml(stability.job_id) +
+        ") in which the site stays in the top 10. Measured for the default scenario only.";
       var winner = (stability.winners || [])[0];
-      var index = -1;
-      if (winner && currentSites) {
-        currentSites.forEach(function (site, i) {
-          if (site.row === winner.row && site.col === winner.col) {
-            index = i;
-          }
-        });
+      if (winner) {
+        text += " The default #1 is the winner in " + (100 * winner.frequency).toFixed(1) + " % of draws.";
       }
-      if (index >= 0) {
-        text += " Site " + pad2(index + 1) + " wins in " + (100 * winner.frequency).toFixed(1) + " % of draws.";
-      }
-      parts.push(text + " – = not in the study.");
+      parts.push(text + "</p>");
     } else {
-      parts.push("Top-10 %: Monte Carlo study not on disk.");
+      parts.push("<p><b>Weight-robust</b>: Monte Carlo weight study not on this machine.</p>");
     }
     if (checks) {
       parts.push(
-        "⚠ = " + checks.flag.text + ", job " + checks.source.job +
-        "; only the default top 10 were checked."
+        "<p><b>Flat ground 1 km</b>: share of 20 m LOLA pixels at or below 8° within 1 km " +
+        "of the 240 m cell centre (job " + escapeHtml(checks.source.job) +
+        "). Only the default top 10 were checked.</p>"
       );
     }
     if (noiseChecks) {
       parts.push(
-        "DEM noise: job " + noiseChecks.source.job + ", " + noiseChecks.draws +
-        " draws, LOLA PGDA 90 height error; ✓ passes / ✗ fails the 50 %/1 km rule in every draw," +
-        " ≈ on the 50 % line, – = not tested."
+        "<p><b>DEM-noise</b>: the flat-ground rule (≥ 50 % within 1 km) re-run in " +
+        noiseChecks.draws + " draws of the published LOLA height error (job " +
+        escapeHtml(noiseChecks.source.job) + "). ✓/✗ = same answer in every draw; " +
+        "≈ = the answer flips or sits on the 50 % line. Only 8 sites were tested.</p>"
       );
     }
-    els.tableNote.textContent = parts.join(" ");
+    els.tableNote.innerHTML = parts.join("");
   }
 
   function isPresenting() {
@@ -576,10 +642,12 @@
   function artemisCell(site) {
     if (site.nearest) {
       var dist =
-        site.distance_km == null ? "" : " (" + Number(site.distance_km).toFixed(1) + " km)";
-      return escapeHtml(site.nearest) + dist;
+        site.distance_km == null
+          ? ""
+          : ' <span class="a-dist">' + Number(site.distance_km).toFixed(1) + " km</span>";
+      return '<span class="a-name">' + escapeHtml(site.nearest) + "</span>" + dist;
     }
-    return "unpublished";
+    return '<span class="na">none cited</span>';
   }
 
   // L.circle measures with Earth's radius under Proj4Leaflet, so the ring is
@@ -620,24 +688,24 @@
         tr.className = "active";
       }
       tr.innerHTML =
-        '<td class="num">' +
+        '<td class="num rank">' +
         pad2(index + 1) +
-        flagHtml(site) +
-        '</td><td class="num">' +
-        fmtLat(site.lat) +
-        '</td><td class="num">' +
-        fmtLon(site.lon) +
-        '</td><td class="num">' +
+        '</td><td class="loc">' +
+        fmtLocation(site.lat, site.lon) +
+        '</td><td class="num score-cell">' +
         Number(site.total).toFixed(3) +
-        '</td><td class="num">' +
+        scoreBar(contrib) +
+        '</td><td class="num contrib">' +
         contribCell(contrib.illumination) +
-        '</td><td class="num">' +
+        '</td><td class="num contrib">' +
         contribCell(contrib.hydrogen) +
-        '</td><td class="num">' +
+        '</td><td class="num contrib">' +
         contribCell(contrib.earth_visibility) +
         '</td><td class="num">' +
         stabilityCell(site) +
-        '</td><td class="noise-cell">' +
+        '</td><td class="num">' +
+        flatCell(site) +
+        "</td><td>" +
         noiseCell(site) +
         '</td><td class="wrap">' +
         artemisCell(site) +
@@ -650,17 +718,37 @@
     drawMarkers();
   }
 
+  // Artemis III regions ranked by the score at their approximate point; the
+  // list sits in a closed <details> so it never pushes the Score button away.
   function renderArtemis(artemis) {
     if (!artemis) {
       els.artemisRail.hidden = true;
       return;
     }
+    els.artemisRail.hidden = false;
     els.artemisNote.textContent =
-      artemis.note || "NASA has not published region centres.";
+      "Score at each region's approximate point (Goossens et al. 2025), best first. " +
+      "NASA has not published region centres.";
+    var regions = (artemis.regions || []).slice().sort(function (a, b) {
+      var ra = a.rank == null ? Infinity : a.rank;
+      var rb = b.rank == null ? Infinity : b.rank;
+      return ra - rb || String(a.name).localeCompare(String(b.name));
+    });
     els.artemisList.innerHTML = "";
-    (artemis.regions || []).forEach(function (region) {
+    regions.forEach(function (region) {
       var li = document.createElement("li");
-      li.textContent = region.name;
+      var why =
+        region.coordinate_status === "not_published"
+          ? "no cited point"
+          : "fails slope rule or keep-out at its point";
+      li.innerHTML =
+        escapeHtml(region.name) +
+        (region.best_score == null
+          ? ' <span class="na">' + why + "</span>"
+          : ' <span class="mono">' + Number(region.best_score).toFixed(2) + "</span>");
+      if (region.rank == null) {
+        li.className = "unranked";
+      }
       els.artemisList.appendChild(li);
     });
   }
@@ -1052,6 +1140,13 @@
       selectedRank = null;
       renderSites(payload.sites, request.hard.slope_radius_m);
       renderArtemis(payload.artemis);
+      if (PARAMS.get("site") && !initialSiteShown) {
+        initialSiteShown = true;
+        var wanted = Number(PARAMS.get("site")) - 1;
+        if (wanted >= 0 && wanted < currentSites.length) {
+          selectSite(wanted);
+        }
+      }
       els.csv.disabled = false;
       els.geojson.disabled = false;
     } catch (err) {
@@ -1141,26 +1236,12 @@
         map.removeLayer(artemisLayer);
         artemisLayer = null;
       }
-      els.artemisRail.hidden = true;
       return;
     }
-    var response = await fetch("/artemis3.geojson");
-    var geojson = await response.json();
-    var hasGeom = (geojson.features || []).some(function (feat) {
-      return feat.geometry;
-    });
-    els.artemisRail.hidden = false;
-    if (!hasGeom) {
-      els.artemisNote.textContent =
-        "NASA named nine regions (28 Oct 2024) and did not publish centres. Outlines cannot be drawn.";
-      if (!els.artemisList.children.length) {
-        (geojson.features || []).forEach(function (feat) {
-          var li = document.createElement("li");
-          li.textContent = feat.properties && feat.properties.name;
-          els.artemisList.appendChild(li);
-        });
-      }
-      return;
+    var geojson = artemisGeojson;
+    if (!geojson) {
+      var response = await fetch("/artemis3.geojson");
+      geojson = await response.json();
     }
     if (artemisLayer) {
       map.removeLayer(artemisLayer);
@@ -1218,7 +1299,31 @@
     }
   }
 
+  function setRail(open) {
+    document.body.classList.toggle("rail-closed", !open);
+    els.railToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    els.railToggle.textContent = open ? "Scenario ◂" : "Scenario ▸";
+    if (map) {
+      window.setTimeout(function () {
+        map.invalidateSize();
+        drawMarkers();
+      }, 0);
+    }
+  }
+
+  function railOpen() {
+    return !document.body.classList.contains("rail-closed");
+  }
+
+  function setInfo(open) {
+    els.tableNote.hidden = !open;
+    els.infoButton.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
   function storedPresenting() {
+    if (PARAMS.has("present")) {
+      return PARAMS.get("present") === "1";
+    }
     try {
       return window.localStorage.getItem(PRESENT_KEY) === "1";
     } catch (err) {
@@ -1228,8 +1333,31 @@
 
   async function main() {
     setPresenting(storedPresenting());
+    // Presentation mode starts with the scenario rail closed.
+    setRail(PARAMS.has("rail") ? PARAMS.get("rail") === "1" : !isPresenting());
     els.present.addEventListener("click", function () {
       setPresenting(!isPresenting());
+      setRail(!isPresenting());
+    });
+    els.railToggle.addEventListener("click", function () {
+      setRail(!railOpen());
+    });
+    els.infoButton.addEventListener("click", function (event) {
+      event.stopPropagation();
+      setInfo(els.tableNote.hidden);
+    });
+    document.addEventListener("click", function (event) {
+      if (!els.tableNote.hidden && !els.tableNote.contains(event.target)) {
+        setInfo(false);
+      }
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        setInfo(false);
+        if (isPresenting() && railOpen()) {
+          setRail(false);
+        }
+      }
     });
     [els.illum, els.hydro, els.earth].forEach(function (slider) {
       slider.addEventListener("input", syncSliderLabels);

@@ -479,11 +479,14 @@ def test_stage_d_noise_file_missing_is_404(client_empty: TestClient, monkeypatch
 def test_sites_table_has_noise_column():
     html = (repo_root() / "static" / "index.html").read_text()
     app_js = (repo_root() / "static" / "app.js").read_text()
-    assert ">Noise</th>" in html
+    assert ">DEM-<br />noise</th>" in html
+    assert ">Flat ground<br />1 km</th>" in html
     assert "/checks/stage-d-noise.json" in app_js
     assert "check.row === site.row && check.col === site.col" in app_js
-    # A tested, stable site with a mixed pass rate is not reported as untested.
-    assert "stable by the Stage D rule" in app_js
+    # A tested site with a mixed pass rate is borderline, not untested.
+    assert 'return "borderline: " + pass' in app_js
+    # Verdicts are in a visible legend row, not only in tooltips.
+    assert 'id="table-legend"' in html and "not checked</span>" in html
     assert 'id="legend-note">blank = fails slope rule' in html
 
 

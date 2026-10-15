@@ -134,11 +134,20 @@ h1 {
 }
 
 .workspace {
+  position: relative;
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) minmax(420px, 520px);
+  grid-template-columns: 250px minmax(0, 1fr) minmax(460px, 560px);
   gap: 8px;
   padding: 8px;
   min-height: 0;
+}
+
+body.rail-closed .workspace {
+  grid-template-columns: minmax(0, 1fr) minmax(460px, 560px);
+}
+
+body.rail-closed .panel-form {
+  display: none;
 }
 
 .panel {
@@ -148,8 +157,36 @@ h1 {
   overflow: auto;
 }
 
+/* Rail: controls scroll, Score and exports stay in view at 768 px height. */
 .panel-form {
+  padding: 0;
+  overflow: hidden;
+}
+
+.panel-form form {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.rail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   padding: 12px;
+}
+
+.rail-actions {
+  flex: none;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--white);
+}
+
+.regions summary {
+  font-weight: 500;
+  font-size: 0.8rem;
+  cursor: pointer;
 }
 
 .field {
@@ -494,15 +531,18 @@ select {
   flex-direction: column;
 }
 
+.panel-sites > * {
+  flex: none;
+}
+
 .table-wrap {
-  overflow: auto;
-  flex: 1;
+  overflow-x: auto;
 }
 
 .sites-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
 }
 
 .sites-table th,
@@ -516,18 +556,36 @@ select {
 
 .sites-table th {
   font-weight: 500;
+  line-height: 1.15;
+  vertical-align: bottom;
   background: var(--white);
   position: sticky;
   top: 0;
+  z-index: 1;
 }
 
 .sites-table tbody tr {
   cursor: pointer;
 }
 
-.sites-table tbody tr:hover,
+.sites-table tbody tr:hover {
+  background: #f3f3f3;
+}
+
+/* Selected site: strong red, matching its map marker. */
 .sites-table tbody tr.active {
-  background: #fafafa;
+  background: #fde3e6;
+  box-shadow: inset 4px 0 0 var(--accent);
+  font-weight: 600;
+}
+
+.sites-table tbody tr.active .rank {
+  color: var(--accent);
+}
+
+.sites-table .loc {
+  font-family: var(--mono);
+  font-size: 0.95em;
 }
 
 .sites-table .num {
@@ -538,26 +596,154 @@ select {
 .sites-table .wrap {
   white-space: normal;
   min-width: 5.5rem;
+  max-width: 9rem;
 }
 
-.flag {
+/* Verdict marks: shape and colour both carry the meaning. */
+.v {
+  font-weight: 700;
+  font-style: normal;
+}
+
+.v-pass {
+  color: #1a7f37;
+}
+
+.v-fail {
   color: var(--accent);
-  cursor: help;
 }
 
-.sites-table .noise-cell {
-  text-align: center;
+.v-edge {
+  color: #b35c00;
 }
 
-.noise {
-  cursor: help;
+.v-none,
+.v-na {
+  color: #9a9a9a;
+  font-weight: 400;
 }
 
-.table-note {
-  margin: 0;
-  padding: 6px 8px 8px;
-  font-size: 0.68rem;
+.na {
+  color: #9a9a9a;
+  font-weight: 400;
+}
+
+:root {
+  --c-sun: #e8a300;
+  --c-hyd: #2878b5;
+  --c-earth: #8c6bb1;
+}
+
+.c-sun {
+  background: var(--c-sun);
+}
+
+.c-hyd {
+  background: var(--c-hyd);
+}
+
+.c-earth {
+  background: var(--c-earth);
+}
+
+.score-bar {
+  display: none;
+  width: 100%;
+  min-width: 4.5em;
+  height: 6px;
+  margin-top: 3px;
+  background: var(--line);
+}
+
+.score-bar i {
+  display: block;
+  height: 100%;
+}
+
+.sw {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin: 0 2px 0 6px;
+  vertical-align: -0.05em;
+}
+
+.bar-rule {
+  display: none;
+}
+
+.a-dist {
+  display: block;
+  font-size: 0.9em;
   color: var(--muted);
+  font-weight: 400;
+}
+
+.table-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.table-legend .v {
+  margin-right: 2px;
+}
+
+.legend-rule {
+  flex-basis: 100%;
+}
+
+.info {
+  position: relative;
+  margin-left: auto;
+}
+
+.info-button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  background: var(--white);
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.info-button[aria-expanded="true"] {
+  background: var(--ink);
+  color: var(--white);
+}
+
+.info-pop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 1100;
+  width: min(30rem, 80vw);
+  max-height: 60vh;
+  overflow: auto;
+  padding: 10px 12px;
+  background: var(--white);
+  border: 1px solid var(--ink);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  color: var(--ink);
+  font-size: 0.78rem;
+}
+
+.info-pop p {
+  margin: 0 0 6px;
+}
+
+.info-pop[hidden] {
+  display: none;
 }
 
 .empty {
@@ -565,10 +751,14 @@ select {
 }
 
 .artemis-list {
-  list-style: none;
-  margin: 0;
-  padding: 8px 12px 12px;
+  margin: 6px 0 0;
+  padding: 0 0 0 1.4em;
   font-size: 0.75rem;
+}
+
+.artemis-list li.unranked {
+  list-style: none;
+  margin-left: -1.4em;
 }
 
 .status {
@@ -642,6 +832,21 @@ select {
   color: var(--white);
 }
 
+.site-mark.active .site-dot {
+  left: -7px;
+  top: -7px;
+  width: 14px;
+  height: 14px;
+  background: var(--accent);
+  border: 2px solid var(--white);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.site-mark.active .site-leader line {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
 .legend {
   position: absolute;
   right: 8px;
@@ -691,7 +896,20 @@ body.present .subtitle {
 }
 
 body.present .sites-table {
-  font-size: 0.8rem;
+  font-size: 18px;
+}
+
+body.present .sites-table th,
+body.present .sites-table td {
+  padding: 6px 7px;
+}
+
+body.present .table-legend {
+  font-size: 15px;
+}
+
+body.present .header {
+  padding: 0.35rem 1rem;
 }
 
 body.present .site-label {
@@ -727,8 +945,54 @@ body.present .legend-bar {
   height: 16px;
 }
 
-body.present .workspace {
-  grid-template-columns: 260px minmax(0, 1fr) minmax(460px, 600px);
+/* The table takes the width it needs; the map takes the rest. The rail
+   opens as a drawer over the map instead of squeezing the layout. */
+body.present .workspace,
+body.present.rail-closed .workspace {
+  grid-template-columns: minmax(360px, 1fr) fit-content(66%);
+}
+
+body.present .panel-form {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 8px;
+  z-index: 1000;
+  width: 300px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+
+/* Presentation: one line per site. The three part columns become a bar
+   under the score, so all ten rows fit without side-scrolling. */
+body.present .sites-table .contrib,
+body.present .contrib-rule {
+  display: none;
+}
+
+body.present .bar-rule {
+  display: inline;
+}
+
+body.present .score-bar {
+  display: flex;
+}
+
+body.present .sites-table .wrap {
+  max-width: none;
+  white-space: nowrap;
+}
+
+body.present .a-dist {
+  display: inline;
+}
+
+body.present .sites-table .loc {
+  font-family: var(--sans);
+  font-size: 1em;
+}
+
+body.present .status {
+  padding: 4px 12px;
 }
 
 @media (max-width: 960px) {
