@@ -609,6 +609,12 @@ def test_stage_d_preflight_hashes_inputs_and_pins_them(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="inside a compute allocation"):
         preflight.run_preflight(tmp_path / "receipt-stage-d-login.json")
     monkeypatch.setenv("SLURM_JOB_ID", "123456")
+    # Compute nodes have no myquota; Stage D relies on the evidence files.
+    monkeypatch.setattr(
+        preflight.shutil,
+        "which",
+        lambda command: None if command == "myquota" else f"/bin/{command}",
+    )
     receipt = preflight.run_preflight(tmp_path / "receipt-stage-d.json")
     assert receipt["stage_d_preflight_slurm_job_id"] == "123456"
     assert receipt["stage_d_preflight_host"]

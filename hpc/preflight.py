@@ -247,7 +247,13 @@ def run_preflight(receipt_path: Path) -> dict:
     missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
     if missing:
         fail("missing required environment variables: " + ", ".join(missing))
-    for command in ("myquota", "sbatch", "sacctmgr", "scontrol"):
+    # myquota exists only on login nodes, while Stage D preflight must run in a
+    # compute allocation. Preflight never calls it; allocation and storage come
+    # from the evidence files captured on the login node within 24 hours.
+    commands = ["myquota", "sbatch", "sacctmgr", "scontrol"]
+    if job_profile in STAGE_D_PROFILES and os.environ.get("SLURM_JOB_ID", "").strip():
+        commands.remove("myquota")
+    for command in commands:
         if shutil.which(command) is None:
             fail(f"required Slurm command is unavailable: {command}")
 

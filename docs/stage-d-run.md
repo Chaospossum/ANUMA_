@@ -121,7 +121,10 @@ Defaults for the other inputs: `ANUMA_STAGE_D_RAW_DIR=$ANUMA_DATA_ROOT/data/raw`
 `ANUMA_MC_SUMMARY=$ANUMA_DATA_ROOT/out/hpc/monte-carlo-full-5332991/study-summary.json`.
 
 Stage D preflight refuses to run without `SLURM_JOB_ID`, because it hashes
-the rasters, and records the job id and host in the receipt. The `cpudev`
+the rasters, and records the job id and host in the receipt. `myquota` exists only on
+login nodes, so Stage D preflight does not require it inside an allocation:
+refresh the allocation and storage evidence files from `myquota` on the login
+node first (they must be under 24 hours old). The `cpudev`
 allocation (QOS `dev`) is node time outside the 2.0 node-hour Stage D
 accounting above; keep it short and record it with the job's `myquota`
 captures.

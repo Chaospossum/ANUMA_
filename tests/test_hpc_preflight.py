@@ -357,3 +357,15 @@ def test_stage_b_production_preflight_requires_stage_a_pass(tmp_path, monkeypatc
     )
     with pytest.raises(RuntimeError, match="has not passed"):
         preflight.run_preflight(tmp_path / "receipt-stage-b-fail.json")
+
+
+def test_myquota_is_still_required_outside_stage_d(tmp_path, monkeypatch):
+    _configured_environment(tmp_path, monkeypatch)
+    monkeypatch.setenv("SLURM_JOB_ID", "123456")
+    monkeypatch.setattr(
+        preflight.shutil,
+        "which",
+        lambda command: None if command == "myquota" else f"/bin/{command}",
+    )
+    with pytest.raises(RuntimeError, match="unavailable: myquota"):
+        preflight.run_preflight(tmp_path / "receipt.json")
