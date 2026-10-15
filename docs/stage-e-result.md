@@ -14,7 +14,7 @@ measurement, a mission claim or a landing recommendation.
 | Built-in checks | all passed: lit hours 0–24, fill matches valid mask and Stage A NaN mask | `daily-lit-report.json` |
 | Mean lit fraction vs Stage A | RMSE **0.00232**, bias −0.00188, max abs 0.0156, corr 0.99996 over 5,040,704 valid px | job `5342908`, independent recomputation |
 | Cost | ≈ 1 CPU node-h (account 4 → 5 of 300 this month) | `myquota` before/after |
-| Storage | 47 GB: 43.8 GB daily uint8 + 5.8 GB monthly uint32 cumulative sums | `du`, `output-manifest.json` |
+| Storage | 49.6 GB (46.2 GiB): 43.8 GB daily uint8 + 5.8 GB monthly uint32 cumulative sums | `du`, `output-manifest.json` |
 
 Outputs are in `/project/home/p201619/ANUMA_/out/hpc/daily-lit-production-5342908/`.
 Small summaries (report, index, manifest, mean, valid mask) are copied to the
@@ -25,7 +25,7 @@ laptop under `out/hpc/` and are not committed.
 `DailyLitCube(root).lit_hours_mean(start, end)` returns the mean sunlit hours
 per day for each pixel over `[start, end)` (UTC days). It reads two monthly
 cumulative slices and at most the partial-month daily slices, so a range query
-does not touch the full 47 GB. Fill values: 255 (daily), 4294967295
+does not touch the full 49.6 GB. Fill values: 255 (daily), 4294967295
 (cumulative), NaN (means).
 
 ## Independent check
