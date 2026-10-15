@@ -24,6 +24,10 @@
   var checks = null;
   // Cited Artemis III points from /artemis3.geojson, fetched once.
   var artemisGeojson = null;
+  // Only the newest /score and layer request may paint; older replies are dropped.
+  var scoreSeq = 0;
+  var layerSeq = 0;
+  var MAX_MONTHS = 600;
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   var els = {
@@ -70,6 +74,7 @@
     keepoutPenalty: document.getElementById("keepout-penalty"),
     keepoutPenaltyRow: document.getElementById("keepout-penalty-row"),
     keepoutNote: document.getElementById("keepout-note"),
+    keepoutError: document.getElementById("keepout-error"),
     windowStart: document.getElementById("window-start"),
     windowEnd: document.getElementById("window-end"),
     windowNote: document.getElementById("window-note"),
@@ -92,6 +97,23 @@
 
   function pad2(n) {
     return String(n).padStart(2, "0");
+  }
+
+  function escapeHtml(text) {
+    return String(text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function debounce(fn, ms) {
+    var timer = null;
+    return function () {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(fn, ms);
+    };
   }
 
   function showVeil(kicker, body, command, note) {
@@ -464,7 +486,7 @@
     if (site.nearest) {
       var dist =
         site.distance_km == null ? "" : " (" + Number(site.distance_km).toFixed(1) + " km)";
-      return site.nearest + dist;
+      return escapeHtml(site.nearest) + dist;
     }
     return "unpublished";
   }
@@ -602,6 +624,32 @@
       (used.skipped ? "; " + used.skipped + " regions have no cited point and are not avoided." : ".");
   }
 
+  // Blank or non-positive radius or penalty: say so next to the field and
+  // send nothing, rather than raising the map veil for a typo.
+  function keepoutError() {
+    if (!els.keepout.checked) {
+      return "";
+    }
+    var radius = els.keepoutRadius.value === "" ? NaN : Number(els.keepoutRadius.value);
+    if (!(radius > 0)) {
+      return "Enter a radius above 0 km.";
+    }
+    if (els.keepoutMode.value === "penalty") {
+      var penalty = els.keepoutPenalty.value === "" ? NaN : Number(els.keepoutPenalty.value);
+      if (!(penalty > 0)) {
+        return "Enter a penalty above 0.";
+      }
+    }
+    return "";
+  }
+
+  function showKeepoutError() {
+    var message = keepoutError();
+    els.keepoutError.textContent = message;
+    els.keepoutError.hidden = !message;
+    return message;
+  }
+
   function currentKeepout() {
     if (!els.keepout.checked) {
       return null;
@@ -647,29 +695,33 @@
     return { start: els.windowStart.value, end: els.windowEnd.value };
   }
 
+  // Months since year 0, or NaN when the text is not YYYY-MM.
+  function monthIndex(text) {
+    var match = /^([0-9]{4})-([0-9]{2})$/.exec(String(text || ""));
+    if (!match || Number(match[2]) < 1 || Number(match[2]) > 12) {
+      return NaN;
+    }
+    return Number(match[1]) * 12 + Number(match[2]) - 1;
+  }
+
   function fillWindowSelects(info) {
     var spec = info.illumination_window;
     if (!spec) {
       return;
     }
     var html = '<option value="">average</option>';
-    var year = Number(spec.first_month.slice(0, 4));
-    var month = Number(spec.first_month.slice(5, 7));
-    var last = spec.last_month;
-    var value = "";
-    while (value !== last) {
-      value = year + "-" + pad2(month);
+    var first = monthIndex(spec.first_month);
+    var count = Math.min(monthIndex(spec.last_month) - first + 1, MAX_MONTHS);
+    var i;
+    // A malformed range gives NaN or a count below 1, so no months are offered.
+    for (i = 0; count > 0 && i < count; i += 1) {
+      var value = String(Math.floor((first + i) / 12)).padStart(4, "0") + "-" + pad2(((first + i) % 12) + 1);
       html += '<option value="' + value + '">' + monthText(value) + "</option>";
-      month += 1;
-      if (month > 12) {
-        month = 1;
-        year += 1;
-      }
     }
     els.windowStart.innerHTML = html;
     els.windowEnd.innerHTML = html;
     els.windowReset.textContent = spec.default_label;
-    if (!spec.available) {
+    if (!spec.available || !(count > 0)) {
       els.windowStart.disabled = true;
       els.windowEnd.disabled = true;
     }
@@ -705,15 +757,20 @@
       els.windowEnd.value = "";
     }
     updateWindowNote();
-    runScore({ keepLayer: true });
+    scheduleScore();
   }
 
   function resetWindow() {
     els.windowStart.value = "";
     els.windowEnd.value = "";
     updateWindowNote();
-    runScore({ keepLayer: true });
+    scheduleScore();
   }
+
+  // Select and number changes re-score once they settle.
+  var scheduleScore = debounce(function () {
+    runScore({ keepLayer: true });
+  }, 300);
 
   function currentRequest() {
     var request = {
@@ -736,6 +793,9 @@
   }
 
   async function downloadRanking(path, filename) {
+    if (showKeepoutError()) {
+      return;
+    }
     var response = await fetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -840,6 +900,10 @@
   // single layer on the map and refreshes it instead of switching to score.
   async function runScore(options) {
     var keepLayer = options && options.keepLayer && els.layer.value !== "score";
+    if (showKeepoutError()) {
+      return;
+    }
+    var seq = ++scoreSeq;
     els.score.disabled = true;
     els.csv.disabled = true;
     els.geojson.disabled = true;
@@ -852,6 +916,9 @@
         body: JSON.stringify(request),
       });
       var payload = await response.json();
+      if (seq !== scoreSeq) {
+        return;
+      }
       if (response.status === 412) {
         var detail = detailFrom(response, payload);
         showNotIngested(detail.ingest_command);
@@ -887,14 +954,19 @@
       els.csv.disabled = false;
       els.geojson.disabled = false;
     } catch (err) {
-      showVeil("Score failed", String(err), "", "");
+      if (seq === scoreSeq) {
+        showVeil("Score failed", String(err), "", "");
+      }
     } finally {
-      els.score.disabled = false;
-      els.score.textContent = "Score";
+      if (seq === scoreSeq) {
+        els.score.disabled = false;
+        els.score.textContent = "Score";
+      }
     }
   }
 
   async function showSingleLayer(name) {
+    var seq = ++layerSeq;
     if (name === "score") {
       if (lastScore) {
         hideVeil();
@@ -918,6 +990,9 @@
         path += "?start=" + encodeURIComponent(months.start) + "&end=" + encodeURIComponent(months.end);
       }
       var response = await fetch(path);
+      if (seq !== layerSeq) {
+        return;
+      }
       if (response.status === 412) {
         var payload = await response.json();
         showNotIngested(detailFrom(response, payload).ingest_command);
@@ -936,11 +1011,16 @@
         return;
       }
       var blob = await response.blob();
+      if (seq !== layerSeq) {
+        return;
+      }
       var url = URL.createObjectURL(blob);
       hideVeil();
       setOverlay(url, meta.bounds, name);
     } catch (err) {
-      showVeil("Layer missing", String(err), "", "");
+      if (seq === layerSeq) {
+        showVeil("Layer missing", String(err), "", "");
+      }
     }
   }
 
@@ -1056,14 +1136,17 @@
     els.artemis.addEventListener("change", toggleArtemis);
     els.keepout.addEventListener("change", function () {
       updateKeepoutNote();
-      runScore({ keepLayer: true });
+      showKeepoutError();
+      scheduleScore();
     });
     [els.keepoutLists, els.keepoutRadius, els.keepoutMode, els.keepoutPenalty].forEach(function (input) {
-      input.addEventListener("change", function () {
-        updateKeepoutNote();
-        if (els.keepout.checked) {
-          runScore({ keepLayer: true });
-        }
+      ["input", "change"].forEach(function (type) {
+        input.addEventListener(type, function () {
+          updateKeepoutNote();
+          if (els.keepout.checked && !showKeepoutError()) {
+            scheduleScore();
+          }
+        });
       });
     });
     els.windowStart.addEventListener("change", function () {

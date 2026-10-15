@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 
 from anuma.artemis import distinction, feature_collection
 from anuma.config import load_config, repo_root
-from anuma.daily_lit import DailyLitCube
+from anuma.daily_lit import INDEX_NAME, DailyLitCube
 from anuma.export import sites_csv, sites_geojson
 from anuma.grid import Grid
 from anuma.heatmap import render_png
@@ -34,7 +34,7 @@ DISPLAY_LAYERS = ("dem", "slope", "illumination", "hydrogen", "earth_visibility"
 
 _STORE: dict[str, Any] = {}
 _CUBES: dict[str, DailyLitCube] = {}
-_MONTH = re.compile(r"^(\d{4})-(\d{2})$")
+_MONTH = re.compile(r"\A([0-9]{4})-([0-9]{2})\Z")
 DAILY_LIT_MISSING = "daily sunlight data not available on this machine"
 
 
@@ -58,7 +58,7 @@ class KeepOutBody(BaseModel):
 
 
 def _parse_month(value: str) -> date:
-    match = _MONTH.match(value)
+    match = _MONTH.fullmatch(value)
     if match is None or not 1 <= int(match.group(2)) <= 12:
         raise ValueError(f"month {value!r} must be YYYY-MM with MM in 01..12")
     return date(int(match.group(1)), int(match.group(2)), 1)
@@ -169,25 +169,64 @@ def _load_store(cfg: dict, root: Path) -> dict[str, Any]:
     return store
 
 
-def _window_bounds(cfg: dict) -> tuple[date, date]:
+def _previous_month(day: date) -> date:
+    return date(day.year - (day.month == 1), (day.month - 2) % 12 + 1, 1)
+
+
+def _window_bounds(cfg: dict, cube: DailyLitCube | None = None) -> tuple[date, date]:
+    """Allowed first and last month. A loaded cube narrows the config range to
+    the whole months it holds, so config and cube cannot disagree."""
     spec = cfg["illumination_window"]
-    return _parse_month(spec["first_month"]), _parse_month(spec["last_month"])
+    first, last = _parse_month(spec["first_month"]), _parse_month(spec["last_month"])
+    if cube is not None:
+        cube_first = cube.start if cube.start.day == 1 else _next_month(cube.start)
+        # The last month must end on or before the exclusive cube end.
+        cube_last = _previous_month(date(cube.end.year, cube.end.month, 1))
+        first, last = max(first, cube_first), min(last, cube_last)
+    return first, last
 
 
-def _load_cube(cfg: dict, root: Path, shape: tuple[int, int]) -> DailyLitCube:
+def _month_text(day: date) -> str:
+    return f"{day.year:04d}-{day.month:02d}"
+
+
+def _check_window(window: "MonthWindow", bounds: tuple[date, date]) -> None:
+    first, last = bounds
+    if _parse_month(window.start) < first or _parse_month(window.end) > last:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"illumination months {window.start}..{window.end} are outside "
+                f"{_month_text(first)}..{_month_text(last)}"
+            ),
+        )
+
+
+def _daily_lit_ready(path: Path) -> bool:
+    return (path / INDEX_NAME).is_file()
+
+
+def _open_cube(cfg: dict, root: Path) -> DailyLitCube | None:
+    """Cached cube, or None when this machine has no daily-lit output."""
     path = _paths(cfg, root)["daily_lit"]
     key = str(path.resolve())
     cube = _CUBES.get(key)
     if cube is None:
-        if not path.is_dir():
-            raise HTTPException(status_code=400, detail=f"{DAILY_LIT_MISSING} ({path})")
+        if not _daily_lit_ready(path):
+            return None
         try:
             cube = DailyLitCube(path)
-        except (FileNotFoundError, ValueError) as exc:
-            raise HTTPException(
-                status_code=400, detail=f"{DAILY_LIT_MISSING}: {exc}"
-            ) from exc
+        except (FileNotFoundError, ValueError):
+            return None
         _CUBES[key] = cube
+    return cube
+
+
+def _load_cube(cfg: dict, root: Path, shape: tuple[int, int]) -> DailyLitCube:
+    cube = _open_cube(cfg, root)
+    if cube is None:
+        path = _paths(cfg, root)["daily_lit"]
+        raise HTTPException(status_code=400, detail=f"{DAILY_LIT_MISSING} ({path})")
     if tuple(cube.shape) != tuple(shape):
         raise HTTPException(
             status_code=400,
@@ -200,19 +239,10 @@ def _window_illumination(
     cfg: dict, root: Path, store: dict, window: MonthWindow
 ) -> tuple[np.ndarray, dict]:
     """Mean lit fraction over the month window, NaN out of cap like the PDS layer."""
-    first, last = _window_bounds(cfg)
-    lo, hi = _parse_month(window.start), _parse_month(window.end)
-    if lo < first or hi > last:
-        spec = cfg["illumination_window"]
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"illumination months {window.start}..{window.end} are outside "
-                f"{spec['first_month']}..{spec['last_month']}"
-            ),
-        )
+    _check_window(window, _window_bounds(cfg))
     grid = store["grid"]
     cube = _load_cube(cfg, root, (grid.height, grid.width))
+    _check_window(window, _window_bounds(cfg, cube))
     start, end = window.days()
     try:
         hours = cube.lit_hours_mean(start, end)
@@ -230,6 +260,18 @@ def _window_illumination(
         "note": cfg["illumination_window"]["note"],
     }
     return fraction, used
+
+
+def _window_meta(cfg: dict, root: Path) -> dict:
+    cube = _open_cube(cfg, root)
+    first, last = _window_bounds(cfg, cube)
+    return {
+        "first_month": _month_text(first),
+        "last_month": _month_text(last),
+        "default_label": cfg["illumination_window"]["default_label"],
+        "note": cfg["illumination_window"]["note"],
+        "available": cube is not None,
+    }
 
 
 def _default_window(cfg: dict) -> dict:
@@ -386,6 +428,12 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
     return payload
 
 
+def _scenario(payload: dict, body: ScoreBody | None) -> dict:
+    """The illumination window and keep-out behind an exported ranking."""
+    keepout = body.keepout.model_dump() if body is not None and body.keepout else None
+    return {"illumination_window": payload["illumination_window"], "keepout": keepout}
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="ANUMA",
@@ -429,13 +477,7 @@ def create_app() -> FastAPI:
                 "slope_radius_m": float(cfg["hard"]["slope_radius_m"]),
                 "n": int(cfg["scoring"]["n_sites"]),
             },
-            "illumination_window": {
-                "first_month": cfg["illumination_window"]["first_month"],
-                "last_month": cfg["illumination_window"]["last_month"],
-                "default_label": cfg["illumination_window"]["default_label"],
-                "note": cfg["illumination_window"]["note"],
-                "available": _paths(cfg, root)["daily_lit"].is_dir(),
-            },
+            "illumination_window": _window_meta(cfg, root),
             "layers": layers,
         }
 
@@ -447,7 +489,7 @@ def create_app() -> FastAPI:
     def post_score_csv(body: ScoreBody | None = None) -> Response:
         payload = _run_score(body, include_png=False)
         return Response(
-            content=sites_csv(payload["sites"]),
+            content=sites_csv(payload["sites"], _scenario(payload, body)),
             media_type="text/csv",
             headers={"Content-Disposition": 'attachment; filename="anuma-ranked-sites.csv"'},
         )
@@ -456,7 +498,7 @@ def create_app() -> FastAPI:
     def post_score_geojson(body: ScoreBody | None = None) -> Response:
         payload = _run_score(body, include_png=False)
         return Response(
-            content=sites_geojson(payload["sites"]),
+            content=sites_geojson(payload["sites"], _scenario(payload, body)),
             media_type="application/geo+json",
             headers={
                 "Content-Disposition": 'attachment; filename="anuma-ranked-sites.geojson"'

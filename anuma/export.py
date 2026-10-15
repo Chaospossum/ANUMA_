@@ -49,7 +49,19 @@ def _csv(records: list[dict], fieldnames: list[str]) -> bytes:
     return stream.getvalue().encode("utf-8")
 
 
-def sites_csv(sites: list[dict]) -> bytes:
+def _scenario_lines(scenario: dict | None) -> bytes:
+    """Leading ``# key: json`` lines that record the request behind a ranking."""
+    if not scenario:
+        return b""
+    lines = [
+        f"# {key}: {json.dumps(value, separators=(',', ':'), allow_nan=False)}\n"
+        for key, value in scenario.items()
+    ]
+    return "".join(lines).encode("utf-8")
+
+
+def sites_csv(sites: list[dict], scenario: dict | None = None) -> bytes:
+    """Ranked sites as CSV. ``scenario`` adds ``#`` comment lines before the header."""
     records = site_records(sites)
     fields = [
         "rank",
@@ -62,10 +74,10 @@ def sites_csv(sites: list[dict]) -> bytes:
         "nearest_artemis_region",
         "distance_to_artemis_km",
     ]
-    return _csv(records, fields)
+    return _scenario_lines(scenario) + _csv(records, fields)
 
 
-def sites_geojson(sites: list[dict]) -> bytes:
+def sites_geojson(sites: list[dict], scenario: dict | None = None) -> bytes:
     """Return WGS84-like lunar lon/lat points without inventing region geometry."""
     features = []
     for record in site_records(sites):
@@ -89,6 +101,8 @@ def sites_geojson(sites: list[dict]) -> bytes:
         ),
         "features": features,
     }
+    if scenario:
+        collection["properties"] = dict(scenario)
     return (json.dumps(collection, indent=2, allow_nan=False) + "\n").encode("utf-8")
 
 

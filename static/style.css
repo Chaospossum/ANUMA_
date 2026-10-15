@@ -287,6 +287,10 @@ select {
   border: 1px solid var(--line);
 }
 
+.help.error {
+  color: var(--accent);
+}
+
 .link-button {
   margin-top: 4px;
   padding: 0;

@@ -40,6 +40,12 @@ Approximate points for the 13 names are the Mean Earth sites in Goossens et al. 
 
 Orbital debris affects trajectories, not site choice, so it is not modelled.
 
+## Illumination window
+
+`POST /score` accepts an optional `illumination_months` object, `{"start": "YYYY-MM", "end": "YYYY-MM"}`. The end month is inclusive and days are UTC: the window runs from the first day of `start` to the first day after `end`. The illumination layer is then the Stage E mean lit hours per day over that window divided by 24, NaN outside the cube's valid mask (on the production cube these are the same cells as the published map), normalised with the same per-layer policy. Months outside 2026-01..2044-08, or outside the cube on disk, are rejected with 400; a malformed month or a start after the end gives 422. With no cube on the machine the request gets 400 "daily sunlight data not available on this machine". The window is a modeled scenario, not mission dates.
+
+`GET /layer/illumination.png?start=YYYY-MM&end=YYYY-MM` renders the same window. `GET /layer/score.png` uses the config defaults only, with no window or keep-out.
+
 ## Planned
 
 - The mission case, including ellipse, weights, and the comparison the demo will show.

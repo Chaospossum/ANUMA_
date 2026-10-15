@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from anuma.api import INGEST_COMMAND, app, clear_cache
 from anuma.config import load_config, repo_root
+from anuma.daily_lit import DailyLitCube
 from anuma.grid import Grid
 from anuma.ingest import write_artemis_geojson
 from tests.test_daily_lit import _write_synthetic_output
@@ -217,7 +218,15 @@ def test_ranked_site_downloads(client_ingested: TestClient):
     assert csv_response.status_code == 200
     assert csv_response.headers["content-type"].startswith("text/csv")
     assert "attachment" in csv_response.headers["content-disposition"]
-    rows = list(csv.DictReader(io.StringIO(csv_response.text)))
+    lines = csv_response.text.splitlines()
+    comments = [line for line in lines if line.startswith("#")]
+    assert lines[: len(comments)] == comments
+    assert json.loads(comments[0].split(": ", 1)[1]) == {
+        "source": "published",
+        "label": load_config()["illumination_window"]["default_label"],
+    }
+    assert comments[1] == "# keepout: null"
+    rows = list(csv.DictReader(io.StringIO("\n".join(lines[len(comments) :]))))
     assert [row["rank"] for row in rows] == ["1", "2"]
     assert rows[0]["nearest_artemis_region"]
     assert float(rows[0]["latitude_deg"]) < -80.0
@@ -227,6 +236,8 @@ def test_ranked_site_downloads(client_ingested: TestClient):
     assert geo_response.headers["content-type"].startswith("application/geo+json")
     collection = geo_response.json()
     assert collection["type"] == "FeatureCollection"
+    assert collection["properties"]["illumination_window"]["source"] == "published"
+    assert collection["properties"]["keepout"] is None
     assert len(collection["features"]) == 2
     assert collection["features"][0]["geometry"]["type"] == "Point"
     assert collection["features"][0]["properties"]["rank"] == 1
@@ -442,10 +453,11 @@ def _artemis_points(client: TestClient, lists: set[str]) -> list[dict]:
 
 
 def test_keepout_artemis_points_change_the_ranking(client_ingested: TestClient):
-    request = {"hard": {"max_slope_deg": 8}, "n": 10}
+    request = {"hard": {"max_slope_deg": 8}, "n": 50}
     default = client_ingested.post("/score", json=request).json()["sites"]
     points = _artemis_points(client_ingested, {"2022", "2024"})
-    assert len(points) == 13
+    cited = [r for r in load_config()["artemis3"]["regions"] if r.get("lon_east") is not None]
+    assert len(points) == len(cited)
     hard = client_ingested.post(
         "/score",
         json={**request, "keepout": {"points": points, "radius_km": 50.0, "mode": "hard"}},
@@ -467,7 +479,17 @@ def test_keepout_artemis_points_change_the_ranking(client_ingested: TestClient):
     near = [s for s in default if s["distance_km"] <= 50.0]
     assert near
     for site in near:
+        assert (site["row"], site["col"]) in by_cell
         assert by_cell[(site["row"], site["col"])] == pytest.approx(site["total"] - 0.25, abs=1e-5)
+
+
+def test_keepout_is_recorded_in_exports(client_ingested: TestClient):
+    keepout = {"points": [{"lon": 0.0, "lat": -87.0}], "radius_km": 5.0, "mode": "hard"}
+    collection = client_ingested.post("/score.geojson", json={"keepout": keepout}).json()
+    assert collection["properties"]["keepout"]["radius_km"] == 5.0
+    assert collection["properties"]["keepout"]["points"] == keepout["points"]
+    text = client_ingested.post("/score.csv", json={"keepout": keepout}).text
+    assert text.splitlines()[1].startswith('# keepout: {"points":[{"lon":0.0,"lat":-87.0}]')
 
 
 def test_keepout_2024_list_has_fewer_points(client_empty: TestClient):
@@ -525,6 +547,51 @@ def test_month_window_changes_the_score(window_client):
     assert all(valid[s["row"], s["col"]] for s in body["sites"])
 
 
+def test_month_window_equals_cube_mean(window_client):
+    client, data, valid, cube_dir = window_client
+    import anuma.api as api
+
+    cfg = api._cfg()
+    root = api.data_root()
+    store = api._load_store(cfg, root)
+    for start, end, days in (("2027-02", "2027-04", (31, 120)), ("2027-05", "2027-05", (120, 151))):
+        window = api.MonthWindow(start=start, end=end)
+        fraction, used = api._window_illumination(cfg, root, store, window)
+        expected = DailyLitCube(cube_dir).lit_hours_mean(*window.days()) / 24.0
+        np.testing.assert_array_equal(fraction, expected.astype(np.float32))
+        brute = data[days[0] : days[1]].astype(np.float64).mean(axis=0) / 24.0
+        np.testing.assert_allclose(fraction[valid], brute[valid], atol=1e-6)
+        assert np.isnan(fraction[~valid]).all()
+    # A single month: start == end covers that whole month.
+    assert used["start_day"] == "2027-05-01" and used["end_day_exclusive"] == "2027-06-01"
+    response = client.post(
+        "/score", json={"illumination_months": {"start": "2027-05", "end": "2027-05"}}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["illumination_window"]["end_day_exclusive"] == "2027-06-01"
+
+
+def test_month_window_bounds_follow_the_cube(window_client):
+    client, *_ = window_client
+    meta = client.get("/layers").json()["illumination_window"]
+    assert meta["available"] is True
+    # The synthetic cube holds 2027-01..2027-06, inside the configured range.
+    assert (meta["first_month"], meta["last_month"]) == ("2027-01", "2027-06")
+
+
+def test_month_window_cube_shape_mismatch_is_400(window_client):
+    client, _, _, cube_dir = window_client
+    shutil.rmtree(cube_dir)
+    cube_dir.mkdir()
+    _write_synthetic_output(cube_dir, WINDOW_START, WINDOW_END, shape=(3, 5))
+    clear_cache()
+    response = client.post(
+        "/score", json={"illumination_months": {"start": "2027-01", "end": "2027-02"}}
+    )
+    assert response.status_code == 400
+    assert "does not match grid" in response.json()["detail"]
+
+
 def test_month_window_layer_png(window_client):
     client, *_ = window_client
     plain = client.get("/layer/illumination.png")
@@ -545,7 +612,9 @@ def test_month_window_layer_png(window_client):
         ("2027-03", "2027-01", 422, "after end month"),
         ("2025-12", "2026-02", 400, "outside 2026-01..2044-08"),
         ("2044-08", "2044-09", 400, "outside 2026-01..2044-08"),
-        ("2030-01", "2030-02", 400, "outside"),  # in range, but not in the synthetic cube
+        # In the configured range, but not in the synthetic cube.
+        ("2030-01", "2030-02", 400, "outside 2027-01..2027-06"),
+        ("2027-01\n", "2027-02", 422, "YYYY-MM"),
     ],
 )
 def test_month_window_rejects_bad_ranges(window_client, start, end, status, text):
@@ -557,12 +626,15 @@ def test_month_window_rejects_bad_ranges(window_client, start, end, status, text
 
 def test_month_window_without_cube_is_400(window_client):
     client, _, _, cube_dir = window_client
-    shutil.rmtree(cube_dir)
+    request = {"illumination_months": {"start": "2027-01", "end": "2027-02"}}
+    # A directory without its index counts as missing, as does no directory.
+    (cube_dir / "daily-lit-index.json").unlink()
     clear_cache()
-    response = client.post(
-        "/score", json={"illumination_months": {"start": "2027-01", "end": "2027-02"}}
-    )
-    assert response.status_code == 400
-    assert "daily sunlight data not available on this machine" in response.json()["detail"]
-    assert client.post("/score", json={}).status_code == 200
-    assert client.get("/layers").json()["illumination_window"]["available"] is False
+    for _ in range(2):
+        response = client.post("/score", json=request)
+        assert response.status_code == 400
+        assert "daily sunlight data not available on this machine" in response.json()["detail"]
+        assert client.post("/score", json={}).status_code == 200
+        assert client.get("/layers").json()["illumination_window"]["available"] is False
+        shutil.rmtree(cube_dir, ignore_errors=True)
+        clear_cache()
