@@ -206,6 +206,22 @@ def test_range_mean_from_cumulative_equals_brute_force(tmp_path):
         cube.lit_hours_mean(start + timedelta(days=3), start + timedelta(days=3))
 
 
+def test_month_aligned_ranges_need_only_the_cumulative_file(tmp_path):
+    start, end = date(2027, 11, 1), date(2028, 3, 1)
+    data, valid, _ = _write_synthetic_output(tmp_path, start, end, seed=7)
+    index = json.loads((tmp_path / dl.INDEX_NAME).read_text())
+    for item in index["chunks"]:
+        (tmp_path / item["file"]).unlink()
+    cube = dl.DailyLitCube(tmp_path)
+    for lo, hi in [(date(2027, 11, 1), date(2028, 3, 1)), (date(2027, 12, 1), date(2028, 1, 1))]:
+        brute = data[(lo - start).days : (hi - start).days].astype(np.float64).mean(axis=0)
+        got = cube.lit_hours_mean(lo, hi)
+        assert np.allclose(got[valid], brute[valid], rtol=0, atol=1e-5)
+        assert np.isnan(got[~valid]).all()
+    with pytest.raises(FileNotFoundError, match="month boundaries"):
+        cube.lit_hours_mean(date(2027, 11, 15), date(2028, 1, 1))
+
+
 def test_fill_values_in_daily_cumulative_and_mean(tmp_path):
     start, end = date(2026, 1, 1), date(2026, 3, 4)
     data, valid, _ = _write_synthetic_output(tmp_path, start, end, seed=5)

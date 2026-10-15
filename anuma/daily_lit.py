@@ -480,19 +480,29 @@ class DailyLitCube:
         self.start = parse_day(period["start_day_utc"])
         self.end = parse_day(period["end_day_exclusive_utc"])
         self.shape = tuple(self.index["shape"])
+        # Daily year files are opened on first use, so a copy that holds only
+        # the cumulative file still answers ranges on month boundaries.
         self._chunks = [
-            (
-                parse_day(item["first_day"]),
-                int(item["day_count"]),
-                np.load(self.root / item["file"], mmap_mode="r", allow_pickle=False),
-            )
+            (parse_day(item["first_day"]), int(item["day_count"]), item["file"])
             for item in self.index["chunks"]
         ]
+        self._opened: dict[str, np.ndarray] = {}
         self.boundaries = [parse_day(item) for item in self.index["cumulative"]["boundaries"]]
         self.cumulative = np.load(
             self.root / self.index["cumulative"]["file"], mmap_mode="r", allow_pickle=False
         )
         self.valid = np.load(self.root / self.index["valid_mask"], allow_pickle=False)
+
+    def _chunk(self, name: str) -> np.ndarray:
+        if name not in self._opened:
+            path = self.root / name
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"daily file {name} is not in {self.root}; use a range that starts "
+                    "and ends on month boundaries, or copy that file"
+                )
+            self._opened[name] = np.load(path, mmap_mode="r", allow_pickle=False)
+        return self._opened[name]
 
     def _check_range(self, start: date, end: date) -> None:
         if not self.start <= start < end <= self.end:
@@ -508,10 +518,11 @@ class DailyLitCube:
         self._check_range(start, end)
         rows, cols = window or (slice(None), slice(None))
         parts = []
-        for first, count, array in self._chunks:
+        for first, count, name in self._chunks:
             lo = max(start, first)
             hi = min(end, first + timedelta(days=count))
             if lo < hi:
+                array = self._chunk(name)
                 parts.append(
                     np.asarray(array[(lo - first).days : (hi - first).days, rows, cols])
                 )
