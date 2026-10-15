@@ -320,7 +320,8 @@ def test_index_folio_is_local():
     assert response.status_code == 200
     text = response.text
     assert "anuma" in text
-    assert "ispace-EUROPE" in text
+    assert "Student project · NeoSpace Challenge 2026 · 80°S–90°S" in text
+    assert "ispace-EUROPE" not in text
     assert "/vendor/leaflet.js" in text
     assert "/vendor/proj4.js" in text
     assert "/vendor/proj4leaflet.js" in text
