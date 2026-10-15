@@ -107,7 +107,7 @@ python -m anuma.stage_d --mode rule \
 It refuses a summary whose sha256 is not `4da2a9c3…` and exits 2 unless the
 recomputed lists equal the frozen ones.
 
-## Commands (MeluXina, not run)
+## Commands (MeluXina; run 2026-10-15, pilot `5345021`, production `5345050`)
 
 Wait until `pgda90-download.log` shows all three PGDA files done and
 `pgda90-sha256.txt` lists them. Capture `myquota`. Then, on a `cpudev`
@@ -136,7 +136,8 @@ salloc -A p201619 -p cpu --reservation=cpudev -q dev -N 1 -t 01:00:00
 export ANUMA_JOB_PROFILE=stage-d-pilot
 export ANUMA_QOS=test
 export ANUMA_ACCOUNT=p201619
-.venv-hpc-sun/bin/python hpc/preflight.py \
+module load env/release/2024.1 Python/3.12.3-GCCcore-13.3.0
+.venv-hpc-ingest/bin/python hpc/preflight.py \
   --receipt "$HOME/anuma-stage-d-pilot-$(date -u +%Y%m%dT%H%M%SZ).json"
 exit   # leave the cpudev allocation
 export ANUMA_PREFLIGHT_RECEIPT="$HOME/<the-new-pilot-receipt>.json"
@@ -149,7 +150,8 @@ Production (only after the pilot passes and is reviewed):
 salloc -A p201619 -p cpu --reservation=cpudev -q dev -N 1 -t 01:00:00
 export ANUMA_JOB_PROFILE=stage-d
 export ANUMA_QOS=default
-.venv-hpc-sun/bin/python hpc/preflight.py \
+module load env/release/2024.1 Python/3.12.3-GCCcore-13.3.0
+.venv-hpc-ingest/bin/python hpc/preflight.py \
   --receipt "$HOME/anuma-stage-d-$(date -u +%Y%m%dT%H%M%SZ).json"
 exit
 export ANUMA_PREFLIGHT_RECEIPT="$HOME/<the-new-production-receipt>.json"
@@ -162,6 +164,13 @@ or `stage-d-summary.json`, `output-manifest.json` (report plus sha256 and
 bytes of every output), `progress.log`, `module-list.txt` and `myquota`
 before and after. Exit codes: 2 a refused input or pin, 3 a failed
 acceptance check, 4 a pilot projection that does not fit.
+
+The preflight must use `.venv-hpc-ingest`: `.venv-hpc-sun` has no scipy,
+which `anuma.score` imports. The 2026-10-15 runs used a helper,
+`~/stage-d-preflight.sh <receipt>` (a `bash -l` script that sources the
+environment file, loads the two modules and runs the line above), started with
+`salloc ... -q dev -N 1 -t 00:30:00 srun --export=ALL -N1 -n1 -c 4`. Results:
+[stage-d-result.md](stage-d-result.md).
 
 ## Pilot pass conditions
 
