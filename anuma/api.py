@@ -28,11 +28,24 @@ from anuma.daily_lit import INDEX_NAME, DailyLitCube
 from anuma.export import sites_csv, sites_geojson
 from anuma.grid import Grid
 from anuma.heatmap import render_png
-from anuma.score import apply_keepout, artemis_overlap, hard_mask, normalize, rank_sites, score
+from anuma.score import (
+    apply_keepout,
+    artemis_overlap,
+    hard_mask,
+    is_display_only,
+    normalize,
+    rank_sites,
+    score,
+    scored_weights,
+)
 
 INGEST_COMMAND = "python3 -m anuma.ingest"
 REQUIRED_FOR_SCORE = ("slope", "illumination", "hydrogen", "earth_visibility")
-DISPLAY_LAYERS = ("dem", "slope", "illumination", "hydrogen", "earth_visibility")
+DISPLAY_LAYERS = ("dem", "slope", "illumination", "hydrogen", "earth_visibility", "dem_error")
+DEM_ERROR_COMMAND = (
+    "python -m anuma.dem_error --src data/raw/LDEM_80S_20MPP_ADJ_ERR.TIF "
+    "--out data/grid/dem_error.npy"
+)
 
 _STORE: dict[str, Any] = {}
 _CUBES: dict[str, DailyLitCube] = {}
@@ -386,6 +399,10 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
     store = _load_store(cfg, root)
     body = body or ScoreBody()
     weights = dict(body.weights) if body.weights else dict(cfg["scoring"]["weights"])
+    try:
+        weights = scored_weights(weights, cfg)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     max_slope = (
         body.hard.max_slope_deg
         if body.hard is not None and body.hard.max_slope_deg is not None
@@ -441,6 +458,36 @@ def _scenario(payload: dict, body: ScoreBody | None) -> dict:
     return {"illumination_window": payload["illumination_window"], "keepout": keepout}
 
 
+def _display_range(cfg: dict, name: str, array: np.ndarray) -> tuple[float, float] | None:
+    """Colour range in layer units: finite minimum to the configured percentile."""
+    finite = array[np.isfinite(array)]
+    if finite.size == 0:
+        return None
+    high_pct = float(cfg["layers"][name].get("display_percentile_high", 100.0))
+    low = float(finite.min())
+    high = float(np.percentile(finite, high_pct))
+    return low, high if high > low else low + 1.0
+
+
+def _display_only_png(cfg: dict, name: str, array: np.ndarray) -> Response:
+    """Raw values in grey on a fixed range; the range goes out in headers."""
+    span = _display_range(cfg, name, array)
+    headers = {"X-Anuma-Display-Only": "true"}
+    if span is None:
+        png = render_png(array, cmap="gray")
+    else:
+        png = render_png(array, cmap="gray", vmin=span[0], vmax=span[1])
+        headers["X-Anuma-Range-Min"] = f"{span[0]:.6g}"
+        headers["X-Anuma-Range-Max"] = f"{span[1]:.6g}"
+        pct = cfg["layers"][name].get("display_percentile_high")
+        if pct is not None:
+            headers["X-Anuma-Range-Max-Percentile"] = f"{float(pct):g}"
+    unit = cfg["layers"][name].get("unit")
+    if unit:
+        headers["X-Anuma-Unit"] = str(unit)
+    return Response(content=png, media_type="image/png", headers=headers)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="ANUMA",
@@ -460,15 +507,22 @@ def create_app() -> FastAPI:
         gdir = _paths(cfg, root)["grid"]
         for name, meta in cfg["layers"].items():
             npy = gdir / f"{name}.npy"
-            layers.append(
-                {
-                    "name": meta.get("name", name),
-                    "unit": meta.get("unit"),
-                    "mode": meta.get("mode"),
-                    "citation": meta.get("citation"),
-                    "present": npy.is_file(),
-                }
-            )
+            entry = {
+                "name": meta.get("name", name),
+                "unit": meta.get("unit"),
+                "mode": meta.get("mode"),
+                "citation": meta.get("citation"),
+                "present": npy.is_file(),
+            }
+            if is_display_only(cfg, name):
+                entry.update(
+                    label=meta.get("label"),
+                    display_only=True,
+                    scored=False,
+                    available=npy.is_file(),
+                    command=DEM_ERROR_COMMAND if name == "dem_error" else None,
+                )
+            layers.append(entry)
         return {
             "ingested": not missing,
             "missing": missing,
@@ -541,8 +595,22 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=f"Unknown layer {name!r}")
         store = _load_store(cfg, root)
         array = store["layers"].get(name)
+        npy = _paths(cfg, root)["grid"] / f"{name}.npy"
+        if array is None and is_display_only(cfg, name) and npy.is_file():
+            # Optional layer built after the store was cached.
+            array = store["layers"][name] = np.load(npy)
+        if array is None and is_display_only(cfg, name):
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"{name}.npy is not on this machine; it is display only. "
+                    f"Build it with: {DEM_ERROR_COMMAND}"
+                ),
+            )
         if array is None:
             raise _not_ingested([name])
+        if is_display_only(cfg, name):
+            return _display_only_png(cfg, name, array)
         if window is not None:
             array, _ = _window_illumination(cfg, root, store, window)
         mode = cfg["layers"][name].get("mode")

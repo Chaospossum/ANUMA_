@@ -459,6 +459,33 @@ The ID must identify the actual staged dataset; do not copy the example
 literally. `--check-only` reads metadata, hashes every file, and checks every
 array shape. It does not create the output directory or compute a ranking.
 
+## Display-only DEM height error (no Slurm job)
+
+`data/grid/dem_error.npy` is the mean LOLA height error per 240 m cell, from
+PGDA product 90 `LDEM_80S_20MPP_ADJ_ERR.TIF`. It is display only: it is not in
+the scoring weights, the input manifest, or the smoke check. It is built by
+`anuma.dem_error`, not `anuma.ingest`. The 20 m grid nests 12 x 12 in the
+240 m grid, so each cell is the exact mean of its finite fine pixels; nodata
+and cells outside 80°S are NaN. It reads the 3.7 GB raster in bands of 64
+grid rows (about 1.3 GB peak RSS, 20 s on a laptop for the 2.7 GB DEM). Run it
+in a short `cpudev` allocation, not on the login node:
+
+```bash
+salloc -A p201619 -p cpu --reservation=cpudev -q dev -N 1 -t 00:30:00
+cd /project/home/p201619/ANUMA_
+module load env/release/2024.1
+module load Python/3.12.3-GCCcore-13.3.0
+.venv-hpc-ingest/bin/python -m anuma.dem_error \
+  --src /project/home/p201619/ANUMA_/data/raw/LDEM_80S_20MPP_ADJ_ERR.TIF \
+  --out /project/home/p201619/ANUMA_/data/grid/dem_error.npy
+exit
+```
+
+It writes `dem_error.json` beside the array: the source sha256 (compared with
+the configured Stage D digest; `--no-hash` skips it), resampling, nesting,
+stats (min/median/p95/max) and the grid sha256. It refuses a `grid.json` that
+differs from the config and a source that is not nested in the grid.
+
 ## Read-only preflight
 
 Obtain the quota and allocation numbers from the portal or a documented

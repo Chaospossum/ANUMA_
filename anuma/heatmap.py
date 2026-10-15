@@ -34,8 +34,13 @@ def render_png(
     array: np.ndarray,
     cmap: str = "viridis",
     max_dim: int = 1024,
+    vmin: float | None = None,
+    vmax: float | None = None,
 ) -> bytes:
-    """Render a 2-D array as a tight PNG. NaN / masked pixels are transparent."""
+    """Render a 2-D array as a tight PNG. NaN / masked pixels are transparent.
+
+    Without vmin/vmax the colour range is the finite min/max after downsampling.
+    """
     data = _downsample(np.asarray(array, dtype=np.float64), max_dim)
     finite = np.isfinite(data)
     h, w = data.shape
@@ -45,9 +50,9 @@ def render_png(
     ax = fig.add_axes((0.0, 0.0, 1.0, 1.0), frameon=False)
     ax.set_axis_off()
     if finite.any():
-        vmin = float(np.min(data[finite]))
-        vmax = float(np.max(data[finite]))
-        if vmin == vmax:
+        vmin = float(np.min(data[finite])) if vmin is None else float(vmin)
+        vmax = float(np.max(data[finite])) if vmax is None else float(vmax)
+        if vmin >= vmax:
             vmax = vmin + 1.0
         cmap_obj = matplotlib.colormaps[cmap].with_extremes(bad=(0.0, 0.0, 0.0, 0.0))
         masked = np.ma.masked_invalid(data)

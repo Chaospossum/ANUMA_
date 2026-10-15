@@ -17,6 +17,14 @@ Verified 28 September 2026. Product names and URLs are in `config/layers.yaml`. 
 
 `LDEM_87S_20M` is not a published filename. `LDEM_875S_20M` exists but only covers 87.5°S–90°S.
 
+## DEM height error (display only)
+
+- **Product:** `LDEM_80S_20MPP_ADJ_ERR` (PGDA product 90, "LDEM surface height error (in meters)"), same 20 m grid as `LDEM_80S_20MPP_ADJ`
+- **Catalog:** https://pgda.gsfc.nasa.gov/products/90
+- **Citation:** Barker et al. (2023), *Planet. Sci. J.* 4, 183. https://doi.org/10.3847/PSJ/acf3e1
+- **Aggregation:** mean of the finite 12 × 12 20 m pixels per 240 m cell (`python -m anuma.dem_error`); nodata → NaN
+- **Use:** map layer only, weight 0; not part of the score, hard mask, or ranking
+
 ## Illumination
 
 - **Product:** `AVGVISIB_65S_240M_201608`

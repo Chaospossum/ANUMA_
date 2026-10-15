@@ -285,6 +285,29 @@ layers:
     mode: higher_better
     citation: "Derived from the ingested DEM. Clearance = Earth elevation minus horizon elevation toward (0°E, 0°N)."
 
+  # Display only: never weighted, never part of the hard mask or score.
+  # Built by `python -m anuma.dem_error`, not by anuma.ingest.
+  dem_error:
+    name: dem_error
+    label: "DEM height error (m), LOLA PGDA 90"
+    unit: m
+    display_only: true
+    product_name: LDEM_80S_20MPP_ADJ_ERR
+    filename: LDEM_80S_20MPP_ADJ_ERR.TIF
+    # URL by analogy with the DEM; the file was staged on MeluXina for Stage D.
+    url: https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_20MPP_ADJ_ERR.TIF
+    # First MeluXina download (2026-10-15), as anuma.stage_d_gate.ERR_SHA256.
+    sha256: d64045b8aa58a24010f009ab5667ae02cc06cffa7796784dd5e2d48b3059d8cf
+    resolution_m: 20
+    aggregation: "mean of the finite 12 x 12 20 m pixels per 240 m cell; nodata -> NaN"
+    # Colour range of /layer/dem_error.png: finite minimum to this percentile.
+    display_percentile_high: 95.0
+    coverage: "80S to 90S, same 20 m grid as LDEM_80S_20MPP_ADJ"
+    citation: "Barker et al. (2023), Planet. Sci. J. 4, 183. https://doi.org/10.3847/PSJ/acf3e1"
+    data_doi: "https://doi.org/10.60903/gsfcpgda-lola-spole"
+    licence: "Citation requested on the PGDA product page; no other licence text."
+    catalog: https://pgda.gsfc.nasa.gov/products/90
+
 artemis3:
   approximate: true
   coordinate_status: nasa_centres_unpublished

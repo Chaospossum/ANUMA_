@@ -27,6 +27,8 @@
   // Only the newest /score and layer request may paint; older replies are dropped.
   var scoreSeq = 0;
   var layerSeq = 0;
+  // Colour range of the last display-only layer PNG, from its response headers.
+  var layerRange = null;
   var MAX_MONTHS = 600;
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -196,6 +198,25 @@
     var info = ((meta && meta.layers) || []).filter(function (layer) {
       return layer.name === name;
     })[0] || {};
+    if (info.display_only) {
+      // Raw values on a fixed range in metres; not normalised, not scored.
+      var u = info.unit ? " " + info.unit : "";
+      els.legendTitle.textContent = info.label || layerLabel(name);
+      els.legendBar.style.background = GREY;
+      if (layerRange) {
+        els.legendLow.textContent = fmtRange(layerRange.min) + u;
+        els.legendHigh.textContent =
+          (layerRange.pct ? "≥ " : "") + fmtRange(layerRange.max) + u;
+      } else {
+        els.legendLow.textContent = "low";
+        els.legendHigh.textContent = "high";
+      }
+      els.legendNote.textContent =
+        "display only, not scored" +
+        (layerRange && layerRange.pct ? "; white = p" + layerRange.pct + " or more" : "") +
+        "; blank = no data";
+      return;
+    }
     var unit = info.unit ? " (" + info.unit + ")" : "";
     var months = name === "illumination" ? currentWindow() : null;
     els.legendTitle.textContent =
@@ -215,6 +236,10 @@
     } else {
       els.legendNote.textContent = "blank = no data";
     }
+  }
+
+  function fmtRange(value) {
+    return value >= 10 ? value.toFixed(0) : value.toFixed(1);
   }
 
   function setOverlay(url, bounds, name) {
@@ -844,7 +869,12 @@
   function fillLayerSelect(info) {
     var keep = '<option value="score">Combined score</option>';
     (info.layers || []).forEach(function (layer) {
-      var label = layer.name === "dem" ? "DEM" : layer.name.replace(/_/g, " ");
+      var label = layer.label || (layer.name === "dem" ? "DEM" : layer.name.replace(/_/g, " "));
+      if (layer.display_only && !layer.available) {
+        // Optional layer not built on this machine: listed, but not selectable.
+        keep += '<option value="' + layer.name + '" disabled>' + label + " (not available)</option>";
+        return;
+      }
       keep += '<option value="' + layer.name + '">' + label + "</option>";
     });
     els.layer.innerHTML = keep;
@@ -1013,6 +1043,16 @@
       var blob = await response.blob();
       if (seq !== layerSeq) {
         return;
+      }
+      layerRange = null;
+      var low = response.headers.get("X-Anuma-Range-Min");
+      var high = response.headers.get("X-Anuma-Range-Max");
+      if (low !== null && high !== null) {
+        layerRange = {
+          min: Number(low),
+          max: Number(high),
+          pct: response.headers.get("X-Anuma-Range-Max-Percentile"),
+        };
       }
       var url = URL.createObjectURL(blob);
       hideVeil();

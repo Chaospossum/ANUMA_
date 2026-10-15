@@ -127,6 +127,29 @@ def normalize(
     return out
 
 
+def is_display_only(cfg: dict, name: str) -> bool:
+    return bool((cfg["layers"].get(name) or {}).get("display_only"))
+
+
+def scored_weights(weights: dict[str, float], cfg: dict) -> dict[str, float]:
+    """Validate weights and drop display-only layers given weight 0.
+
+    A display-only layer (e.g. dem_error) never enters the score or the
+    no-data mask; a positive weight for one is an error.
+    """
+    validated: dict[str, float] = {}
+    for name, weight in weights.items():
+        value = float(weight)
+        if not np.isfinite(value) or value < 0.0:
+            raise ValueError(f"weight for {name!r} must be finite and non-negative")
+        if is_display_only(cfg, name):
+            if value != 0.0:
+                raise ValueError(f"{name!r} is display only and cannot be weighted")
+            continue
+        validated[name] = value
+    return validated
+
+
 def score(
     layers: dict[str, np.ndarray],
     weights: dict[str, float] | None = None,
@@ -147,13 +170,7 @@ def score(
         grid = Grid(cfg)
     if "slope" not in layers:
         raise KeyError("layers must include 'slope' for the hard mask")
-    validated_weights: dict[str, float] = {}
-    for name, weight in weights.items():
-        value = float(weight)
-        if not np.isfinite(value) or value < 0.0:
-            raise ValueError(f"weight for {name!r} must be finite and non-negative")
-        validated_weights[name] = value
-    weights = validated_weights
+    weights = scored_weights(weights, cfg)
     mask = hard_mask(
         layers["slope"],
         hard.get("max_slope_deg"),
