@@ -69,8 +69,10 @@ it changes the top of the ranking.
 - The 1 km circle is a proxy, not a landing ellipse.
 - Only the 8° limit was computed. With another maximum slope the gate is not
   applied (the app says so).
-- The Monte Carlo weight study and the DEM-noise study were run for the
-  slope-only ranking. With the gate on they do not describe the new list
-  (`studies_match` is false in `/score`), and the app shows n/a for them.
+- The Stage B and Stage D studies (weight Monte Carlo, DEM noise) were run
+  for the slope-only ranking. Stage H re-ran them for the gated ranking
+  ([stage-h-result.md](stage-h-result.md)), so with the gate on at 50 %
+  `studies_match` is true in `/score`. The app shows n/a only when the gate
+  is off or its threshold or slope limit is changed.
 - Slope is Stage B's Horn 3×3 at 20 m. Nothing below 20 m (boulders, small
   craters) is modelled.

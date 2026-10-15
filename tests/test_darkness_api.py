@@ -303,3 +303,31 @@ def test_ui_shows_longest_dark():
     assert '"longest dark stretch "' in app_js
     assert 'fact("Longest darkness"' in app_js and '"Longest sunlight"' in app_js
     assert 'name === "longest_dark" ? currentWindow() : null' in app_js
+
+
+def test_exports_carry_darkness_fields(dark_client):
+    import csv
+    import json
+
+    client, shape, brute, valid = (dark_client[k] for k in ("client", "shape", "brute", "valid"))
+    request = {"illumination_months": {"start": "2027-02", "end": "2027-04"}}
+    score = client.post("/score", json=request).json()
+    text = client.post("/score.csv", json=request).text
+    rows = list(csv.DictReader(line for line in text.splitlines() if not line.startswith("#")))
+    geo = client.post("/score.geojson", json=request).json()
+    assert len(rows) == len(score["sites"]) == len(geo["features"])
+    names = (
+        "longest_dark_hours", "longest_dark_censored", "never_lit", "longest_dark_start_utc",
+        "longest_dark_end_utc", "longest_lit_hours", "window_longest_dark_hours",
+    )
+    for row, feature, site in zip(rows, geo["features"], score["sites"]):
+        props = feature["properties"]
+        for name in names:
+            assert name in row and props[name] == site[name]
+        if valid[site["row"], site["col"]]:
+            k = _flat(site["row"], site["col"], shape)
+            assert int(row["longest_dark_hours"]) == int(brute["dark_hours"][k])
+            assert row["window_longest_dark_hours"] == str(site["window_longest_dark_hours"])
+        else:
+            assert row["longest_dark_hours"] == ""
+    assert json.dumps(geo)  # finite, serialisable

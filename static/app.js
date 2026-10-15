@@ -264,7 +264,7 @@
     if (info.darkness) {
       // Stage G days on a fixed grey ramp; never-lit pixels in black.
       var dm = name === "longest_dark" ? currentWindow() : null;
-      var period = dm ? windowLabel(dm) : (meta.darkness && meta.darkness.period_label) || "2026–2044";
+      var period = dm ? windowLabel(dm) : darkPeriod();
       var dark = name === "longest_dark";
       els.legendTitle.textContent =
         (dark ? "Longest continuous darkness" : "Longest continuous sunlight") + " (days), " + period + " modelled";
@@ -480,7 +480,7 @@
   // ---- Stage G darkness (per site, from /score; never scored)
 
   // Longest dark stretch shown for a site: the month window's when one is
-  // active, else 2026–2044. null when the server has no darkness data.
+  // active, else the full modelled period. null when the server has no darkness data.
   function darkOf(site, months) {
     if (!site) {
       return null;
@@ -529,10 +529,10 @@
     }
     if (d.never) {
       return '<span class="dark-never" title="no sunlit hour in ' +
-        (months ? escapeHtml(windowLabel(months)) : "2026–2044") + '">never lit</span>';
+        escapeHtml(months ? windowLabel(months) : darkPeriod()) + '">never lit</span>';
     }
     var title = (d.censored ? "touches the edge of the period; may be longer. " : "") +
-      d.hours + " h" + (months ? " in " + windowLabel(months) : ", 2026–2044");
+      d.hours + " h" + (months ? " in " + windowLabel(months) : ", " + darkPeriod());
     return '<span title="' + escapeHtml(title) + '">' + (d.censored ? "≥ " : "") + daysText(d.hours) + '<span class="unit"> d</span></span>';
   }
 
@@ -557,36 +557,60 @@
     return d1 === d2 ? d1 + " " + m1 + " " + y1 : d1 + "–" + d2 + " " + m1 + " " + y1;
   }
 
+  // The modelled darkness period, from /layers ("2026–2044").
+  function darkPeriod() {
+    return (meta && meta.darkness && meta.darkness.period_label) || "the modelled period";
+  }
+
   function darkFacts(card) {
     var site = card.site;
-    var out = "";
     if (site.longest_dark_hours == null) {
       return fact("Longest darkness", '<span class="na">' + escapeHtml(darkWhy(null)) + "</span>");
     }
-    var full;
-    if (site.never_lit) {
-      full = "never lit 2026–2044";
-    } else {
-      full = (site.longest_dark_censored ? "≥ " : "") + daysText(site.longest_dark_hours) + " days";
-      if (site.longest_dark_start_utc && site.longest_dark_end_utc) {
-        full += " (" + spanText(site.longest_dark_start_utc, site.longest_dark_end_utc) + ")";
-      }
-    }
-    if (card.months) {
-      var w = darkOf(site, card.months);
-      var head = !w
-        ? '<span class="na">' + escapeHtml(windowLabel(card.months)) + ": " + escapeHtml(darkWhy(card.months)) + "</span>"
-        : (w.never ? "never lit" : (w.censored ? "≥ " : "") + daysText(w.hours) + " days") +
+    var period = darkPeriod();
+    var days = site.never_lit
+      ? "never lit"
+      : (site.longest_dark_censored ? "≥ " : "") + daysText(site.longest_dark_hours);
+    var span =
+      !site.never_lit && site.longest_dark_start_utc && site.longest_dark_end_utc
+        ? " (" + spanText(site.longest_dark_start_utc, site.longest_dark_end_utc) + ")"
+        : "";
+    var lit = site.longest_lit_hours === 0
+      ? "never lit"
+      : (site.longest_lit_censored ? "≥ " : "") + (site.longest_lit_hours / 24).toFixed(0);
+    var w = card.months ? darkOf(site, card.months) : null;
+    var windowText = !card.months
+      ? ""
+      : !w
+        ? escapeHtml(windowLabel(card.months)) + ": " + escapeHtml(darkWhy(card.months))
+        : (w.never ? "never lit" : (w.censored ? "≥ " : "") + daysText(w.hours) + " d") +
           " in " + escapeHtml(windowLabel(card.months));
-      out += fact("Longest darkness", head + ' <span class="na">(2026–2044: ' + escapeHtml(full) + ")</span>");
+    if (isPresenting()) {
+      // One row in presentation mode, so the check rows below still fit.
+      var main = card.months
+        ? windowText
+        : escapeHtml(days + (site.never_lit ? "" : " d") + span);
+      return fact(
+        "Longest dark / lit",
+        main + " / " + escapeHtml(lit + (site.longest_lit_hours === 0 ? "" : " d"))
+      );
+    }
+    var full = site.never_lit
+      ? "never lit " + period
+      : days + " days" + span;
+    var out = "";
+    if (card.months) {
+      out += fact(
+        "Longest darkness",
+        (w ? windowText.replace(/ d in /, " days in ") : '<span class="na">' + windowText + "</span>") +
+          ' <span class="na">(' + escapeHtml(period) + ": " + escapeHtml(full) + ")</span>"
+      );
     } else {
       out += fact("Longest darkness", escapeHtml(full));
     }
     out += fact(
       "Longest sunlight",
-      site.longest_lit_hours === 0
-        ? "never lit"
-        : (site.longest_lit_censored ? "≥ " : "") + (site.longest_lit_hours / 24).toFixed(0) + " days"
+      site.longest_lit_hours === 0 ? "never lit" : escapeHtml(lit) + " days"
     );
     return out;
   }
@@ -596,12 +620,13 @@
     if (!d) {
       return null;
     }
-    var where = months ? " in " + windowLabel(months) : "";
+    var where = months ? " in " + windowLabel(months) : " (modelled " + darkPeriod() + ")";
     if (d.never) {
-      return "never lit" + (months ? " in " + windowLabel(months) : " 2026–2044");
+      return "never lit" + where;
     }
     return "longest dark stretch " + (d.censored ? "≥ " : "") + daysText(d.hours) + " days" + where;
   }
+
 
   function siteKey(site) {
     return site.row + ":" + site.col;
@@ -894,8 +919,11 @@
     }
     parts.push(
       "<p><b>Longest dark</b>: longest run of consecutive hours with no part of the Sun above the " +
-      "modelled 240 m horizon, 2026–2044 (or inside the sunlight month window), in days. " +
-      "Hourly samples (±1 h); ≥ = the run touches the edge of the period. Not scored.</p>"
+      "modelled 240 m horizon, " + escapeHtml(darkPeriod()) +
+      " (or inside the sunlight month window), in days. " +
+      "Hourly samples (±1 h); ≥ = the run touches the edge of the period. Not scored." +
+      (meta && meta.darkness && meta.darkness.note ? " " + escapeHtml(meta.darkness.note) + "." : "") +
+      "</p>"
     );
     if (checks) {
       parts.push(
@@ -1089,12 +1117,13 @@
         ? '<span class="na">not checked</span>'
         : v.slope.toFixed(1) + "°" + (card.maxSlope != null ? ' <span class="na">limit ' + card.maxSlope + "°</span>" : "")
     );
-    out += fact("Earth view", escapeHtml(earthWords(values)));
+    // Presentation mode keeps the card short so the check rows stay visible.
+    out += fact("Earth view", escapeHtml(earthWords(values, isPresenting())));
     out += fact(
       "Hydrogen",
       v.hydrogen == null ? '<span class="na">not checked</span>' : v.hydrogen.toFixed(0) + " ppm"
     );
-    if (v.dem != null) {
+    if (v.dem != null && !isPresenting()) {
       out += fact("Elevation", v.dem.toFixed(0) + " m");
     }
     return out;
@@ -2374,6 +2403,10 @@
       // Storage can be blocked; the toggle still works for this page.
     }
     placeCards();
+    // Cards merge the Stage G rows in presentation mode.
+    if (currentSites) {
+      renderCards();
+    }
     if (map) {
       map.invalidateSize();
       drawMarkers();

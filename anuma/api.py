@@ -1160,14 +1160,16 @@ def create_app() -> FastAPI:
             layers.append(entry)
         shape = None if missing else (grid.height, grid.width)
         darkness = _darkness_meta(cfg, root, _open_darkness(cfg, root, shape))
+        period_label = darkness["period_label"] or _darkness_spec(cfg).get("period_label") or "modelled period"
+        citation = "ANUMA Stage G model" + (f", job {darkness['job']}" if darkness["job"] else "")
         for name, label in DARKNESS_LAYERS.items():
             layers.append(
                 {
                     "name": name,
-                    "label": label.format(period=darkness["period_label"] or "2026–2044"),
+                    "label": label.format(period=period_label),
                     "unit": "days",
                     "mode": None,
-                    "citation": "ANUMA Stage G model, job " + str(darkness["job"]),
+                    "citation": citation,
                     "present": darkness["available"],
                     "display_only": True,
                     "darkness": True,

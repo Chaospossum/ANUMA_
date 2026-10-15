@@ -11,6 +11,16 @@ import numpy as np
 
 
 CONTRIBUTION_NAMES = ("illumination", "hydrogen", "earth_visibility")
+# Stage G per-site fields from /score (null when the darkness output is absent).
+DARKNESS_EXPORT_FIELDS = (
+    "longest_dark_hours",
+    "longest_dark_censored",
+    "never_lit",
+    "longest_dark_start_utc",
+    "longest_dark_end_utc",
+    "longest_lit_hours",
+    "window_longest_dark_hours",
+)
 
 
 def _finite(value: Any) -> float | None:
@@ -37,6 +47,8 @@ def site_records(sites: list[dict]) -> list[dict]:
             record[f"{name}_contribution"] = _finite(contributions.get(name))
         record["nearest_artemis_region"] = site.get("nearest")
         record["distance_to_artemis_km"] = _finite(site.get("distance_km"))
+        for name in DARKNESS_EXPORT_FIELDS:
+            record[name] = site.get(name)
         records.append(record)
     return records
 
@@ -73,6 +85,7 @@ def sites_csv(sites: list[dict], scenario: dict | None = None) -> bytes:
         *(f"{name}_contribution" for name in CONTRIBUTION_NAMES),
         "nearest_artemis_region",
         "distance_to_artemis_km",
+        *DARKNESS_EXPORT_FIELDS,
     ]
     return _scenario_lines(scenario) + _csv(records, fields)
 

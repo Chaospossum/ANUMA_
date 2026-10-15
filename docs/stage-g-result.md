@@ -28,11 +28,12 @@ Sun above the modelled horizon.
   19.2–26.8). None lies between 30 and 45 days. About 16 % (763,000 pixels)
   have seasonal darkness from 45 days to more than a year.
 - Short longest nights are rare: **6,970 pixels (0.14 %)** are at or below
-  15 days, and 105 pixels are at or below 10 days.
+  15 days, and 123 pixels are at or below 10 days (105 strictly below).
 - The longest sunlit stretch is typically 11.8 days (95th percentile
   15.5 days).
 - At every site below, the worst calendar year is within a few hours of the
-  full-period value. The worst years are 2030 and 2032 for the old ranking.
+  full-period value. For the old ranking the worst year is mostly 2030 (8 of
+  12 sites); otherwise 2026, 2032 or 2033.
 
 ### Old default top 12 (slope-only ranking)
 
@@ -106,6 +107,8 @@ cap for this measure, but it fails the 20 m flat-ground gate (share 0.10).
   sunlight 175 days". The answer banner names #1's longest dark stretch.
 - Map layers `longest_dark` (month windows supported) and `longest_lit`; black
   marks never-lit pixels. Display only, never scored.
+- A long multi-year month window can take up to about 10 s the first time
+  the map layer is drawn; it is cached after that.
 - Without the output on disk the fields are null and the layers are listed as
   not available. Month windows need `monthly/`; without it only whole calendar
   years answer.
