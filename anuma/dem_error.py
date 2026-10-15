@@ -5,6 +5,7 @@ height error in metres, Barker et al. 2023) onto the common grid. The 20 m
 grid nests in the 240 m grid, so each cell is the exact mean of its finite
 12 x 12 fine pixels (block mean, the nested case of average resampling).
 Source nodata becomes NaN, and a cell with no finite fine pixel is NaN.
+Cells at the raster edge are averaged over the covered pixels only.
 The source is read in bands of grid rows, so the 3.7 GB raster is never held
 in memory. GDAL's WarpedVRT average is used only for an unnested source
 (`--allow-unnested`); it mis-weights cells the source covers only in part.
@@ -236,6 +237,7 @@ def run(
         "method": (
             f"Mean of the finite {FINE_PER_CELL} x {FINE_PER_CELL} fine pixels per 240 m "
             "cell (block_mean on nested grids; gdal_average only if --allow-unnested). "
+            "Cells at the raster edge are averaged over the covered pixels only. "
             "Source nodata -> NaN. Cells outside lat_max -> NaN."
         ),
         "nodata": "NaN",

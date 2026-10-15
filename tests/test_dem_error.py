@@ -17,6 +17,7 @@ from anuma import dem_error
 from anuma.api import app, clear_cache
 from anuma.config import load_config
 from anuma.grid import Grid
+from anuma.heatmap import displayed
 from anuma.ingest import write_artemis_geojson
 from anuma.score import score
 
@@ -309,7 +310,11 @@ def test_api_dem_error_present(api_root):
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert response.content[:8] == b"\x89PNG\r\n\x1a\n"
-    finite = array[np.isfinite(array)]
+    # The range is over the pixels the PNG draws (nanmax blocks), not the full grid.
+    shown = displayed(array)
+    assert shown.shape[0] < array.shape[0]
+    finite = shown[np.isfinite(shown)]
+    assert response.headers["X-Anuma-Range-Basis"] == "displayed-block-max"
     assert float(response.headers["X-Anuma-Range-Min"]) == pytest.approx(float(finite.min()), rel=1e-5)
     assert float(response.headers["X-Anuma-Range-Max"]) == pytest.approx(
         float(np.percentile(finite, 95)), rel=1e-5

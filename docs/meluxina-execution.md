@@ -465,8 +465,9 @@ array shape. It does not create the output directory or compute a ranking.
 PGDA product 90 `LDEM_80S_20MPP_ADJ_ERR.TIF`. It is display only: it is not in
 the scoring weights, the input manifest, or the smoke check. It is built by
 `anuma.dem_error`, not `anuma.ingest`. The 20 m grid nests 12 x 12 in the
-240 m grid, so each cell is the exact mean of its finite fine pixels; nodata
-and cells outside 80°S are NaN. It reads the 3.7 GB raster in bands of 64
+240 m grid, so each cell is the exact mean of its finite fine pixels; cells
+at the raster edge are averaged over the covered pixels only; nodata and
+cells outside 80°S are NaN. It reads the 3.7 GB raster in bands of 64
 grid rows (about 1.3 GB peak RSS, 20 s on a laptop for the 2.7 GB DEM). Run it
 in a short `cpudev` allocation, not on the login node:
 

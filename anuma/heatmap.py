@@ -30,10 +30,18 @@ def _downsample(array: np.ndarray, max_dim: int) -> np.ndarray:
     return reduced
 
 
+PNG_MAX_DIM = 1024
+
+
+def displayed(array: np.ndarray, max_dim: int = PNG_MAX_DIM) -> np.ndarray:
+    """The pixels render_png draws: nanmax blocks when larger than max_dim."""
+    return _downsample(np.asarray(array, dtype=np.float64), max_dim)
+
+
 def render_png(
     array: np.ndarray,
     cmap: str = "viridis",
-    max_dim: int = 1024,
+    max_dim: int = PNG_MAX_DIM,
     vmin: float | None = None,
     vmax: float | None = None,
 ) -> bytes:

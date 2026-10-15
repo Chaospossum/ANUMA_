@@ -27,7 +27,7 @@ from anuma.config import load_config, repo_root
 from anuma.daily_lit import INDEX_NAME, DailyLitCube
 from anuma.export import sites_csv, sites_geojson
 from anuma.grid import Grid
-from anuma.heatmap import render_png
+from anuma.heatmap import displayed, render_png
 from anuma.score import (
     apply_keepout,
     artemis_overlap,
@@ -459,8 +459,10 @@ def _scenario(payload: dict, body: ScoreBody | None) -> dict:
 
 
 def _display_range(cfg: dict, name: str, array: np.ndarray) -> tuple[float, float] | None:
-    """Colour range in layer units: finite minimum to the configured percentile."""
-    finite = array[np.isfinite(array)]
+    """Colour range in layer units over the pixels the PNG draws (nanmax blocks):
+    finite minimum to the configured percentile."""
+    shown = displayed(array)
+    finite = shown[np.isfinite(shown)]
     if finite.size == 0:
         return None
     high_pct = float(cfg["layers"][name].get("display_percentile_high", 100.0))
@@ -469,10 +471,13 @@ def _display_range(cfg: dict, name: str, array: np.ndarray) -> tuple[float, floa
     return low, high if high > low else low + 1.0
 
 
-def _display_only_png(cfg: dict, name: str, array: np.ndarray) -> Response:
+def _display_only_png(cfg: dict, name: str, array: np.ndarray, store: dict) -> Response:
     """Raw values in grey on a fixed range; the range goes out in headers."""
-    span = _display_range(cfg, name, array)
-    headers = {"X-Anuma-Display-Only": "true"}
+    ranges = store.setdefault("display_ranges", {})
+    if name not in ranges:
+        ranges[name] = _display_range(cfg, name, array)
+    span = ranges[name]
+    headers = {"X-Anuma-Display-Only": "true", "X-Anuma-Range-Basis": "displayed-block-max"}
     if span is None:
         png = render_png(array, cmap="gray")
     else:
@@ -610,7 +615,7 @@ def create_app() -> FastAPI:
         if array is None:
             raise _not_ingested([name])
         if is_display_only(cfg, name):
-            return _display_only_png(cfg, name, array)
+            return _display_only_png(cfg, name, array, store)
         if window is not None:
             array, _ = _window_illumination(cfg, root, store, window)
         mode = cfg["layers"][name].get("mode")

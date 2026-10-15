@@ -22,7 +22,9 @@ Verified 28 September 2026. Product names and URLs are in `config/layers.yaml`. 
 - **Product:** `LDEM_80S_20MPP_ADJ_ERR` (PGDA product 90, "LDEM surface height error (in meters)"), same 20 m grid as `LDEM_80S_20MPP_ADJ`
 - **Catalog:** https://pgda.gsfc.nasa.gov/products/90
 - **Citation:** Barker et al. (2023), *Planet. Sci. J.* 4, 183. https://doi.org/10.3847/PSJ/acf3e1
-- **Aggregation:** mean of the finite 12 × 12 20 m pixels per 240 m cell (`python -m anuma.dem_error`); nodata → NaN
+- **URL:** https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_20MPP_ADJ_ERR.TIF (verified 2026-10-15: downloaded to MeluXina, sha256 `d64045b8aa58a24010f009ab5667ae02cc06cffa7796784dd5e2d48b3059d8cf`)
+- **Added:** 2026-10-15
+- **Aggregation:** mean of the finite 12 × 12 20 m pixels per 240 m cell (`python -m anuma.dem_error`); cells at the raster edge are averaged over the covered pixels only; nodata → NaN
 - **Use:** map layer only, weight 0; not part of the score, hard mask, or ranking
 
 ## Illumination

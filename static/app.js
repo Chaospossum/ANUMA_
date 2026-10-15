@@ -213,9 +213,12 @@
         els.legendLow.textContent = "low";
         els.legendHigh.textContent = "high";
       }
+      // The PNG draws the largest error in each block; the range is over those pixels.
       els.legendNote.textContent =
-        "display only, not scored" +
-        (layerRange && layerRange.pct ? "; white = p" + layerRange.pct + " or more" : "") +
+        "display only, not scored; black = smallest error, white = largest error" +
+        (layerRange && layerRange.pct
+          ? " (≥ p" + layerRange.pct + " of shown pixels, each its block maximum)"
+          : "") +
         "; blank = no data";
       return;
     }
@@ -366,6 +369,7 @@
     var title =
       flag.text + ": " + Math.round(100 * value) + " % of 20 m pixels ≤ 8° within 1 km (job " +
       checks.source.job + ")";
+    title = escapeHtml(title);
     return ' <span class="flag" title="' + title + '" aria-label="' + title + '">⚠</span>';
   }
 
@@ -381,6 +385,8 @@
       return '<span title="Not in the DEM-noise study">–</span>';
     }
     var text = noiseChecks.text || {};
+    var passPct = (100 * found.pass_rate).toFixed(1);
+    var zeroPct = (100 * found.zero_noise_within_1km).toFixed(1);
     var symbol;
     var title;
     if (found.noise_unstable) {
@@ -393,11 +399,17 @@
       symbol = "✗";
       title = text.stable_fail;
     } else {
-      return '<span title="Not in the DEM-noise study">–</span>';
+      // Tested and stable by the Stage D rule, but neither all-pass nor all-fail.
+      symbol = "·";
+      title =
+        "stable by the Stage D rule; passes in " + passPct + " % of " + noiseChecks.draws +
+        " draws (no noise " + zeroPct + " %)";
     }
-    title =
-      title + " (" + Math.round(100 * found.pass_rate) + " % of " + noiseChecks.draws +
-      " draws pass; no noise " + Math.round(100 * found.zero_noise_within_1km) + " %)";
+    if (symbol !== "·") {
+      title +=
+        " (" + passPct + " % of " + noiseChecks.draws + " draws pass; no noise " + zeroPct + " %)";
+    }
+    title = escapeHtml(title);
     return '<span class="noise" title="' + title + '" aria-label="' + title + '">' + symbol + "</span>";
   }
 
@@ -912,13 +924,16 @@
   function fillLayerSelect(info) {
     var keep = '<option value="score">Combined score</option>';
     (info.layers || []).forEach(function (layer) {
-      var label = layer.label || (layer.name === "dem" ? "DEM" : layer.name.replace(/_/g, " "));
+      var label = escapeHtml(
+        layer.label || (layer.name === "dem" ? "DEM" : layer.name.replace(/_/g, " "))
+      );
+      var value = escapeHtml(layer.name);
       if (layer.display_only && !layer.available) {
         // Optional layer not built on this machine: listed, but not selectable.
-        keep += '<option value="' + layer.name + '" disabled>' + label + " (not available)</option>";
+        keep += '<option value="' + value + '" disabled>' + label + " (not available)</option>";
         return;
       }
-      keep += '<option value="' + layer.name + '">' + label + "</option>";
+      keep += '<option value="' + value + '">' + label + "</option>";
     });
     els.layer.innerHTML = keep;
   }

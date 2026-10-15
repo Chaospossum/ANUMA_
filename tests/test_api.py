@@ -482,6 +482,9 @@ def test_sites_table_has_noise_column():
     assert ">Noise</th>" in html
     assert "/checks/stage-d-noise.json" in app_js
     assert "check.row === site.row && check.col === site.col" in app_js
+    # A tested, stable site with a mixed pass rate is not reported as untested.
+    assert "stable by the Stage D rule" in app_js
+    assert 'id="legend-note">blank = fails slope rule' in html
 
 
 def _artemis_points(client: TestClient, lists: set[str]) -> list[dict]:

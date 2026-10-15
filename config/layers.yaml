@@ -296,9 +296,9 @@ layers:
     display_only: true
     product_name: LDEM_80S_20MPP_ADJ_ERR
     filename: LDEM_80S_20MPP_ADJ_ERR.TIF
-    # URL by analogy with the DEM; the file was staged on MeluXina for Stage D.
+    # URL verified: downloaded from it to MeluXina on 2026-10-15 for Stage D.
     url: https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_20MPP_ADJ_ERR.TIF
-    # First MeluXina download (2026-10-15), as anuma.stage_d_gate.ERR_SHA256.
+    # sha256 of that 2026-10-15 download, as anuma.stage_d_gate.ERR_SHA256.
     sha256: d64045b8aa58a24010f009ab5667ae02cc06cffa7796784dd5e2d48b3059d8cf
     resolution_m: 20
     aggregation: "mean of the finite 12 x 12 20 m pixels per 240 m cell; nodata -> NaN"
