@@ -53,9 +53,13 @@ STAGE_F_COMMAND = (
     "copy terrain_1km_fraction.npy and terrain_1km_fraction.json from the Stage F "
     "production output (docs/stage-f-run.md) into data/grid/"
 )
-# What the precomputed studies (Monte Carlo top-10 %, Stage B and Stage D
-# badges) ranked: the slope-only hard mask, before the 20 m terrain gate.
+# What the original precomputed studies (Monte Carlo top-10 %, Stage B and
+# Stage D badges) ranked: the slope-only hard mask, before the 20 m terrain
+# gate. Stage H repeats the Monte Carlo and DEM-noise studies for the gated
+# ranking (config stability.gated); those are served for GATED_BASIS when
+# present and made for the loaded gate layer.
 STUDIES_RANKING_BASIS = "slope_only"
+GATED_BASIS = "slope_and_terrain_1km"
 
 _STORE: dict[str, Any] = {}
 _CUBES: dict[str, DailyLitCube] = {}
@@ -257,18 +261,139 @@ def _terrain_summary(cfg: dict, terrain: dict) -> dict:
     }
 
 
-def _ranking_basis(gate: dict) -> dict:
-    basis = "slope_and_terrain_1km" if gate["status"] == "applied" else "slope_only"
+def _terrain_if_ingested(cfg: dict, root: Path) -> dict:
+    """The gate layer when the grid is ingested; never raises 412."""
+    if _missing_layers(cfg, root):
+        return {"available": False, "reason": "grid layers are not ingested", "meta": None}
+    return _terrain_layer(cfg, root, _load_store(cfg, root))
+
+
+def _gated_basis(cfg: dict) -> str:
+    return str((cfg["stability"].get("gated") or {}).get("ranking_basis", GATED_BASIS))
+
+
+def _gated_studies(cfg: dict, root: Path, terrain: dict) -> dict:
+    """Stage H studies for the gated ranking, if on disk and made for this layer.
+
+    Both files are required: the Monte Carlo summary (data root) and the
+    committed DEM-noise check file (repo). Each must name the configured
+    study ranking basis and the loaded layer's ``fraction_sha256``, and both
+    must agree on the gate's ``min_fraction``.
+    """
+    spec = cfg["stability"].get("gated") or {}
+    info: dict[str, Any] = {
+        "available": False,
+        "reason": None,
+        "summary": None,
+        "noise": None,
+        "min_fraction": None,
+    }
+    if not spec:
+        info["reason"] = "no gated studies configured"
+        return info
+    if not terrain["available"]:
+        info["reason"] = "20 m terrain layer is not loaded"
+        return info
+    digest = (terrain.get("meta") or {}).get("fraction_sha256")
+    mc_path = root / spec["monte_carlo_summary"]
+    noise_path = repo_root() / spec["dem_noise_checks"]
+    if not mc_path.is_file():
+        info["reason"] = "Stage H Monte Carlo summary is not on this machine"
+        return info
+    if not noise_path.is_file():
+        info["reason"] = "Stage H DEM-noise check file is missing"
+        return info
+    try:
+        summary = json.loads(mc_path.read_text())
+        noise = json.loads(noise_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        info["reason"] = f"Stage H files unreadable: {exc}"
+        return info
+    mc_gate = summary.get("terrain_gate") or {}
+    noise_gate = noise.get("terrain_gate") or {}
+    wanted = spec["study_ranking_basis"]
+    if summary.get("ranking_basis") != wanted or noise.get("ranking_basis") != wanted:
+        info["reason"] = f"Stage H files are not for ranking basis {wanted}"
+    elif mc_gate.get("fraction_sha256") != digest or noise_gate.get("fraction_sha256") != digest:
+        info["reason"] = "Stage H files were made for a different terrain layer"
+    elif mc_gate.get("min_fraction") is None or not math.isclose(
+        float(mc_gate["min_fraction"]), float(noise_gate.get("min_fraction", math.nan))
+    ):
+        info["reason"] = "Stage H files disagree on the gate threshold"
+    else:
+        info.update(
+            available=True,
+            summary=summary,
+            noise=noise,
+            min_fraction=float(mc_gate["min_fraction"]),
+        )
+    return info
+
+
+def _studies_context(cfg: dict, root: Path, terrain: dict | None = None) -> dict:
+    """Which studies the app serves by default, and whether gated ones exist.
+
+    The gated studies are the default when the default ``/score`` applies the
+    gate (config enabled, layer loaded, built for the default max slope) and
+    the Stage H files are valid for that layer; otherwise the slope-only
+    studies are, as before.
+    """
+    if terrain is None:
+        terrain = _terrain_if_ingested(cfg, root)
+    gated = _gated_studies(cfg, root, terrain)
+    spec = cfg["hard"]["terrain_1km"]
+    layer_slope = (terrain.get("meta") or {}).get("max_slope_deg")
+    default_applies = bool(
+        spec.get("enabled", False)
+        and terrain["available"]
+        and layer_slope is not None
+        and math.isclose(float(layer_slope), float(cfg["hard"]["max_slope_deg"]))
+    )
+    served = _gated_basis(cfg) if default_applies and gated["available"] else STUDIES_RANKING_BASIS
+    return {"served_basis": served, "gated": gated}
+
+
+def _ranking_basis(gate: dict, studies: dict | None = None, cfg: dict | None = None) -> dict:
+    """The ranking's basis versus the basis of the served studies.
+
+    ``studies_match`` is true only when the served Top-10 % and DEM-noise
+    studies were computed for this ranking: same basis and, with the gate,
+    the same ``min_fraction``.
+    """
+    gated_name = _gated_basis(cfg) if cfg is not None else GATED_BASIS
+    basis = gated_name if gate["status"] == "applied" else STUDIES_RANKING_BASIS
+    studies = studies or {"served_basis": STUDIES_RANKING_BASIS, "gated": {"available": False}}
+    served = studies["served_basis"]
+    gated = studies["gated"]
+    match = basis == served
+    if match and basis == gated_name:
+        match = math.isclose(float(gate["min_fraction"]), float(gated["min_fraction"]))
+    if match:
+        note = None
+    elif basis == gated_name and served == gated_name:
+        note = (
+            f"Top-10 % and DEM-noise badges were computed with the 20 m terrain rule at "
+            f"{float(gated['min_fraction']):.0%}, not {float(gate['min_fraction']):.0%}"
+        )
+    elif basis == gated_name:
+        note = (
+            "Top-10 %, Stage B and Stage D badges were computed for the previous "
+            "(slope-only) ranking"
+        )
+    else:
+        note = (
+            "Top-10 % and DEM-noise badges were computed for the ranking with the "
+            "20 m terrain rule"
+        )
     return {
         "basis": basis,
-        "studies_basis": STUDIES_RANKING_BASIS,
-        "studies_match": basis == STUDIES_RANKING_BASIS,
-        "note": (
-            None
-            if basis == STUDIES_RANKING_BASIS
-            else "Top-10 %, Stage B and Stage D badges were computed for the previous "
-            "(slope-only) ranking"
-        ),
+        "studies_basis": served,
+        "studies_match": match,
+        "studies_available": {
+            STUDIES_RANKING_BASIS: True,
+            gated_name: bool(gated.get("available")),
+        },
+        "note": note,
     }
 
 
@@ -435,8 +560,28 @@ def _artemis_payload(overlap: dict, cfg: dict) -> dict:
     }
 
 
-def _stability_payload(cfg: dict, root: Path) -> dict:
-    """Top-10 membership and winner frequency for the default policy, if on disk."""
+def _select_basis(cfg: dict, root: Path, basis: str | None) -> tuple[str, dict]:
+    """The requested study basis (default: the served one) and the context."""
+    studies = _studies_context(cfg, root)
+    allowed = (STUDIES_RANKING_BASIS, _gated_basis(cfg))
+    if basis is None:
+        basis = studies["served_basis"]
+    if basis not in allowed:
+        raise HTTPException(
+            status_code=400, detail=f"basis must be one of {', '.join(allowed)}"
+        )
+    return basis, studies
+
+
+def _stability_payload(cfg: dict, root: Path, basis: str | None = None) -> dict:
+    """Top-10 membership and winner frequency for the default policy, if on disk.
+
+    ``basis`` picks the study: ``slope_only`` (job 5332991) or the gated
+    Stage H study; by default the one matching the default ``/score``.
+    """
+    basis, studies = _select_basis(cfg, root, basis)
+    if basis != STUDIES_RANKING_BASIS:
+        return _gated_stability_payload(cfg, studies["gated"], basis)
     spec = cfg["stability"]
     path = root / spec["monte_carlo_summary"]
     if not path.is_file():
@@ -451,6 +596,28 @@ def _stability_payload(cfg: dict, root: Path) -> dict:
         "policy": policy,
         "draw_count": int(summary["draw_count"]),
         "weight_ranges": summary.get("weight_ranges"),
+        "note": spec["note"],
+        "winners": study["winner_stability"]["winners"],
+        "top10_membership_frequency": study["top10_membership_frequency"],
+    }
+
+
+def _gated_stability_payload(cfg: dict, gated: dict, basis: str) -> dict:
+    if not gated["available"]:
+        return {"available": False, "ranking_basis": basis, "reason": gated["reason"]}
+    spec = cfg["stability"]["gated"]
+    summary = gated["summary"]
+    policy = cfg["stability"]["policy"]
+    study = summary["policies"][policy]
+    return {
+        "available": True,
+        "ranking_basis": basis,
+        "study_ranking_basis": summary["ranking_basis"],
+        "job_id": str(summary.get("source_job")) if summary.get("source_job") else None,
+        "policy": policy,
+        "draw_count": int(summary["draw_count"]),
+        "weight_ranges": summary.get("weight_ranges"),
+        "terrain_gate": summary.get("terrain_gate"),
         "note": spec["note"],
         "winners": study["winner_stability"]["winners"],
         "top10_membership_frequency": study["top10_membership_frequency"],
@@ -572,7 +739,9 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
         "illumination_window": window,
         "terrain_gate": result.terrain_gate["status"],
         "terrain_gate_detail": result.terrain_gate,
-        "ranking_basis": _ranking_basis(result.terrain_gate),
+        "ranking_basis": _ranking_basis(
+            result.terrain_gate, _studies_context(cfg, root, terrain), cfg
+        ),
         "weights_used": weights,
         "hard_used": {"max_slope_deg": float(max_slope), "slope_radius_m": float(slope_radius)},
         "score_range": _score_range(result.combined),
@@ -755,7 +924,11 @@ def create_app() -> FastAPI:
             },
             "illumination_window": _window_meta(cfg, root),
             "terrain_gate": _terrain_summary(cfg, terrain),
-            "studies_ranking_basis": STUDIES_RANKING_BASIS,
+            "studies_ranking_basis": (
+                STUDIES_RANKING_BASIS
+                if missing
+                else _studies_context(cfg, root, terrain)["served_basis"]
+            ),
             "layers": layers,
         }
 
@@ -876,8 +1049,8 @@ def create_app() -> FastAPI:
         return _site_values(row, col, window)
 
     @app.get("/stability.json")
-    def get_stability() -> dict:
-        return _stability_payload(_cfg(), data_root())
+    def get_stability(basis: Annotated[str | None, Query()] = None) -> dict:
+        return _stability_payload(_cfg(), data_root(), basis)
 
     @app.get("/checks/stage-b-1km.json")
     def get_stage_b_checks() -> JSONResponse:
@@ -887,8 +1060,16 @@ def create_app() -> FastAPI:
         return JSONResponse(json.loads(path.read_text()))
 
     @app.get("/checks/stage-d-noise.json")
-    def get_stage_d_checks() -> JSONResponse:
-        path = repo_root() / _cfg()["stability"]["stage_d_checks"]
+    def get_stage_d_checks(basis: Annotated[str | None, Query()] = None) -> JSONResponse:
+        """DEM-noise verdicts for the served ranking basis (``?basis=`` overrides)."""
+        cfg = _cfg()
+        basis, studies = _select_basis(cfg, data_root(), basis)
+        if basis != STUDIES_RANKING_BASIS:
+            gated = studies["gated"]
+            if not gated["available"]:
+                raise HTTPException(status_code=404, detail=gated["reason"])
+            return JSONResponse(gated["noise"])
+        path = repo_root() / cfg["stability"]["stage_d_checks"]
         if not path.is_file():
             raise HTTPException(status_code=404, detail="Stage D check file is missing")
         return JSONResponse(json.loads(path.read_text()))

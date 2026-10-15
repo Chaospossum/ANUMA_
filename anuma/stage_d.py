@@ -24,6 +24,14 @@ The 1 km circle, the 144 fine pixels of the 240 m cell and the 8° limit
 give the per-draw statistics. The decision is distributional: a site is
 noise-unstable when the 5-95 % interval of its ≤ 8° fraction within 1 km is
 wider than 0.10 or straddles 0.50 (primary run only).
+
+Stage H (``docs/stage-h-plan.md``) reuses this module unchanged for the
+ranking with the 20 m terrain gate: ``hpc_studies.dem_noise_gated`` swaps only
+the site scope (gated default ranks 1-12, ``recompute_gated_scope``) and the
+zero-noise fraction reference (the Stage F layer); every noise, ellipse and
+draw value is inherited from the frozen ``dem_noise`` block
+(``require_gated_config``). ``run_stage_d`` and the Stage D config are
+untouched; ``run_gated_noise`` is the Stage H entry point.
 """
 
 from __future__ import annotations
@@ -55,6 +63,7 @@ from anuma.stage_d_gate import (
 
 SCHEMA_VERSION = 1
 STAGE = "D-dem-noise-20m"
+GATED_STAGE = "H-dem-noise-20m-gated"
 RUN_NAMES = ("primary", "sensitivity")
 RANKING_DEPTH = 15
 # Pilot scope from the plan's acceptance checks: 2 sites x 8 draws, primary
@@ -124,6 +133,32 @@ FROZEN_SCORING = {
     "scoring.min_separation_km": 10.0,
     "scoring.weights": {"illumination": 0.5, "hydrogen": 0.3, "earth_visibility": 0.2},
 }
+# Stage H gated scope, frozen in docs/stage-h-plan.md on 2026-10-15 before
+# any Stage H run. Only these keys may appear in hpc_studies.dem_noise_gated;
+# everything else comes from the frozen dem_noise block.
+FROZEN_GATED = {
+    "frozen_on": "2026-10-15",
+    "plan": "docs/stage-h-plan.md",
+    "inherits": "dem_noise",
+    "ranking_basis": "terrain_gate_8deg_1km_50pct",
+    "scope.default_ranks": [1, 12],
+    "scope.site_order": [
+        "1350:1392", "748:1693", "761:1285", "774:1572",
+        "1319:1219", "1281:1142", "768:1635", "1290:1547",
+        "753:1742", "1484:1402", "915:1109", "728:1081",
+    ],
+    "stability_rule.source_study": "stage_h_monte_carlo",
+    "stability_rule.policy": "decided_per_layer",
+    "stability_rule.min_top10_frequency": 0.80,
+    "stability_rule.rank_margin": 2,
+    "acceptance.zero_noise_fraction_reference": "terrain_1km_fraction",
+    "acceptance.zero_noise_fraction_check_ranks": [1, 12],
+}
+FROZEN_GATED_SCORING = {
+    "hard.terrain_1km.min_fraction": 0.5,
+    "hard.terrain_1km.radius_m": 1000.0,
+    "hard.terrain_1km.layer": "terrain_1km_fraction",
+}
 
 
 # --------------------------------------------------------------------------
@@ -155,6 +190,59 @@ def require_frozen_config(cfg: dict) -> dict:
     return dn
 
 
+def _flatten(tree: dict, prefix: str = "") -> set[str]:
+    keys = set()
+    for key, value in tree.items():
+        dotted = f"{prefix}{key}"
+        if isinstance(value, dict):
+            keys |= _flatten(value, dotted + ".")
+        else:
+            keys.add(dotted)
+    return keys
+
+
+def require_gated_config(cfg: dict) -> dict:
+    """Effective Stage H noise config: frozen ``dem_noise`` plus the gated scope.
+
+    ``require_frozen_config`` must pass first, so the inherited noise model,
+    ellipse rule, draws, seed and window are exactly Stage D's. The gated
+    block may hold only the ``FROZEN_GATED`` keys, each with its frozen value,
+    so it cannot override any noise value.
+    """
+    base = require_frozen_config(cfg)
+    gated = cfg["hpc_studies"].get("dem_noise_gated")
+    if not isinstance(gated, dict):
+        raise ValueError("config is missing hpc_studies.dem_noise_gated")
+    extra = _flatten(gated) - set(FROZEN_GATED)
+    if extra:
+        raise ValueError(
+            f"hpc_studies.dem_noise_gated may not set {sorted(extra)}; they are "
+            "inherited from dem_noise"
+        )
+    for key, value in FROZEN_GATED.items():
+        if _lookup(gated, key) != value:
+            raise ValueError(f"hpc_studies.dem_noise_gated.{key} differs from the frozen plan")
+    for key, value in FROZEN_GATED_SCORING.items():
+        if _lookup(cfg, key) != value:
+            raise ValueError(f"{key} differs from the gate the Stage H scope was frozen on")
+    effective = {
+        key: value for key, value in base.items() if key not in ("controls", "stability_rule")
+    }
+    effective.update(
+        {
+            "frozen_on": gated["frozen_on"],
+            "plan": gated["plan"],
+            "inherits": gated["inherits"],
+            "ranking_basis": gated["ranking_basis"],
+            "scope": gated["scope"],
+            "site_order": list(gated["scope"]["site_order"]),
+            "stability_rule": gated["stability_rule"],
+            "acceptance": {**base["acceptance"], **gated["acceptance"]},
+        }
+    )
+    return effective
+
+
 def load_study_summary(path: Path) -> dict:
     """Read the job 5332991 summary after checking the digest the plan names."""
     path = Path(path)
@@ -167,11 +255,40 @@ def load_study_summary(path: Path) -> dict:
     return json.loads(path.read_text())
 
 
-def default_ranking(layers: dict[str, np.ndarray], grid, cfg: dict) -> list[dict]:
-    """Default score and ``rank_sites(n=15)``: weights, policy and mask from config."""
+def default_ranking(
+    layers: dict[str, np.ndarray],
+    grid,
+    cfg: dict,
+    *,
+    terrain_fraction: np.ndarray | None = None,
+    terrain_max_slope_deg: float | None = None,
+) -> list[dict]:
+    """Default score and ``rank_sites(n=15)``: weights, policy and mask from config.
+
+    Without ``terrain_fraction`` this is the slope-only ranking Stage D froze
+    (the gate is absent, so ``score`` reports it unavailable). With it, the
+    gate is forced on (Stage H) and must apply.
+    """
     from anuma.score import rank_sites, score
 
-    result = score(layers, grid=grid, cfg=cfg)
+    if terrain_fraction is None:
+        result = score(layers, grid=grid, cfg=cfg)
+        if result.terrain_gate.get("status") == "applied":
+            raise ValueError("slope-only ranking unexpectedly applied the terrain gate")
+    else:
+        from anuma.hpc_monte_carlo import gated_hard
+
+        if terrain_max_slope_deg is None:
+            raise ValueError("terrain_max_slope_deg is required with terrain_fraction")
+        name = str(cfg["hard"]["terrain_1km"]["layer"])
+        result = score(
+            {**layers, name: terrain_fraction},
+            hard=gated_hard(cfg, terrain_max_slope_deg),
+            grid=grid,
+            cfg=cfg,
+        )
+        if result.terrain_gate.get("status") != "applied":
+            raise ValueError("gated ranking did not apply the terrain gate")
     if result.normalization_policy != "decided_per_layer":
         raise ValueError("default ranking must use decided_per_layer")
     return rank_sites(result, n=RANKING_DEPTH)
@@ -252,6 +369,55 @@ def recompute_stability_rule(summary: dict, ranked: Sequence[dict], cfg: dict) -
             "policy": rule["policy"],
             "source_job": rule["source_job"],
             "study_summary_sha256": STUDY_SUMMARY_SHA256,
+        },
+        "ranking": table,
+    }
+
+
+def recompute_gated_scope(
+    ranked: Sequence[dict], cfg: dict, terrain_fraction: np.ndarray
+) -> dict:
+    """Gated default ranks 1-12 in rank order; assert the frozen site order.
+
+    Every rank-unstable site the Stage H rule can name (top 10 below 80 %
+    membership, or ranks 9-12) is inside this scope, so the scope needs no
+    Monte Carlo result. The rule is applied afterwards as labels only
+    (``anuma.stage_h.gated_stability_labels``).
+    """
+    dn = require_gated_config(cfg)
+    low, high = (int(v) for v in dn["scope"]["default_ranks"])
+    if len(ranked) < high:
+        raise ValueError(f"gated ranking has {len(ranked)} sites; need {high}")
+    table = []
+    for rank, site in enumerate(ranked, start=1):
+        row, col = int(site["row"]), int(site["col"])
+        table.append(
+            {
+                "default_rank": rank,
+                "id": site_id(site),
+                "row": row,
+                "col": col,
+                "lon": float(site["lon"]),
+                "lat": float(site["lat"]),
+                "score": float(site["total"]),
+                "terrain_1km_fraction": float(terrain_fraction[row, col]),
+                "in_scope": bool(low <= rank <= high),
+            }
+        )
+    scope = [table[rank - 1]["id"] for rank in range(low, high + 1)]
+    if scope != list(dn["site_order"]):
+        raise ValueError(
+            f"recomputed gated scope {scope} differs from the frozen site order "
+            f"{dn['site_order']}"
+        )
+    return {
+        "site_order": scope,
+        "reproduces_frozen_scope": True,
+        "unstable_ids": None,
+        "rule": {
+            "scope": f"gated default ranks {low}-{high}",
+            "ranking_basis": dn["ranking_basis"],
+            "labels": "rank-unstable labels come from the Stage H Monte Carlo afterwards",
         },
         "ranking": table,
     }
@@ -875,8 +1041,14 @@ def zero_noise_check(
     *,
     atol_deg: float,
     fraction_ranks: Sequence[int],
+    reference_name: str = "stage_b_table",
 ) -> dict:
-    """Check 3: zero-noise window equals the Stage B slope slice; 1 km fraction."""
+    """Check 3: zero-noise window equals the Stage B slope slice; 1 km fraction.
+
+    ``stage_b_table`` maps site id to the reference 1 km fraction: the
+    committed Stage B table for Stage D, the Stage F layer for Stage H
+    (``reference_name`` labels it in the report).
+    """
     w = site.window
     if w.row0 < 0 or w.col0 < 0:
         raise ValueError(f"site {w.site_id} window leaves the Stage B grid")
@@ -900,10 +1072,10 @@ def zero_noise_check(
     if fraction["applies"]:
         table_value = stage_b_table.get(w.site_id)
         if table_value is None:
-            raise ValueError(f"Stage B table has no 1 km fraction for {w.site_id}")
+            raise ValueError(f"{reference_name} has no 1 km fraction for {w.site_id}")
         fraction.update(
             {
-                "stage_b_table": float(table_value),
+                reference_name: float(table_value),
                 "zero_noise": zero_fraction,
                 # "Equal to two decimals": within half a unit of the second decimal.
                 "matches_two_decimals": bool(
@@ -1224,26 +1396,19 @@ def run_stage_d(
 ) -> dict:
     """Pilot or production on real inputs. Refuses before noise on any bad pin."""
     from anuma.grid import Grid
-    from anuma.hpc_smoke import ARRAY_FILES, validate_input_manifest
+    from anuma.hpc_smoke import validate_input_manifest
+    from anuma.stage_d_gate import NODE_HOURS
 
-    if mode not in ("pilot", "production"):
-        raise ValueError("mode must be pilot or production")
-    if workers <= 0 or workers > 128:
-        raise ValueError("workers must be between 1 and 128")
+    _check_mode_and_workers(mode, workers)
     started_utc = datetime.now(timezone.utc).isoformat()
     clock = time.perf_counter()
     cfg = load_config()
     dn = require_frozen_config(cfg)
-    max_slope_deg = float(_lookup(cfg, dn["ellipse"]["max_slope_deg_from"]))
-    cell_m = float(dn["resolution_m"])
 
     inputs = expected_inputs(
         raw_dir=raw_dir, dem=dem, stage_b_slope=stage_b_slope, mc_summary=mc_summary
     )
-    output_dir = Path(output_dir).resolve()
-    if output_dir.exists() and any(output_dir.iterdir()):
-        raise ValueError(f"output directory is not empty: {output_dir}")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = _empty_output_dir(output_dir)
     log_path = output_dir / "progress.log"
 
     # Digests are checked here, inside the compute job, before any read.
@@ -1251,15 +1416,175 @@ def run_stage_d(
     _log(log_path, f"verified {len(digests)} input digests")
     manifest, files = validate_input_manifest(Path(input_manifest))
     grid = Grid.from_json(files["grid"], cfg=cfg)
-    layers = {
-        name: np.load(files[name], mmap_mode="r", allow_pickle=False)
-        for name in ARRAY_FILES
-        if name != "dem"
-    }
+    layers = _ranking_layers(files)
     summary = load_study_summary(inputs["mc_summary"]["path"])
     rule = recompute_stability_rule(summary, default_ranking(layers, grid, cfg), cfg)
     _log(log_path, f"stability rule reproduced: {rule['unstable_ids']}")
 
+    return _run_noise_and_report(
+        mode=mode,
+        cfg=cfg,
+        dn=dn,
+        rule=rule,
+        grid=grid,
+        inputs=inputs,
+        digests=digests,
+        input_manifest=Path(input_manifest),
+        manifest=manifest,
+        reference_table=load_stage_b_table(),
+        reference_name="stage_b_table",
+        fraction_ranks=dn["acceptance"]["stage_b_fraction_check_ranks"],
+        production_node_hours=float(dn["execution"]["production_node_hours"]),
+        walltime_hours=float(NODE_HOURS["production"]),
+        report_names=("pilot-measurement.json", "stage-d-summary.json"),
+        stage=STAGE,
+        note=(
+            "Not affiliated with NASA, ESA or ispace. Tests LOLA height error "
+            "as ANUMA reads it (1 sigma, Gaussian, one length scale per site, "
+            "EFFRES as FWHM); see docs/stage-d-plan.md."
+        ),
+        output_dir=output_dir,
+        workers=workers,
+        started_utc=started_utc,
+        clock=clock,
+        log_path=log_path,
+        extra_inputs={"stage_b_checks": str(STAGE_B_CHECKS)},
+    )
+
+
+def run_gated_noise(
+    *,
+    mode: str,
+    inputs: dict[str, dict],
+    digests: dict[str, str],
+    output_dir: Path,
+    workers: int,
+    production_node_hours: float,
+) -> dict:
+    """Stage H noise part: the frozen Stage D model on the gated default top 12.
+
+    ``inputs`` are ``anuma.stage_h_gate.expected_inputs`` and ``digests``
+    their verified sha256 (the caller hashed them in this compute job). The
+    gated default ranking is recomputed from the pinned 240 m arrays and the
+    pinned gate layer and must reproduce the frozen ``site_order``. The
+    zero-noise 1 km fraction is checked against the gate layer itself.
+    ``production_node_hours`` is the noise share of the Stage H production
+    hour the pilot projection must fit.
+    """
+    from anuma.grid import Grid
+    from anuma.hpc_smoke import validate_input_manifest
+
+    _check_mode_and_workers(mode, workers)
+    started_utc = datetime.now(timezone.utc).isoformat()
+    clock = time.perf_counter()
+    cfg = load_config()
+    dn = require_gated_config(cfg)
+    for name, entry in inputs.items():
+        if digests.get(name) != entry["sha256"]:
+            raise ValueError(f"Stage H input {name} was not verified")
+    output_dir = _empty_output_dir(output_dir)
+    log_path = output_dir / "progress.log"
+    input_manifest = Path(inputs["input_manifest"]["path"])
+    manifest, files = validate_input_manifest(input_manifest)
+    grid = Grid.from_json(files["grid"], cfg=cfg)
+    layers = _ranking_layers(files)
+    meta = json.loads(Path(inputs["gate_sidecar"]["path"]).read_text())
+    gate = np.load(inputs["gate_fraction"]["path"], allow_pickle=False)
+    ranked = default_ranking(
+        layers,
+        grid,
+        cfg,
+        terrain_fraction=gate,
+        terrain_max_slope_deg=float(meta["max_slope_deg"]),
+    )
+    rule = recompute_gated_scope(ranked, cfg, gate)
+    _log(log_path, f"gated scope reproduced: {rule['site_order']}")
+    reference = {row["id"]: row["terrain_1km_fraction"] for row in rule["ranking"]}
+    return _run_noise_and_report(
+        mode=mode,
+        cfg=cfg,
+        dn=dn,
+        rule=rule,
+        grid=grid,
+        inputs=inputs,
+        digests=digests,
+        input_manifest=input_manifest,
+        manifest=manifest,
+        reference_table=reference,
+        reference_name="stage_f_layer",
+        fraction_ranks=dn["acceptance"]["zero_noise_fraction_check_ranks"],
+        production_node_hours=float(production_node_hours),
+        walltime_hours=float(production_node_hours),
+        report_names=("pilot-measurement.json", "dem-noise-summary.json"),
+        stage=GATED_STAGE,
+        note=(
+            "Not affiliated with NASA, ESA or ispace. The frozen Stage D noise "
+            "model on the default top 12 ranked with the 20 m terrain gate; see "
+            "docs/stage-h-plan.md."
+        ),
+        output_dir=output_dir,
+        workers=workers,
+        started_utc=started_utc,
+        clock=clock,
+        log_path=log_path,
+        extra_inputs={"ranking_basis": dn["ranking_basis"]},
+    )
+
+
+def _check_mode_and_workers(mode: str, workers: int) -> None:
+    if mode not in ("pilot", "production"):
+        raise ValueError("mode must be pilot or production")
+    if workers <= 0 or workers > 128:
+        raise ValueError("workers must be between 1 and 128")
+
+
+def _empty_output_dir(output_dir: Path) -> Path:
+    output_dir = Path(output_dir).resolve()
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise ValueError(f"output directory is not empty: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def _ranking_layers(files: dict[str, Path]) -> dict[str, np.ndarray]:
+    from anuma.hpc_smoke import ARRAY_FILES
+
+    return {
+        name: np.load(files[name], mmap_mode="r", allow_pickle=False)
+        for name in ARRAY_FILES
+        if name != "dem"
+    }
+
+
+def _run_noise_and_report(
+    *,
+    mode: str,
+    cfg: dict,
+    dn: dict,
+    rule: dict,
+    grid,
+    inputs: dict[str, dict],
+    digests: dict[str, str],
+    input_manifest: Path,
+    manifest: dict,
+    reference_table: dict[str, float],
+    reference_name: str,
+    fraction_ranks: Sequence[int],
+    production_node_hours: float,
+    walltime_hours: float,
+    report_names: tuple[str, str],
+    stage: str,
+    note: str,
+    output_dir: Path,
+    workers: int,
+    started_utc: str,
+    clock: float,
+    log_path: Path,
+    extra_inputs: dict,
+) -> dict:
+    """Windows, zero-noise checks, draws, decision and report (Stages D and H)."""
+    max_slope_deg = float(_lookup(cfg, dn["ellipse"]["max_slope_deg_from"]))
+    cell_m = float(dn["resolution_m"])
     effres_path = inputs["effres"]["path"] if "effres" in inputs else None
     sites, _ = prepare_sites_from_rasters(
         rule,
@@ -1272,7 +1597,6 @@ def run_stage_d(
         max_slope_deg=max_slope_deg,
         grid_proj4=grid.proj4,
     )
-    stage_b_table = load_stage_b_table()
     stage_b = np.load(inputs["stage_b_slope"]["path"], mmap_mode="r", allow_pickle=False)
 
     if mode == "pilot":
@@ -1287,9 +1611,10 @@ def run_stage_d(
         sites[i].window.site_id: zero_noise_check(
             sites[i],
             stage_b,
-            stage_b_table,
+            reference_table,
             atol_deg=float(dn["acceptance"]["zero_noise_slope_atol_deg"]),
-            fraction_ranks=dn["acceptance"]["stage_b_fraction_check_ranks"],
+            fraction_ranks=fraction_ranks,
+            reference_name=reference_name,
         )
         for i in site_indices
     }
@@ -1329,14 +1654,10 @@ def run_stage_d(
     checks = _acceptance(rule, zero_checks, study, mode)
     report: dict = {
         "schema_version": SCHEMA_VERSION,
-        "stage": STAGE,
+        "stage": stage,
         "mode": mode,
         "kind": "screening sensitivity, not a landing recommendation",
-        "note": (
-            "Not affiliated with NASA, ESA or ispace. Tests LOLA height error "
-            "as ANUMA reads it (1 sigma, Gaussian, one length scale per site, "
-            "EFFRES as FWHM); see docs/stage-d-plan.md."
-        ),
+        "note": note,
         "started_at_utc": started_utc,
         "completed_at_utc": None,
         "plan": dn["plan"],
@@ -1383,8 +1704,9 @@ def run_stage_d(
             **{
                 name: {"path": str(Path(entry["path"]).resolve()), "sha256": digests[name]}
                 for name, entry in inputs.items()
+                if name != "input_manifest"
             },
-            "stage_b_checks": str(STAGE_B_CHECKS),
+            **extra_inputs,
         },
         "software": _software(),
         "execution": {"workers": int(workers), **_slurm_metadata()},
@@ -1402,8 +1724,6 @@ def run_stage_d(
             for i in site_indices
             for _ in range(draws)
         ]
-        from anuma.stage_d_gate import NODE_HOURS
-
         report["projection"] = project_production_node_hours(
             fixed_seconds=fixed_seconds,
             serial_seconds=study["timings_seconds"]["serial"],
@@ -1412,8 +1732,8 @@ def run_stage_d(
             production_tasks=production_tasks,
             workers=workers,
             write_seconds=write_seconds,
-            production_node_hours=float(dn["execution"]["production_node_hours"]),
-            walltime_hours=float(NODE_HOURS["production"]),
+            production_node_hours=float(production_node_hours),
+            walltime_hours=float(walltime_hours),
         )
         report["window_preview"] = {
             sites[i].window.site_id: {
@@ -1454,7 +1774,7 @@ def run_stage_d(
             and checks["slope_noise_primary_within_bounds"]
         )
     report["completed_at_utc"] = datetime.now(timezone.utc).isoformat()
-    name = "pilot-measurement.json" if mode == "pilot" else "stage-d-summary.json"
+    name = report_names[0] if mode == "pilot" else report_names[1]
     report_path = output_dir / name
     _atomic_json(report_path, report)
     _write_output_manifest(output_dir, report, [draws_path, *site_files, report_path])
@@ -1475,7 +1795,9 @@ def _acceptance(rule: dict, zero_checks: dict, study: dict, mode: str) -> dict:
             else:
                 sensitivity_slope[sid] = checks["slope_noise_vs_ldsm_err"]["ratio"]
     return {
-        "rule_reproduced": bool(rule["reproduces_frozen_unstable_ids"]),
+        "rule_reproduced": bool(
+            rule.get("reproduces_frozen_unstable_ids") or rule.get("reproduces_frozen_scope")
+        ),
         "serial_parallel_identical": bool(study["serial_parallel_identical"]),
         "zero_noise_reproduced": bool(all(c["passed"] for c in zero_checks.values())),
         "noise_std_within_tolerance": bool(all(noise_ok)),

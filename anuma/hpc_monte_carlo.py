@@ -2,6 +2,12 @@
 
 The study consumes an affine-fix provenance-pinned input manifest. It never
 downloads or ingests data and does not submit itself to Slurm.
+
+With a Stage F ``terrain_1km_fraction`` layer (``terrain_fraction`` /
+``--terrain-fraction``) every draw ranks with the 20 m terrain gate applied,
+as the default ``/score`` does (Stage H, docs/stage-h-plan.md). Weights,
+seed, draws and policies are unchanged; the summary records the
+``ranking_basis``.
 """
 
 from __future__ import annotations
@@ -43,6 +49,32 @@ def draw_weights(cfg: dict, count: int) -> list[dict[str, float]]:
             values /= values.sum()
         draws.append({name: float(value) for name, value in zip(names, values)})
     return draws
+
+
+SLOPE_ONLY_BASIS = "slope_only"
+
+
+def ranking_basis_label(gate: dict) -> str:
+    """Study label for a ranking: ``slope_only`` or the applied gate's rule."""
+    if gate.get("status") != "applied":
+        return SLOPE_ONLY_BASIS
+    return (
+        f"terrain_gate_{float(gate['layer_max_slope_deg']):g}deg_"
+        f"{float(gate['radius_m']) / 1000.0:g}km_"
+        f"{int(round(float(gate['min_fraction']) * 100))}pct"
+    )
+
+
+def gated_hard(cfg: dict, terrain_max_slope_deg: float) -> dict:
+    """The default hard rule with the terrain gate forced on (fails if unusable)."""
+    spec = cfg["hard"]["terrain_1km"]
+    return {
+        "max_slope_deg": float(cfg["hard"]["max_slope_deg"]),
+        "slope_radius_m": float(cfg["hard"].get("slope_radius_m", 0.0)),
+        "terrain_1km": True,
+        "terrain_1km_min_fraction": float(spec["min_fraction"]),
+        "terrain_1km_max_slope_deg": float(terrain_max_slope_deg),
+    }
 
 
 def _site_id(site: dict) -> str:
@@ -109,7 +141,16 @@ def run_study(
     mode: str,
     draw_count: int | None = None,
     workers: int = 1,
+    terrain_fraction: np.ndarray | None = None,
+    terrain_max_slope_deg: float | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Run the weight draws for every policy.
+
+    Without ``terrain_fraction`` the hard rule is ``cfg["hard"]`` exactly as
+    in job 5332991 (slope only). With it, the gate is forced on for every
+    policy (``score`` raises if it cannot apply), and normalisation and
+    ranking see the gated mask, as the default ``/score`` does.
+    """
     study_cfg = cfg["hpc_studies"]["clip_weight_monte_carlo"]
     if mode not in ("pilot", "full"):
         raise ValueError("mode must be pilot or full")
@@ -120,17 +161,32 @@ def run_study(
         raise ValueError("workers must be between 1 and 128")
     weights = draw_weights(cfg, count)
     policies = list(study_cfg["policies"])
+    if terrain_fraction is None:
+        score_layers, hard = layers, cfg["hard"]
+    else:
+        if terrain_max_slope_deg is None:
+            raise ValueError("terrain_max_slope_deg is required with terrain_fraction")
+        name = str(cfg["hard"]["terrain_1km"]["layer"])
+        score_layers = {**layers, name: terrain_fraction}
+        hard = gated_hard(cfg, terrain_max_slope_deg)
     prepared = {
         policy: score(
-            layers,
+            score_layers,
             cfg["scoring"]["weights"],
-            cfg["hard"],
+            hard,
             grid=grid,
             cfg=cfg,
             normalization_policy=policy,
         )
         for policy in policies
     }
+    gates = {policy: prepared[policy].terrain_gate for policy in policies}
+    bases = {ranking_basis_label(gate) for gate in gates.values()}
+    if len(bases) != 1:
+        raise ValueError(f"policies ranked on different bases: {sorted(bases)}")
+    ranking_basis = bases.pop()
+    if terrain_fraction is not None and ranking_basis == SLOPE_ONLY_BASIS:
+        raise ValueError("terrain gate was given but not applied")
 
     membership = {policy: Counter() for policy in policies}
     winners = {policy: Counter() for policy in policies}
@@ -217,6 +273,7 @@ def run_study(
     summary = {
         "schema_version": 1,
         "study": "clip_weight_monte_carlo_240m",
+        "ranking_basis": ranking_basis,
         "mode": mode,
         "draw_count": count,
         "seed": int(study_cfg["seed"]),
@@ -231,6 +288,20 @@ def run_study(
             "changed_frequency": float(changed / count),
         },
     }
+    if ranking_basis != SLOPE_ONLY_BASIS:
+        gate = gates[str(cfg["scoring"]["default_normalization_policy"])]
+        summary["terrain_gate"] = {
+            key: gate.get(key)
+            for key in (
+                "status",
+                "layer",
+                "min_fraction",
+                "radius_m",
+                "layer_max_slope_deg",
+                "cells_passing_slope",
+                "cells_removed",
+            )
+        }
     return summary, draw_rows
 
 
@@ -240,7 +311,17 @@ def run_from_manifest(
     *,
     mode: str,
     workers: int = 1,
+    terrain_fraction: Path | None = None,
+    terrain_sidecar: Path | None = None,
+    draw_count: int | None = None,
 ) -> dict[str, Any]:
+    """Run the study and write summary, draws and an output manifest.
+
+    ``terrain_fraction`` and ``terrain_sidecar`` (both or neither) apply the
+    Stage F gate. The sidecar must pass ``anuma.stage_f.validate_sidecar``
+    for this grid, including the layer's sha256; callers that need a specific
+    layer (Stage H) check its pinned digest before calling.
+    """
     manifest, files = validate_input_manifest(input_manifest)
     cfg = load_config()
     grid = Grid.from_json(files["grid"], cfg=cfg)
@@ -248,13 +329,45 @@ def run_from_manifest(
         name: np.load(files[name], mmap_mode="r", allow_pickle=False)
         for name in ARRAY_FILES
     }
+    if (terrain_fraction is None) != (terrain_sidecar is None):
+        raise ValueError("give both terrain_fraction and terrain_sidecar, or neither")
+    gate_meta: dict | None = None
+    gate_array = None
+    if terrain_fraction is not None:
+        from anuma.stage_f import validate_sidecar
+
+        gate_meta = json.loads(Path(terrain_sidecar).read_text())
+        problem = validate_sidecar(gate_meta, grid, cfg, npy_path=Path(terrain_fraction))
+        if problem is not None:
+            raise ValueError(f"terrain gate layer refused: {problem}")
+        gate_array = np.load(terrain_fraction, allow_pickle=False)
+        if gate_array.shape != (grid.height, grid.width):
+            raise ValueError("terrain gate layer does not match the 240 m grid")
     output_dir = output_dir.resolve()
     if output_dir.exists() and any(output_dir.iterdir()):
         raise ValueError(f"output directory is not empty: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     started = datetime.now(timezone.utc).isoformat()
-    summary, draws = run_study(layers, grid, cfg, mode=mode, workers=workers)
+    summary, draws = run_study(
+        layers,
+        grid,
+        cfg,
+        mode=mode,
+        workers=workers,
+        draw_count=draw_count,
+        terrain_fraction=gate_array,
+        terrain_max_slope_deg=None if gate_meta is None else float(gate_meta["max_slope_deg"]),
+    )
+    if gate_meta is not None:
+        summary["terrain_gate"].update(
+            {
+                "fraction_sha256": gate_meta["fraction_sha256"],
+                "source_job": str(gate_meta["job"]),
+            }
+        )
+        if os.environ.get("SLURM_JOB_ID"):
+            summary["source_job"] = os.environ["SLURM_JOB_ID"]
     summary_path = output_dir / "study-summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
     draws_path = output_dir / "draws.jsonl"
@@ -275,6 +388,20 @@ def run_from_manifest(
                 "illumination_affine_revision"
             ),
         },
+        "ranking_basis": summary["ranking_basis"],
+        **(
+            {}
+            if gate_meta is None
+            else {
+                "terrain_gate": {
+                    "fraction": str(Path(terrain_fraction).resolve()),
+                    "fraction_sha256": gate_meta["fraction_sha256"],
+                    "sidecar": str(Path(terrain_sidecar).resolve()),
+                    "sidecar_sha256": sha256_file(Path(terrain_sidecar).resolve()),
+                    "job": str(gate_meta["job"]),
+                }
+            }
+        ),
         "software": {
             "python": platform.python_version(),
             "numpy": np.__version__,
@@ -313,6 +440,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--mode", choices=("pilot", "full"), required=True)
     parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--terrain-fraction", type=Path, default=None)
+    parser.add_argument("--terrain-sidecar", type=Path, default=None)
     args = parser.parse_args(argv)
     try:
         result = run_from_manifest(
@@ -320,6 +449,8 @@ def main(argv: list[str] | None = None) -> None:
             args.output_dir,
             mode=args.mode,
             workers=args.workers,
+            terrain_fraction=args.terrain_fraction,
+            terrain_sidecar=args.terrain_sidecar,
         )
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
         parser.exit(2, f"study precondition failed: {exc}\n")

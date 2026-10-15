@@ -324,6 +324,18 @@ Proposed from the held hours: cap 2.0 node-hours (pilot 0.5 on `test`,
 production 1.0 on `default`). See [stage-f-plan.md](stage-f-plan.md) and
 [stage-f-run.md](stage-f-run.md).
 
+## Stage H — robustness of the gated ranking
+
+Planned, not run. With the Stage F gate the default top 10 changed, so the
+weight Monte Carlo (job `5332991`) and the Stage D DEM-noise check (job
+`5345050`) no longer describe the ranking the app shows. Stage H reruns
+both for the gated ranking with the same designs: the 500-draw weight study
+with the gate (layer of job `5345446`, pinned by digest) and the frozen
+Stage D noise model on the gated default top 12. Proposed from the held
+hours: cap 1.5 node-hours (pilot 0.5 on `test`, production 1.0 on
+`default`). See [stage-h-plan.md](stage-h-plan.md) and
+[stage-h-run.md](stage-h-run.md).
+
 ## Review and release discipline
 
 Each stage produces evidence, not a mission claim. Review scientific outputs

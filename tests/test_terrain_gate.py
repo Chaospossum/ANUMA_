@@ -195,6 +195,7 @@ def test_api_without_layer_reports_unavailable(gated_root, monkeypatch):
     assert body["terrain_gate_detail"]["message"].startswith("20 m terrain rule not applied")
     assert body["ranking_basis"] == {
         "basis": "slope_only", "studies_basis": "slope_only", "studies_match": True, "note": None,
+        "studies_available": {"slope_only": True, "slope_and_terrain_1km": False},
     }
     assert all(site["terrain_1km_fraction"] is None for site in body["sites"])
     layers = client.get("/layers").json()

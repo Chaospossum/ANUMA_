@@ -175,6 +175,26 @@ JOB_PROFILES = {
         "node_hours": 1.0,
         "core_hours": 128.0,
     },
+    # Stage H gated-ranking robustness: pilot 0.5 + production 1.0 = 1.5
+    # node-hours, the cap of docs/stage-h-plan.md.
+    "stage-h-pilot": {
+        "qos": "test",
+        "walltime": "00:30:00",
+        "walltime_minutes": 30,
+        "cpus": 128,
+        "memory": "240G",
+        "node_hours": 0.5,
+        "core_hours": 64.0,
+    },
+    "stage-h": {
+        "qos": "default",
+        "walltime": "01:00:00",
+        "walltime_minutes": 60,
+        "cpus": 128,
+        "memory": "240G",
+        "node_hours": 1.0,
+        "core_hours": 128.0,
+    },
 }
 SUN_PROFILES = frozenset({"sun-validation-pilot", "sun-validation"})
 STAGE_B_PROFILES = frozenset({"stage-b-pilot", "stage-b"})
@@ -182,10 +202,14 @@ DAILY_LIT_PROFILES = {"daily-lit-pilot": "pilot", "daily-lit": "production"}
 STAGE_D_PROFILES = {"stage-d-pilot": "pilot", "stage-d": "production"}
 STAGE_G_PROFILES = {"stage-g-pilot": "pilot", "stage-g": "production"}
 STAGE_F_PROFILES = {"stage-f-pilot": "pilot", "stage-f": "production"}
+STAGE_H_PROFILES = {"stage-h-pilot": "pilot", "stage-h": "production"}
 # Profiles whose preflight hashes or reads large inputs and so runs inside a
 # compute allocation, where myquota does not exist.
 COMPUTE_PREFLIGHT_PROFILES = (
-    frozenset(STAGE_D_PROFILES) | frozenset(STAGE_F_PROFILES) | frozenset(STAGE_G_PROFILES)
+    frozenset(STAGE_D_PROFILES)
+    | frozenset(STAGE_F_PROFILES)
+    | frozenset(STAGE_G_PROFILES)
+    | frozenset(STAGE_H_PROFILES)
 )
 QOS_MAX_WALL_MINUTES = {
     "dev": 6 * 60,
@@ -283,6 +307,26 @@ def stage_d_input_paths(data_root: Path) -> dict[str, Path]:
     }
 
 
+def stage_h_input_paths(data_root: Path, input_manifest: Path) -> dict[str, Path]:
+    """Stage H input locations: Stage D's rasters, the Stage F output directory
+    of job 5345446 (gate layer, sidecar, output manifest, read in place) and
+    job 5332991's draws.jsonl. Each can be overridden by its variable."""
+    from anuma import stage_h_gate
+
+    paths = stage_d_input_paths(data_root)
+    del paths["mc_summary"]
+    paths["stage_f_dir"] = Path(
+        os.environ.get("ANUMA_STAGE_F_DIR", str(data_root / stage_h_gate.DEFAULT_STAGE_F_DIR))
+    )
+    paths["reference_draws"] = Path(
+        os.environ.get(
+            "ANUMA_REFERENCE_DRAWS", str(data_root / stage_h_gate.DEFAULT_REFERENCE_DRAWS)
+        )
+    )
+    paths["input_manifest"] = input_manifest
+    return paths
+
+
 def run_preflight(receipt_path: Path) -> dict:
     for name, value in DEFAULT_ENV.items():
         os.environ.setdefault(name, value)
@@ -294,7 +338,7 @@ def run_preflight(receipt_path: Path) -> dict:
     missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
     if missing:
         fail("missing required environment variables: " + ", ".join(missing))
-    # myquota exists only on login nodes, while Stage D, F and G preflight
+    # myquota exists only on login nodes, while Stage D, F, G and H preflight
     # must run in a compute allocation. Preflight never calls it; allocation and
     # storage come from the evidence files captured on the login node within
     # 24 hours.
@@ -586,6 +630,30 @@ def run_preflight(receipt_path: Path) -> dict:
         stage_f_pin["stage_f_preflight_slurm_job_id"] = slurm_job
         stage_f_pin["stage_f_preflight_host"] = socket.gethostname()
 
+    stage_h_pin: dict = {}
+    if job_profile in STAGE_H_PROFILES:
+        if account != "p201619":
+            fail("Stage H requires account p201619")
+        # Hashes the 20 m rasters and the Stage B slope: compute only.
+        slurm_job = os.environ.get("SLURM_JOB_ID", "").strip()
+        if not slurm_job:
+            fail("Stage H preflight must run inside a compute allocation")
+        from anuma import stage_h_gate
+
+        paths = stage_h_input_paths(data_root, input_manifest)
+        try:
+            stage_h_pin = stage_h_gate.receipt_pin(**paths, mode=STAGE_H_PROFILES[job_profile])
+            inputs = stage_h_gate.expected_inputs(**paths)
+            stage_h_gate.verify_input_digests(inputs)
+            stage_h_gate.check_gate_records(
+                inputs["gate_sidecar"]["path"], inputs["stage_f_manifest"]["path"]
+            )
+        except ValueError as exc:
+            fail(str(exc))
+        stage_h_pin["stage_h_inputs_verified"] = True
+        stage_h_pin["stage_h_preflight_slurm_job_id"] = slurm_job
+        stage_h_pin["stage_h_preflight_host"] = socket.gethostname()
+
     receipt = {
         "schema_version": 1,
         "verified_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -616,6 +684,7 @@ def run_preflight(receipt_path: Path) -> dict:
         **stage_d_pin,
         **stage_g_pin,
         **stage_f_pin,
+        **stage_h_pin,
     }
     canonical = json.dumps(receipt, sort_keys=True).encode()
     receipt["receipt_sha256"] = hashlib.sha256(canonical).hexdigest()

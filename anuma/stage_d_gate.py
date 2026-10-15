@@ -78,9 +78,13 @@ def expected_inputs(
     raw_dir: Path,
     dem: Path,
     stage_b_slope: Path,
-    mc_summary: Path,
+    mc_summary: Path | None,
 ) -> dict[str, dict]:
     """Every Stage D input with its expected SHA-256.
+
+    ``mc_summary=None`` leaves the job 5332991 summary out; Stage H
+    (``anuma.stage_h_gate``) uses that for its gated noise check, which does
+    not read the slope-only summary. Stage D always passes it.
 
     ERR, the DEM, the Stage B slope and the study summary have fixed digests.
     EFFRES and LDSM_ERR digests come from ``pgda90-sha256.txt`` as written by
@@ -99,8 +103,9 @@ def expected_inputs(
         "err": {"path": raw_dir / ERR_FILENAME, "sha256": ERR_SHA256},
         "ldsm_err": {"path": raw_dir / LDSM_ERR_FILENAME, "sha256": listed[LDSM_ERR_FILENAME]},
         "stage_b_slope": {"path": Path(stage_b_slope), "sha256": SLOPE_20M_SHA256},
-        "mc_summary": {"path": Path(mc_summary), "sha256": STUDY_SUMMARY_SHA256},
     }
+    if mc_summary is not None:
+        inputs["mc_summary"] = {"path": Path(mc_summary), "sha256": STUDY_SUMMARY_SHA256}
     effres = raw_dir / EFFRES_FILENAME
     if EFFRES_FILENAME in listed:
         inputs["effres"] = {"path": effres, "sha256": listed[EFFRES_FILENAME]}

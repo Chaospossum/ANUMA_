@@ -86,6 +86,21 @@ stability:
   stage_b_checks: data/checks/stage-b-1km.json
   # Committed Stage D DEM-noise verdicts (job 5345050), read from the repo.
   stage_d_checks: data/checks/stage-d-noise.json
+  # Stage H (docs/stage-h-plan.md): the same two studies for the ranking with
+  # the Stage F 20 m terrain gate applied. /stability.json and
+  # /checks/stage-d-noise.json serve these instead of the slope-only files
+  # when the default /score applies the gate, both files exist, and both
+  # name the loaded gate layer (fraction_sha256) and min_fraction. The
+  # slope-only files above are kept for history (?basis=slope_only).
+  gated:
+    ranking_basis: slope_and_terrain_1km       # /score ranking_basis.basis
+    study_ranking_basis: terrain_gate_8deg_1km_50pct
+    # Installed from out/hpc/stage-h-production-<job>/monte-carlo/ after the
+    # run (docs/stage-h-run.md); read from the data root.
+    monte_carlo_summary: out/hpc/stage-h-monte-carlo/study-summary.json
+    note: "weights varied ±0.1, default normalisation, 20 m terrain gate applied"
+    # Committed after the run, built by `python -m anuma.stage_h --mode checks-file`.
+    dem_noise_checks: data/checks/stage-h-noise.json
 
 # Month window for the Stage E illumination scenario in /score and the layer view.
 # End month is inclusive. Outside this range the request is rejected.
@@ -194,6 +209,70 @@ hpc_studies:
       pilot_walltime: "00:30:00"
       production_node_hours: 2.0
       stage_node_hour_cap: 50.0
+  # Stage H: robustness of the gated ranking. Frozen on 2026-10-15 in
+  # docs/stage-h-plan.md before any Stage H run. Read by anuma/stage_h.py
+  # (and anuma/stage_h_gate.py), which refuse any value that differs from
+  # the plan. The Monte Carlo part reuses clip_weight_monte_carlo unchanged
+  # (seed, 500 draws, ranges, policies); only the gate is added.
+  stage_h:
+    frozen_on: "2026-10-15"
+    plan: docs/stage-h-plan.md
+    ranking_basis: terrain_gate_8deg_1km_50pct
+    monte_carlo_study: clip_weight_monte_carlo
+    # 240 m arrays: the input manifest job 5332991 used.
+    input_manifest_sha256: "54ba6d76277808685fac7887cdbcd70728ecb0bad7027909a20d001460cdb0d9"
+    terrain_gate:
+      layer: terrain_1km_fraction
+      source_job: "5345446"
+      fraction_sha256: "7902c9b98106a5952b520966c7058ab0133729871c4912819418351659b446a9"
+      sidecar_sha256: "335a41dd17946fe4daf5693c66110e6cb7960c70829d29e5eee19d9b7c2dbbe8"
+      stage_f_output_manifest_sha256: "03a04bab651432dfa830d08da34e6c78638dbfff37733ebac61ac58de0930084"
+      min_fraction: 0.5
+      radius_m: 1000.0
+      max_slope_deg: 8.0
+    # Reproduction check: draws 0-7 of job 5332991 (weights and, with the
+    # gate off, every policy's top 10) must come out identical.
+    reference_draws_sha256: "05784ca639f4ce6d2159da427e45e9e53445e6fef5a46425fc4c3d29bbdcd608"
+    reference_draws_checked: 8
+    execution:
+      nodes: 1
+      pilot_qos: test
+      pilot_walltime: "00:30:00"
+      production_walltime: "01:00:00"
+      pilot_node_hours: 0.5
+      production_node_hours: 1.0
+      # The pilot projection must fit each share of the production hour.
+      monte_carlo_projection_node_hours: 0.5
+      noise_projection_node_hours: 0.5
+      monte_carlo_workers: 32
+  # Stage H DEM-noise check of the gated default top 12. Everything not
+  # listed here (noise model, ellipse rule, draws, seed, window, slope,
+  # acceptance) is taken from dem_noise, which stays frozen and unchanged.
+  dem_noise_gated:
+    frozen_on: "2026-10-15"
+    plan: docs/stage-h-plan.md
+    inherits: dem_noise
+    ranking_basis: terrain_gate_8deg_1km_50pct
+    scope:
+      # Gated default ranks 1-12 (rank_sites n=15), recomputed in the job and
+      # asserted equal to site_order. The order fixes the seed streams.
+      default_ranks: [1, 12]
+      site_order: ["1350:1392", "748:1693", "761:1285", "774:1572",
+                   "1319:1219", "1281:1142", "768:1635", "1290:1547",
+                   "753:1742", "1484:1402", "915:1109", "728:1081"]
+    # Labels only (scope above already holds every site this rule can pick):
+    # rank-unstable = gated top 10 with < 80 % top-10 membership in the
+    # Stage H Monte Carlo (decided_per_layer), or gated default ranks 9-12.
+    stability_rule:
+      source_study: stage_h_monte_carlo
+      policy: decided_per_layer
+      min_top10_frequency: 0.80
+      rank_margin: 2
+    acceptance:
+      # Check 3 analogue: zero-noise 1 km fraction equals the Stage F layer
+      # value at the site's 240 m cell to two decimals, for all 12 sites.
+      zero_noise_fraction_reference: terrain_1km_fraction
+      zero_noise_fraction_check_ranks: [1, 12]
 
 earth_visibility:
   # Approximation: 100 km ray toward sub-Earth (lon 0°, lat 0°) in the
