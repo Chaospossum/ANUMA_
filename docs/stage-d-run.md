@@ -40,8 +40,9 @@ draw, so a reviewer can check them:
    ⌈4σ / 20 m⌉ pixels, normalized so `sum K = 1`; the truncation is a square,
    as in `scipy.ndimage.gaussian_filter`. The pad equals that radius, so
    every kept pixel has full kernel support. `sqrt(sum K²) = sum k²`.
-4. **EFFRES statistics.** The window median uses finite, positive EFFRES
-   values on the bare 501 × 501 window; nodata is NaN.
+4. **EFFRES and LDSM_ERR statistics.** Window medians use finite, positive
+   values on the bare 501 × 501 window; nodata is NaN. The valid pixel
+   counts are reported.
 5. **EFFRES fallback.** If EFFRES is not staged (absent from the disk *and*
    from `pgda90-sha256.txt`), 40 m stands in for the window median: primary
    σ = 40 / 2.355 ≈ 17.0 m as the plan says, and the sensitivity run uses
@@ -82,7 +83,15 @@ draw, so a reviewer can check them:
     Pinned digests: DEM `09b7ca80…` and `slope-20m.npy` `08b2e17b…` (Stage B
     job `5334425` manifest), ERR `d64045b8…`, study summary `4da2a9c3…`.
     EFFRES and LDSM_ERR digests are read from `pgda90-sha256.txt`.
-15. **Environment.** The job needs rasterio and scipy, so it runs on
+15. **Fail-closed geometry and error map.** A site is refused if ERR is
+    missing (NaN or nodata) at any pixel of the window plus halo where the
+    DEM is finite (the count is recorded as `err_nan_under_finite_dem`), and
+    a draw is refused if its number of finite slope pixels in the circle
+    differs from the zero-noise pass. The job also refuses a 240 m grid that
+    is not exactly 12 fine pixels per cell, a 240 m centre that is not on a
+    fine-pixel corner to 1e-6 pixel, and a DEM CRS that places test points
+    more than 1 mm from the grid's proj4.
+16. **Environment.** The job needs rasterio and scipy, so it runs on
     `.venv-hpc-ingest` with `env/release/2024.1` and
     `Python/3.12.3-GCCcore-13.3.0`, as Stage B. Login-node checks use
     `.venv-hpc-sun`.
@@ -110,6 +119,12 @@ Defaults for the other inputs: `ANUMA_STAGE_D_RAW_DIR=$ANUMA_DATA_ROOT/data/raw`
 `ANUMA_DEM=$ANUMA_STAGE_D_RAW_DIR/LDEM_80S_20MPP_ADJ.TIF`,
 `ANUMA_STAGE_B_SLOPE=$ANUMA_DATA_ROOT/out/hpc/stage-b-production-5334425/slope-20m.npy`,
 `ANUMA_MC_SUMMARY=$ANUMA_DATA_ROOT/out/hpc/monte-carlo-full-5332991/study-summary.json`.
+
+Stage D preflight refuses to run without `SLURM_JOB_ID`, because it hashes
+the rasters, and records the job id and host in the receipt. The `cpudev`
+allocation (QOS `dev`) is node time outside the 2.0 node-hour Stage D
+accounting above; keep it short and record it with the job's `myquota`
+captures.
 
 Pilot:
 

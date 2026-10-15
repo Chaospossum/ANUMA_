@@ -66,6 +66,8 @@ STAGE_B_CHECKS = Path("data") / "checks" / "stage-b-1km.json"
 # Values frozen in docs/stage-d-plan.md on 2026-10-15. The config must
 # still hold them; the code never adopts a changed value silently.
 FROZEN = {
+    "frozen_on": "2026-10-15",
+    "stability_rule.source_study": "clip_weight_monte_carlo",
     "stability_rule.source_job": "5332991",
     "stability_rule.policy": "decided_per_layer",
     "stability_rule.min_top10_frequency": 0.80,
@@ -286,6 +288,39 @@ class SiteWindow:
         )
 
 
+def require_nested_grids(coarse_transform, fine_transform) -> None:
+    """The 240 m grid must be exactly 12 x 12 fine pixels per cell, north-up."""
+    for name, value in (("b", fine_transform.b), ("d", fine_transform.d)):
+        if value != 0.0 or getattr(coarse_transform, name) != 0.0:
+            raise ValueError("grids must be north-up without rotation")
+    if abs(coarse_transform.a - 12.0 * fine_transform.a) > 1e-9 or abs(
+        coarse_transform.e - 12.0 * fine_transform.e
+    ) > 1e-9:
+        raise ValueError("240 m grid is not 12 fine pixels per cell")
+
+
+def require_same_projection(fine_crs, proj4: str) -> dict:
+    """The DEM CRS must place test points where the 240 m grid proj4 does.
+
+    The DEM carries an IAU WKT and the grid a proj4 string, so the check is
+    numeric: forward-project points across the cap with both and compare.
+    """
+    from pyproj import CRS, Transformer
+
+    geodetic = CRS.from_proj4("+proj=longlat +R=1737400 +no_defs")
+    grid = Transformer.from_crs(geodetic, CRS.from_proj4(proj4), always_xy=True)
+    dem = Transformer.from_crs(geodetic, CRS.from_user_input(fine_crs), always_xy=True)
+    worst = 0.0
+    for lon in (0.0, 45.0, 137.0, -90.0, 180.0):
+        for lat in (-80.5, -85.0, -89.5):
+            x0, y0 = grid.transform(lon, lat)
+            x1, y1 = dem.transform(lon, lat)
+            worst = max(worst, float(math.hypot(x1 - x0, y1 - y0)))
+    if not worst <= 1e-3:
+        raise ValueError(f"DEM CRS differs from the grid projection by {worst} m")
+    return {"max_offset_m": worst}
+
+
 def site_window(
     *,
     site_id: str,
@@ -302,11 +337,22 @@ def site_window(
     On the real grids the 240 m centre falls on a fine-pixel corner; the
     window then starts ``half_size_px`` pixels before the pixel whose upper
     left corner is the centre. The circle and the cell are measured from the
-    exact centre, so this half-pixel choice does not move them.
+    exact centre, so this half-pixel choice does not move them. Any other
+    nesting (not 12 fine pixels per 240 m cell, or a centre off the fine
+    corners) is refused.
     """
+    require_nested_grids(coarse_transform, fine_transform)
     centre_x, centre_y = coarse_transform @ (col_240 + 0.5, row_240 + 0.5)
-    fine_col = int(math.floor((centre_x - fine_transform.c) / fine_transform.a))
-    fine_row = int(math.floor((centre_y - fine_transform.f) / fine_transform.e))
+    frac_col = (centre_x - fine_transform.c) / fine_transform.a
+    frac_row = (centre_y - fine_transform.f) / fine_transform.e
+    for value in (frac_col, frac_row):
+        if abs(value - round(value)) > 1e-6:
+            raise ValueError(
+                f"site {site_id}: 240 m centre is not on a 20 m pixel corner "
+                f"(fractional index {value})"
+            )
+    fine_col = int(round(frac_col))
+    fine_row = int(round(frac_row))
     return SiteWindow(
         site_id=site_id,
         site_index=site_index,
@@ -520,6 +566,15 @@ def prepare_site(
             stats["effres_m"] = {"valid_pixels": 0}
     else:
         stats["effres_m"] = None
+    # Noise is ERR x u on the window plus halo; a NaN ERR under a finite DEM
+    # would turn a valid pixel into a missing one in every draw. Fail closed.
+    err_gaps = int(np.count_nonzero(np.isfinite(dem) & ~np.isfinite(err)))
+    stats["err_nan_under_finite_dem"] = err_gaps
+    if err_gaps:
+        raise ValueError(
+            f"site {window.site_id}: ERR is missing at {err_gaps} pixels where the DEM "
+            "is finite"
+        )
     interior_err = err[HALO:-HALO, HALO:-HALO]
     err_valid = interior_err[np.isfinite(interior_err) & (interior_err > 0.0)]
     stats["err_m"] = {
@@ -530,8 +585,9 @@ def prepare_site(
         "window_pixels": int(interior_err.size),
     }
     if ldsm_err is not None:
-        ldsm = ldsm_err[np.isfinite(ldsm_err)]
+        ldsm = ldsm_err[np.isfinite(ldsm_err) & (ldsm_err > 0.0)]
         stats["ldsm_err_deg_median"] = float(np.median(ldsm)) if ldsm.size else float("nan")
+        stats["ldsm_err_valid_pixels"] = int(ldsm.size)
     sigmas = sigmas_from_effres(effres_median, nm)
     if effres is not None and sigmas["effres_source"] == "fallback_fwhm_m":
         sigmas["effres_source"] = "fallback_fwhm_m (no valid EFFRES in window)"
@@ -580,6 +636,12 @@ def evaluate_draw(
     stats = slope_statistics(
         slope, site.circle, site.cell, max_slope_deg=max_slope_deg, cell_m=cell_m
     )
+    expected = site.window_stats["zero_noise"]["circle_finite_pixels"]
+    if stats["circle_finite_pixels"] != expected:
+        raise ValueError(
+            f"site {site.window.site_id} run {run_index} draw {draw}: "
+            f"{stats['circle_finite_pixels']} finite circle pixels, zero noise has {expected}"
+        )
     interior_unit = unit[HALO:-HALO, HALO:-HALO]
     interior_err = site.err[HALO:-HALO, HALO:-HALO]
     valid = np.isfinite(interior_err) & (interior_err > 0.0)
@@ -1062,6 +1124,7 @@ def prepare_sites_from_rasters(
     coarse_transform,
     dn: dict,
     max_slope_deg: float,
+    grid_proj4: str | None = None,
 ) -> tuple[dict[int, PreparedSite], object]:
     """Read every scope site's windows from the 20 m rasters (no full-cap load)."""
     import rasterio
@@ -1076,6 +1139,8 @@ def prepare_sites_from_rasters(
         fine_transform = dem_ds.transform
         if abs(fine_transform.a - cell_m) > 1e-9 or abs(fine_transform.e + cell_m) > 1e-9:
             raise ValueError("DEM is not a 20 m north-up grid")
+        if grid_proj4 is not None:
+            require_same_projection(dem_ds.crs, grid_proj4)
         companions = [err_ds, ldsm_ds]
         effres_ds = rasterio.open(effres_path) if effres_path is not None else None
         try:
@@ -1205,6 +1270,7 @@ def run_stage_d(
         coarse_transform=grid.affine,
         dn=dn,
         max_slope_deg=max_slope_deg,
+        grid_proj4=grid.proj4,
     )
     stage_b_table = load_stage_b_table()
     stage_b = np.load(inputs["stage_b_slope"]["path"], mmap_mode="r", allow_pickle=False)

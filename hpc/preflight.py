@@ -9,6 +9,7 @@ import json
 import math
 import os
 import shutil
+import socket
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -439,6 +440,11 @@ def run_preflight(receipt_path: Path) -> dict:
     if job_profile in STAGE_D_PROFILES:
         if account != "p201619":
             fail("Stage D requires account p201619")
+        # Preflight hashes the 20 m rasters, which plan gate 6 keeps off login
+        # nodes; without a Slurm job id this is not a compute allocation.
+        slurm_job = os.environ.get("SLURM_JOB_ID", "").strip()
+        if not slurm_job:
+            fail("Stage D preflight must run inside a compute allocation")
         from anuma import stage_d_gate
 
         paths = stage_d_input_paths(data_root)
@@ -452,6 +458,8 @@ def run_preflight(receipt_path: Path) -> dict:
         except ValueError as exc:
             fail(str(exc))
         stage_d_pin["stage_d_inputs_verified"] = True
+        stage_d_pin["stage_d_preflight_slurm_job_id"] = slurm_job
+        stage_d_pin["stage_d_preflight_host"] = socket.gethostname()
 
     receipt = {
         "schema_version": 1,

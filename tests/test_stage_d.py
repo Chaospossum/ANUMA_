@@ -605,7 +605,13 @@ def test_stage_d_preflight_hashes_inputs_and_pins_them(tmp_path, monkeypatch):
         return original(command)
 
     monkeypatch.setattr(preflight, "run_checked", fake_command)
+    monkeypatch.delenv("SLURM_JOB_ID", raising=False)
+    with pytest.raises(RuntimeError, match="inside a compute allocation"):
+        preflight.run_preflight(tmp_path / "receipt-stage-d-login.json")
+    monkeypatch.setenv("SLURM_JOB_ID", "123456")
     receipt = preflight.run_preflight(tmp_path / "receipt-stage-d.json")
+    assert receipt["stage_d_preflight_slurm_job_id"] == "123456"
+    assert receipt["stage_d_preflight_host"]
     assert receipt["job_profile"] == "stage-d-pilot"
     assert receipt["stage_d_inputs_verified"] is True
     assert receipt["stage_d_effres_staged"] is True
@@ -641,3 +647,105 @@ def test_stage_d_profiles_and_scripts_fit_two_node_hours():
         assert "'env/staging/2025\\.1'" in script
         assert "--gpu" not in script.lower()
         assert f'walltime="{profile["walltime"]}"' in wrapper
+
+
+# -- fail-closed inputs and geometry -------------------------------------------
+
+
+def _site_arrays(err_value: float = 2.0):
+    base = _synthetic_site()
+    return base.window, base.dem.copy(), np.full(base.dem.shape, err_value)
+
+
+def _prepare(window, dem, err, ldsm=None):
+    return stage_d.prepare_site(
+        window,
+        dem=dem,
+        err=err,
+        effres=np.full((window.size, window.size), 60.0),
+        ldsm_err=np.full((window.size, window.size), 1.0) if ldsm is None else ldsm,
+        fine_transform=FINE,
+        nm=_dn()["noise_model"],
+        radius_m=1000.0,
+        cell_size_m=240.0,
+        cell_m=20.0,
+        max_slope_deg=8.0,
+    )
+
+
+def test_err_gap_under_finite_dem_fails_closed():
+    window, dem, err = _site_arrays()
+    assert _prepare(window, dem, err).window_stats["err_nan_under_finite_dem"] == 0
+    err[0, 5] = np.nan  # halo row: still under the noise
+    with pytest.raises(ValueError, match="ERR is missing at 1 pixels"):
+        _prepare(window, dem, err)
+    dem[0, 5] = np.nan  # no DEM there either: nothing to perturb
+    assert _prepare(window, dem, err).window_stats["err_nan_under_finite_dem"] == 0
+
+
+def test_draw_refuses_a_change_in_finite_circle_pixels():
+    site = _synthetic_site()
+    site.window_stats["zero_noise"]["circle_finite_pixels"] -= 1
+    with pytest.raises(ValueError, match="finite circle pixels"):
+        stage_d.evaluate_draw(site, 0, 0, seed=1, max_slope_deg=8.0, cell_m=20.0)
+
+
+def test_ldsm_median_uses_positive_finite_values_and_reports_count():
+    window, dem, err = _site_arrays()
+    ldsm = np.full((window.size, window.size), 1.5)
+    ldsm[:10] = 0.0
+    ldsm[10:20] = np.nan
+    stats = _prepare(window, dem, err, ldsm=ldsm).window_stats
+    assert stats["ldsm_err_deg_median"] == 1.5
+    assert stats["ldsm_err_valid_pixels"] == (window.size - 20) * window.size
+
+
+@pytest.mark.parametrize(
+    "coarse",
+    [
+        Affine(200.0, 0.0, -80.0, 0.0, -200.0, 4080.0),  # not 12 fine pixels per cell
+        Affine(240.0, 0.0, -70.0, 0.0, -240.0, 4080.0),  # centre off the fine corners
+    ],
+)
+def test_site_window_refuses_unnested_grids(coarse):
+    with pytest.raises(ValueError, match="12 fine pixels|not on a 20 m pixel corner"):
+        stage_d.site_window(
+            site_id="8:8",
+            site_index=0,
+            default_rank=1,
+            row_240=8,
+            col_240=8,
+            coarse_transform=coarse,
+            fine_transform=FINE,
+            half_size_px=60,
+        )
+
+
+def test_dem_projection_must_match_grid_proj4(tmp_path):
+    from rasterio.crs import CRS as RioCRS
+
+    proj4 = _cfg()["projection"]["proj4"]
+    assert stage_d.require_same_projection(RioCRS.from_proj4(proj4), proj4)["max_offset_m"] == 0.0
+    rotated = RioCRS.from_proj4(proj4.replace("+lon_0=0", "+lon_0=90"))
+    with pytest.raises(ValueError, match="DEM CRS differs"):
+        stage_d.require_same_projection(rotated, proj4)
+    dn = copy.deepcopy(_dn())
+    dn["window_half_size_m"] = 1200.0
+    paths = {
+        name: _write_tif(tmp_path / f"{name}.tif", array)
+        for name, array in (
+            ("dem", _terrain()),
+            ("err", np.full(SHAPE, 3.0)),
+            ("ldsm", np.full(SHAPE, 0.5)),
+        )
+    }
+    rule = {"site_order": ["8:8"], "ranking": [{"id": "8:8", "default_rank": 1, "row": 8, "col": 8}]}
+    kwargs = dict(
+        dem_path=paths["dem"], err_path=paths["err"], effres_path=None, ldsm_path=paths["ldsm"],
+        coarse_transform=COARSE, dn=dn, max_slope_deg=8.0,
+    )
+    stage_d.prepare_sites_from_rasters(rule, grid_proj4=proj4, **kwargs)
+    with pytest.raises(ValueError, match="DEM CRS differs"):
+        stage_d.prepare_sites_from_rasters(
+            rule, grid_proj4=proj4.replace("+lon_0=0", "+lon_0=90"), **kwargs
+        )
