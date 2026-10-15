@@ -99,35 +99,59 @@ hpc_studies:
     frozen_on: "2026-10-15"
     plan: docs/stage-d-plan.md
     stability_rule:
+      # Answers "which sites are rank-marginal", not "is rank 1 robust".
       source_study: clip_weight_monte_carlo
       source_job: "5332991"
       policy: decided_per_layer
       min_top10_frequency: 0.80
-      rank_margin: 2            # default ranks n_sites-1 .. n_sites+2, i.e. 9-12
+      rank_margin: 2            # default ranks 9-12 (n_sites-1 .. n_sites+2)
+      # Code must recompute the rule and assert it reproduces this list.
       frozen_unstable_ids: ["779:1564", "1252:1287", "1277:1142", "1206:1114"]
     controls:
       top_ranks: 3
-      frozen_ids: ["1318:1219", "1292:1255", "1350:1392"]
+      # Default rank 8 (1 km fraction 0.50 at zero noise) added 2026-10-15,
+      # before any noise draw.
+      extra_ranks: [8]
+      frozen_ids: ["1318:1219", "1292:1255", "1350:1392", "791:1624"]
+    site_order: ["1318:1219", "1292:1255", "1350:1392", "791:1624",
+                 "779:1564", "1252:1287", "1277:1142", "1206:1114"]
     noise_model:
       error_filename: LDEM_80S_20MPP_ADJ_ERR.TIF
       effres_filename: LDEM_80S_20MPP_ADJ_EFFRES.TIF
+      slope_error_filename: LDSM_80S_20MPP_ADJ_ERR.TIF   # acceptance check only
       error_is_one_sigma: true  # assumption; Barker et al. (2023) do not say
       distribution: gaussian
       correlation: gaussian_kernel
-      kernel_sigma_source: effres_median_in_window
-      fallback_kernel_sigma_m: 40.0
+      effres_window_statistic: median
+      # EFFRES is read as a FWHM: sigma = EFFRES / 2.355.
+      effres_is_fwhm: true
+      fwhm_to_sigma_divisor: 2.355
+      # Declared sensitivity run: sigma = EFFRES (smoother noise).
+      sensitivity_sigma_equals_effres: true
+      # Used only if EFFRES cannot be staged; it is a FWHM (sigma = 40/2.355).
+      fallback_fwhm_m: 40.0
       rescale_to_error_map: true
     ellipse:
       radius_m: 1000.0
       max_slope_deg_from: hard.max_slope_deg
-      min_fraction_at_or_below: 0.50
-    flip_unstable_fraction: 0.10
+      threshold_fraction: 0.50
+      # Decisive: noise-unstable if the 5-95 % interval of the <=8 deg
+      # fraction is wider than 0.10 or straddles threshold_fraction.
+      interval_percentiles: [5, 95]
+      max_interval_width: 0.10
+      # Pass/fail and flip rate are reported, not decisive.
+      report_pass_fail: true
+      patch_connectivity: 8
+    in_cell_fine_pixels: 144
     draws: 200
     seed: 20261016
     window_half_size_m: 5000.0
     resolution_m: 20.0
     slope_method: horn_3x3
-    zero_noise_slope_atol_deg: 1.0e-4
+    acceptance:
+      zero_noise_slope_atol_deg: 1.0e-4
+      noise_std_ratio_tolerance: 0.05
+      slope_noise_vs_ldsm_err_max_factor: 2.0
     execution:
       nodes: 1
       pilot_qos: test
