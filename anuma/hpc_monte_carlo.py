@@ -187,6 +187,8 @@ def run_study(
     ranking_basis = bases.pop()
     if terrain_fraction is not None and ranking_basis == SLOPE_ONLY_BASIS:
         raise ValueError("terrain gate was given but not applied")
+    if terrain_fraction is None and ranking_basis != SLOPE_ONLY_BASIS:
+        raise ValueError(f"gate-off study ranked on {ranking_basis}, not slope only")
 
     membership = {policy: Counter() for policy in policies}
     winners = {policy: Counter() for policy in policies}

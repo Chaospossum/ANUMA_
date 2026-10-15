@@ -2,7 +2,9 @@
 
 Not affiliated with NASA, ESA or ispace. Screening only; not a landing
 recommendation. This plan authorizes no submission and records no result.
-Status: **frozen on 2026-10-15, implemented, not run on MeluXina**.
+Status: **frozen on 2026-10-15 (revised the same day, before any Stage H
+run: zero-noise fraction tolerance 1e-6, see below), implemented, not run on
+MeluXina**.
 
 The values below are fixed in `hpc_studies.stage_h` and
 `hpc_studies.dem_noise_gated` of `config/layers.yaml`, in `anuma/stage_h.py`
@@ -74,10 +76,14 @@ weights as draw *i* of job `5332991`.
 
 The only change: every draw and policy ranks with the gate **on**
 (`terrain_1km: true`, `min_fraction 0.5`, radius 1 km, layer built for 8°).
-The gate enters the hard mask before normalisation, so percentile and
-min–max ranges are taken over gated cells, as the default `/score` does.
-`score` raises instead of silently ranking slope-only if the gate cannot
-apply.
+The gate enters the hard mask, exactly as in the default `/score`. It
+changes only the feasible set, not the normalisation ranges: the weighted
+layers (illumination, hydrogen, Earth visibility) use `scope: valid` under
+all three policies, so their percentile and min–max ranges are taken over
+all valid cells with or without the gate. Only slope uses `scope:
+hard_mask` (under `decided_per_layer`), and slope is not weighted. `score`
+raises instead of silently ranking slope-only if the gate cannot apply, and
+the gate-off reproduction refuses a study that is not ranked slope-only.
 
 Outputs: `study-summary.json` with the job `5332991` schema plus
 `ranking_basis: "terrain_gate_8deg_1km_50pct"`, `terrain_gate` (status,
@@ -141,9 +147,11 @@ supplies everything else:
   the ≤ 8° fraction within 1 km is wider than **0.10** or straddles **0.50**;
   borderline width band 0.085–0.115; clause reported per site.
 
-The seed and stream rule are Stage D's, but site indices differ, so no site
-reuses a Stage D stream (1350:1392 was Stage D index 2 and is index 0 here).
-Its Stage H result is an independent repeat, not a copy.
+The seed and stream rule are Stage D's, and site indices 0–7 exist in both
+studies, so the same streams (white-noise fields) are applied to different
+sites: Stage H index 0 (1350:1392) gets the stream Stage D used for index 0
+(1318:1219). 1350:1392 was Stage D index 2, so its Stage H result is a
+repeat with a different noise realisation, not a copy.
 
 Every gated site passes the gate at zero noise (≥ 0.50) by construction.
 Zero-mean noise tends to lower the fraction (Stage D Δ columns), so sites
@@ -170,10 +178,17 @@ in the check file). A label never changes the scope.
 - the zero-noise window slope equals the Stage B `slope-20m.npy` slice
   within 1e-4° (unchanged), for all 12 sites;
 - the zero-noise 1 km fraction equals the **Stage F layer value** at the
-  site's 240 m cell within 0.005 (two decimals), for all 12 sites. Stage F
-  was built with Stage D's window path, so this ties the noise windows to
-  the gate itself. The Stage B table covers only the old top 10 and is not
-  used.
+  site's 240 m cell within **1e-6** (`acceptance.zero_noise_fraction_atol`),
+  for all 12 sites. Stage F was built with Stage D's window path, so the two
+  must agree to float32 precision (the layer is stored as float32); this
+  ties the noise windows to the gate itself. The Stage B table covers only
+  the old top 10 and is not used.
+
+**Revision 2026-10-15 (before any Stage H run).** The tolerance was first
+frozen as Stage D's 0.005 ("two decimals"). A laptop check against the
+pinned layer gave differences of about 1e-8, and 0.005 is loose enough to
+hide a window-geometry error near the 0.50 threshold, so it is tightened to
+1e-6. Stage D keeps 0.005 (`zero_noise_check` default).
 
 ## Acceptance checks
 
@@ -259,11 +274,13 @@ gated ranking, and false for the gate switched off or another threshold.
 
 1. **Gate in the input manifest?** No; pinned by digest and read in place
    (above), so the 5332991 manifest digest still pins the 240 m arrays.
-2. **Which normalisation ranges?** Over gated cells, as `/score`.
+2. **Which normalisation ranges?** As `/score`: the weighted layers keep
+   their `scope: valid` ranges, so the gate changes only the feasible set.
 3. **Rule before or after the noise run?** All 12 rule-eligible sites are
    checked; the rule labels them afterwards, in the same job.
 4. **Seed.** Stage D's seed and stream rule, keyed by the Stage H order.
-5. **Zero-noise reference.** The Stage F layer, all 12 sites, ±0.005.
+5. **Zero-noise reference.** The Stage F layer, all 12 sites, ±1e-6
+   (revised from ±0.005 before any run).
 6. **Basis label.** Studies record `terrain_gate_8deg_1km_50pct`; the API's
    `/score` basis stays `slope_and_terrain_1km`, mapped in
    `stability.gated`.

@@ -153,6 +153,8 @@ FROZEN_GATED = {
     "stability_rule.rank_margin": 2,
     "acceptance.zero_noise_fraction_reference": "terrain_1km_fraction",
     "acceptance.zero_noise_fraction_check_ranks": [1, 12],
+    # Plan revision 2026-10-15, before any Stage H run.
+    "acceptance.zero_noise_fraction_atol": 1.0e-6,
 }
 FROZEN_GATED_SCORING = {
     "hard.terrain_1km.min_fraction": 0.5,
@@ -1042,12 +1044,15 @@ def zero_noise_check(
     atol_deg: float,
     fraction_ranks: Sequence[int],
     reference_name: str = "stage_b_table",
+    fraction_atol: float = 0.005,
 ) -> dict:
     """Check 3: zero-noise window equals the Stage B slope slice; 1 km fraction.
 
     ``stage_b_table`` maps site id to the reference 1 km fraction: the
     committed Stage B table for Stage D, the Stage F layer for Stage H
-    (``reference_name`` labels it in the report).
+    (``reference_name`` labels it in the report). ``fraction_atol`` is the
+    allowed difference: 0.005 ("two decimals", Stage D) by default; Stage H
+    uses 1e-6 against the Stage F layer.
     """
     w = site.window
     if w.row0 < 0 or w.col0 < 0:
@@ -1077,9 +1082,12 @@ def zero_noise_check(
             {
                 reference_name: float(table_value),
                 "zero_noise": zero_fraction,
-                # "Equal to two decimals": within half a unit of the second decimal.
+                "fraction_atol": float(fraction_atol),
+                "abs_diff": abs(zero_fraction - float(table_value)),
+                # Stage D: "equal to two decimals", within half a unit of the
+                # second decimal (fraction_atol 0.005). Key kept for Stage D.
                 "matches_two_decimals": bool(
-                    abs(zero_fraction - float(table_value)) <= 0.005 + 1e-12
+                    abs(zero_fraction - float(table_value)) <= float(fraction_atol) + 1e-12
                 ),
             }
         )
@@ -1434,6 +1442,7 @@ def run_stage_d(
         reference_table=load_stage_b_table(),
         reference_name="stage_b_table",
         fraction_ranks=dn["acceptance"]["stage_b_fraction_check_ranks"],
+        fraction_atol=0.005,
         production_node_hours=float(dn["execution"]["production_node_hours"]),
         walltime_hours=float(NODE_HOURS["production"]),
         report_names=("pilot-measurement.json", "stage-d-summary.json"),
@@ -1513,6 +1522,7 @@ def run_gated_noise(
         reference_table=reference,
         reference_name="stage_f_layer",
         fraction_ranks=dn["acceptance"]["zero_noise_fraction_check_ranks"],
+        fraction_atol=float(dn["acceptance"]["zero_noise_fraction_atol"]),
         production_node_hours=float(production_node_hours),
         walltime_hours=float(production_node_hours),
         report_names=("pilot-measurement.json", "dem-noise-summary.json"),
@@ -1570,6 +1580,7 @@ def _run_noise_and_report(
     reference_table: dict[str, float],
     reference_name: str,
     fraction_ranks: Sequence[int],
+    fraction_atol: float,
     production_node_hours: float,
     walltime_hours: float,
     report_names: tuple[str, str],
@@ -1615,6 +1626,7 @@ def _run_noise_and_report(
             atol_deg=float(dn["acceptance"]["zero_noise_slope_atol_deg"]),
             fraction_ranks=fraction_ranks,
             reference_name=reference_name,
+            fraction_atol=fraction_atol,
         )
         for i in site_indices
     }

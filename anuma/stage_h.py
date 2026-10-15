@@ -442,7 +442,13 @@ def run_stage_h(
 # --------------------------------------------------------------------------
 
 
-def checks_file(summary: dict, noise_summary: dict, *, commit: str | None = None) -> dict:
+def checks_file(
+    summary: dict,
+    noise_summary: dict,
+    *,
+    summary_sha256: str,
+    commit: str | None = None,
+) -> dict:
     """``data/checks/stage-h-noise.json`` from a passed production run.
 
     Same per-site fields as ``data/checks/stage-d-noise.json`` (the UI reads
@@ -455,6 +461,11 @@ def checks_file(summary: dict, noise_summary: dict, *, commit: str | None = None
         raise ValueError("checks file needs a passed Stage H production run")
     if noise_summary.get("mode") != "production":
         raise ValueError("checks file needs the production DEM-noise summary")
+    job = str((summary.get("execution") or {}).get("SLURM_JOB_ID") or "").strip()
+    if not job:
+        raise ValueError("checks file needs a summary with a Slurm job id (a MeluXina run)")
+    if not (isinstance(summary_sha256, str) and len(summary_sha256) == 64):
+        raise ValueError("checks file needs the sha256 of stage-h-summary.json")
     threshold = float(noise_summary["sites"][noise_summary["scope"]["site_order"][0]]["runs"][
         "primary"
     ]["pass_fail"]["threshold"])
@@ -499,14 +510,15 @@ def checks_file(summary: dict, noise_summary: dict, *, commit: str | None = None
         "terrain_gate": {
             "fraction_sha256": gate["fraction_sha256"],
             "job": gate["job"],
-            "min_fraction": 0.5,
+            "min_fraction": threshold,
             "radius_m": gate["radius_m"],
             "max_slope_deg": gate["max_slope_deg"],
         },
         "source": {
-            "job": str(summary["execution"].get("SLURM_JOB_ID")),
+            "job": job,
             "commit": commit,
             "summary": "stage-h-summary.json",
+            "summary_sha256": summary_sha256,
             "plan": "docs/stage-h-plan.md",
         },
         "threshold": threshold,
@@ -545,11 +557,16 @@ def main(argv: list[str] | None = None) -> None:
         if args.mode == "checks-file":
             if args.run_dir is None or args.out is None:
                 parser.error("--run-dir and --out are required for checks-file")
-            summary = json.loads((args.run_dir / "stage-h-summary.json").read_text())
+            from anuma.stage_h_gate import sha256_file
+
+            summary_path = args.run_dir / "stage-h-summary.json"
+            summary = json.loads(summary_path.read_text())
             noise = json.loads(
                 (args.run_dir / "dem-noise" / "dem-noise-summary.json").read_text()
             )
-            payload = checks_file(summary, noise, commit=args.commit)
+            payload = checks_file(
+                summary, noise, summary_sha256=sha256_file(summary_path), commit=args.commit
+            )
             args.out.write_text(json.dumps(payload, indent=2) + "\n")
             print(json.dumps({"written": str(args.out), "sites": len(payload["sites"])}))
             return

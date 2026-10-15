@@ -273,6 +273,10 @@ hpc_studies:
       # value at the site's 240 m cell to two decimals, for all 12 sites.
       zero_noise_fraction_reference: terrain_1km_fraction
       zero_noise_fraction_check_ranks: [1, 12]
+      # Revision 2026-10-15 (before any Stage H run): the reference is the
+      # Stage F layer built with the same window path, so it must agree to
+      # float32 precision, not only to two decimals (laptop: 1e-8).
+      zero_noise_fraction_atol: 1.0e-6
 
 earth_visibility:
   # Approximation: 100 km ray toward sub-Earth (lon 0°, lat 0°) in the

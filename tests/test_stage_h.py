@@ -94,6 +94,35 @@ def test_gated_monte_carlo_refuses_an_unusable_gate():
         )
 
 
+def test_gate_off_study_must_rank_slope_only():
+    cfg = _tiny_cfg()
+    layers = {**_layers(), "terrain_1km_fraction": _tiny_gate()}
+    # The layer is present but no gate was requested: cfg["hard"] enables the
+    # gate, so the study would silently rank gated. It must refuse.
+    with pytest.raises(ValueError, match="not slope only"):
+        hpc_monte_carlo.run_study(layers, TinyGrid(), cfg, mode="pilot", draw_count=2)
+
+
+def test_zero_noise_fraction_tolerance_is_a_parameter(tmp_path):
+    from tests.test_stage_d import _synthetic_site
+
+    full = compute_slope_untiled(_write_tif(tmp_path / "dem.tif", _terrain()))
+    site = _synthetic_site()
+    fraction = site.window_stats["zero_noise"]["fraction_1km"]
+    near = {"8:8": fraction + 0.003}
+    # Stage D default: two decimals.
+    assert stage_d.zero_noise_check(site, full, near, atol_deg=1e-4, fraction_ranks=[1, 10])["passed"]
+    strict = stage_d.zero_noise_check(
+        site, full, near, atol_deg=1e-4, fraction_ranks=[1, 10], fraction_atol=1e-6
+    )
+    assert not strict["passed"] and strict["fraction_1km"]["fraction_atol"] == 1e-6
+    exact = {"8:8": float(np.float32(fraction))}
+    assert stage_d.zero_noise_check(
+        site, full, exact, atol_deg=1e-4, fraction_ranks=[1, 10], fraction_atol=1e-6
+    )["passed"]
+    assert stage_d.require_gated_config(load_config())["acceptance"]["zero_noise_fraction_atol"] == 1e-6
+
+
 def test_reference_draw_check_compares_records_exactly(tmp_path):
     cfg = _tiny_cfg()
     _, rows = hpc_monte_carlo.run_study(_layers(), TinyGrid(), cfg, mode="pilot", draw_count=3)
@@ -570,6 +599,8 @@ def test_stage_h_pilot_end_to_end_on_synthetic_inputs(tmp_path, monkeypatch):
     assert noise["scope"]["site_order"] == ["8:8", "5:9"]
     zero = noise["sites"]["8:8"]["zero_noise_check"]
     assert zero["fraction_1km"]["applies"] and zero["fraction_1km"]["matches_two_decimals"]
+    assert zero["fraction_1km"]["fraction_atol"] == 1.0e-6
+    assert zero["fraction_1km"]["abs_diff"] <= 1.0e-6
     assert "stage_f_layer" in zero["fraction_1km"]
     assert noise["projection"]["production_node_hours"] == 0.5
     manifest = json.loads((out / "output-manifest.json").read_text())
@@ -593,7 +624,9 @@ def test_stage_h_production_end_to_end_writes_labels_and_a_checks_file(tmp_path,
     assert labels["unstable_ids"] == []
     noise = json.loads((out / "dem-noise" / "dem-noise-summary.json").read_text())
     assert set(noise["verdict"]) == {"8:8", "5:9"}
-    payload = stage_h.checks_file(report, noise, commit="abc1234")
+    summary_sha = stage_d_gate.sha256_file(out / "stage-h-summary.json")
+    payload = stage_h.checks_file(report, noise, summary_sha256=summary_sha, commit="abc1234")
+    assert payload["source"]["summary_sha256"] == summary_sha
     assert [site["site_id"] for site in payload["sites"]] == ["8:8", "5:9"]
     assert payload["source"]["job"] == "5400002" and payload["draws"] == 200
     assert payload["terrain_gate"]["fraction_sha256"] == stage_h_gate.GATE_FRACTION_SHA256
@@ -671,7 +704,9 @@ def _h_summary(fraction_sha256: str) -> dict:
 
 
 def test_checks_file_keeps_the_stage_d_fields_and_adds_the_basis():
-    payload = stage_h.checks_file(_h_summary("a" * 64), _noise_production(), commit="abc1234")
+    payload = stage_h.checks_file(
+        _h_summary("a" * 64), _noise_production(), summary_sha256="b" * 64, commit="abc1234"
+    )
     stage_d_file = json.loads((REPO / "data" / "checks" / "stage-d-noise.json").read_text())
     assert set(stage_d_file) <= set(payload)
     assert set(stage_d_file["sites"][0]) <= set(payload["sites"][0])
@@ -681,7 +716,17 @@ def test_checks_file_keeps_the_stage_d_fields_and_adds_the_basis():
     assert [site["rank_unstable"] for site in payload["sites"]] == [False, True]
     assert payload["sites"][0]["zero_noise_within_1km"] == 0.6123
     with pytest.raises(ValueError, match="passed"):
-        stage_h.checks_file({**_h_summary("a" * 64), "passed": False}, _noise_production())
+        stage_h.checks_file(
+            {**_h_summary("a" * 64), "passed": False}, _noise_production(), summary_sha256="b" * 64
+        )
+    with pytest.raises(ValueError, match="Slurm job id"):
+        stage_h.checks_file(
+            {**_h_summary("a" * 64), "execution": {}}, _noise_production(), summary_sha256="b" * 64
+        )
+    with pytest.raises(ValueError, match="sha256 of stage-h-summary"):
+        stage_h.checks_file(_h_summary("a" * 64), _noise_production(), summary_sha256="")
+    assert payload["terrain_gate"]["min_fraction"] == payload["threshold"] == 0.5
+    assert payload["source"]["summary_sha256"] == "b" * 64
 
 
 def _install_gated_studies(root: Path, digest: str, cfg: dict, min_fraction: float = 0.5) -> None:
@@ -703,7 +748,7 @@ def _install_gated_studies(root: Path, digest: str, cfg: dict, min_fraction: flo
         },
     }
     path.write_text(json.dumps(summary))
-    noise = stage_h.checks_file(_h_summary(digest), _noise_production())
+    noise = stage_h.checks_file(_h_summary(digest), _noise_production(), summary_sha256="b" * 64)
     noise_path = root / "stage-h-noise.json"
     noise_path.write_text(json.dumps(noise))
     cfg["stability"]["gated"]["dem_noise_checks"] = str(noise_path)

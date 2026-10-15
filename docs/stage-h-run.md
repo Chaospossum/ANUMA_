@@ -69,6 +69,13 @@ i.e. `checks.reference_draws_identical`, `checks.monte_carlo_passed`,
 `checks.noise_passed` and `checks.projection_fits`; read
 `projection.total_hours`.
 
+The Monte Carlo projection is deliberately conservative (whole pilot time,
+scoring preparation included, charged per pilot draw × 500) and stays as
+frozen. If the pilot fails **only** on `projection.monte_carlo_fits_share`,
+do not rerun or edit the code: write a dated plan revision (for example a
+projection that separates the fixed preparation time), have it reviewed,
+then run a new pilot.
+
 Production (only after the pilot passes and is reviewed):
 
 ```bash
