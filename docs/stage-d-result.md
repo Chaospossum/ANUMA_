@@ -29,7 +29,7 @@ The decision uses the primary noise model; the rule is ≥ 0.50.
 | 1 | 89.45°S 137.31°W | 0.4915 | 0.4878–0.4920 | 0 of 200 | fails, stable |
 | 2 | 89.78°S 155.73°W | 0.1045 | 0.1033–0.1057 | 0 of 200 | fails, stable |
 | 3 | 88.81°S 123.64°E | 0.6585 | 0.6536–0.6584 | 200 of 200 | passes, stable |
-| 8 | 85.29°S 36.94°E | 0.4987 | 0.4968–0.5012 | 19 % | **noise-unstable** (straddles 0.50) |
+| 8 | 85.29°S 36.94°E | 0.4987 | 0.4968–0.5012 | 38 of 200 | **noise-unstable** (straddles 0.50) |
 | 9 | 85.48°S 31.39°E | 0.4709 | 0.4696–0.4732 | 0 of 200 | fails, stable |
 | 10 | 89.80°S 54.73°E | 0.2084 | 0.2066–0.2098 | 0 of 200 | fails, stable |
 | 11 | 89.01°S 94.82°W | 0.3910 | 0.3880–0.3929 | 0 of 200 | fails, stable |
@@ -88,8 +88,8 @@ A second reviewer recomputed every decision, percentile and rate from
 ### Correction to the plan's wording
 
 The plan says reading EFFRES as σ "gives smoother, gentler noise". For slope
-the opposite holds here: the smoother sensitivity noise gives about 1.24×
-larger Horn slope noise at all 8 sites, because the Horn stencil sums
+the opposite holds here: the smoother sensitivity noise gives 1.11–1.24×
+larger Horn slope noise (larger at all 8 sites), because the Horn stencil sums
 correlated neighbours. So the sensitivity run is the more conservative one.
 It gives the same verdicts. The frozen plan is left unchanged; this note
 records the correction.
