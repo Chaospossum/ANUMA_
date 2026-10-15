@@ -302,3 +302,41 @@ def _client_score(client: TestClient, body: dict) -> dict:
     response = client.post("/score", json=body)
     assert response.status_code == 200, response.text
     return response.json()
+
+
+# -- Demo UI fields alongside the gate -------------------------------------------
+
+
+def test_gate_fields_coexist_with_ui_fields(gated_root, monkeypatch):
+    _write_layer(gated_root, _peak_fraction(gated_root, 0.49))
+    client = _client(gated_root, monkeypatch)
+    body = _client_score(client, {"weights": {"illumination": 1, "hydrogen": 1, "earth_visibility": 0}})
+    assert body["terrain_gate"] == "applied"
+    assert body["ranking_basis"]["studies_match"] is False
+    assert body["weights_used"] == pytest.approx({"illumination": 0.5, "hydrogen": 0.5, "earth_visibility": 0.0})
+    assert body["hard_used"]["max_slope_deg"] == 8.0
+    low, high = body["score_range"]
+    assert low <= high
+    # Every ranked site carries its gate-layer fraction for the table and card.
+    assert all(site["terrain_1km_fraction"] is not None for site in body["sites"])
+    lines = client.post("/score.csv", json={}).text.splitlines()
+    keys = [line.split(":", 1)[0] for line in lines if line.startswith("#")]
+    assert keys == [
+        "# illumination_window", "# keepout", "# terrain_gate",
+        "# weights_used", "# max_slope_deg", "# slope_radius_m",
+    ]
+    # The gate layer keeps its fixed 0..1 range basis.
+    png = client.get(f"/layer/{LAYER}.png")
+    assert png.headers["X-Anuma-Range-Basis"] == "fixed"
+
+
+def test_ui_reads_the_gate_fields():
+    from anuma.config import repo_root
+
+    app_js = (repo_root() / "static" / "app.js").read_text()
+    html = (repo_root() / "static" / "index.html").read_text()
+    assert "studies_match === false" in app_js
+    assert "site.terrain_1km_fraction" in app_js
+    assert "detail.layer_max_slope_deg" in app_js
+    assert "request.hard.terrain_1km = els.terrain.checked" in app_js
+    assert 'id="terrain-toggle"' in html

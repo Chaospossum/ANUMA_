@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>anuma · lunar south-pole landing-site screening</title>
     <link rel="stylesheet" href="/vendor/leaflet.css" />
-    <link rel="stylesheet" href="/style.css?v=demo-story-2" />
+    <link rel="stylesheet" href="/style.css?v=demo-story-3" />
   </head>
   <body>
     <div class="app">
@@ -67,6 +67,13 @@
                 </div>
               </div>
               <p class="help">Slope requirement must be valid in the circle defined by the radius.</p>
+            </div>
+            <div class="field check terrain-field">
+              <label>
+                <input id="terrain-toggle" type="checkbox" />
+                20 m flat-ground rule (≥ 50 % flat within 1 km)
+              </label>
+              <p class="help" id="terrain-note"></p>
             </div>
             <fieldset class="field group" id="keepout-group">
               <legend class="visually-hidden">Artemis III keep-out</legend>
@@ -233,6 +240,6 @@
     <script src="/vendor/leaflet.js"></script>
     <script src="/vendor/proj4.js"></script>
     <script src="/vendor/proj4leaflet.js"></script>
-    <script src="/app.js?v=demo-story-2"></script>
+    <script src="/app.js?v=demo-story-3"></script>
   </body>
 </html>

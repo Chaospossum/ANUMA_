@@ -121,6 +121,8 @@
     windowEnd: document.getElementById("window-end"),
     windowNote: document.getElementById("window-note"),
     windowReset: document.getElementById("window-reset"),
+    terrain: document.getElementById("terrain-toggle"),
+    terrainNote: document.getElementById("terrain-note"),
   };
 
   function fmtLat(lat) {
@@ -246,16 +248,15 @@
       return layer.name === name;
     })[0] || {};
     if (info.gate) {
-      // Stage F hard-gate layer: share of flat 20 m ground within 1 km, 0–100 %.
-      els.legendTitle.textContent = info.label || layerLabel(name);
+      // Gate layer: share of flat 20 m ground within 1 km, 0–100 %.
+      var gate = (meta && meta.terrain_gate) || {};
+      var cut = Math.round(100 * (gate.min_fraction == null ? 0.5 : gate.min_fraction));
+      els.legendTitle.textContent = "Flat ground within 1 km at 20 m";
       els.legendBar.style.background = GREY;
       els.legendLow.textContent = "0 %";
       els.legendHigh.textContent = "100 %";
-      var gate = (meta && meta.terrain_gate) || {};
       els.legendNote.textContent =
-        "hard rule, not scored: cells below " +
-        Math.round(100 * (gate.min_fraction == null ? 0.5 : gate.min_fraction)) +
-        " % are excluded; blank = no data";
+        "passes at ≥ " + cut + " %; a hard rule, not scored; blank = no data";
       return;
     }
     if (info.display_only) {
@@ -484,11 +485,26 @@
   }
 
   function scenarioNow() {
-    return lastScenario || { isDefault: true, slopeChanged: false, parts: [] };
+    return lastScenario || { isDefault: true, studiesOk: true, slopeChanged: false, parts: [] };
+  }
+
+  // False when /score ranked on a different basis (20 m terrain gate on)
+  // than the precomputed studies, which ranked on slope only.
+  function studiesMatch(payload) {
+    var basis = payload && payload.ranking_basis;
+    return !(basis && typeof basis === "object" && basis.studies_match === false);
+  }
+
+  function studiesNote() {
+    var basis = lastScore && lastScore.ranking_basis;
+    if (basis && typeof basis === "object" && basis.studies_match === false) {
+      return basis.note || "the studies were computed for a different ranking";
+    }
+    return "the site was not in the study, which used the default scenario";
   }
 
   function naHtml() {
-    return '<span class="na" title="n/a for this scenario: the site was not in the study, which used the default scenario">n/a</span>';
+    return '<span class="na" title="n/a for this scenario: ' + escapeHtml(studiesNote()) + '">n/a</span>';
   }
 
   // Verdict mark: shape + colour, with the word for screen readers and hover.
@@ -509,6 +525,9 @@
   }
 
   function stabilityRow(site) {
+    if (!studiesMatch(lastScore)) {
+      return null;
+    }
     return stabilityById[siteKey(site)] || null;
   }
 
@@ -518,14 +537,14 @@
     }
     var row = stabilityRow(site);
     var scenario = scenarioNow();
-    if (!scenario.isDefault && !row) {
+    if (!scenario.studiesOk && !row) {
       return naHtml();
     }
     // Every site that reached the top 10 in any draw is listed, so a
     // missing site was in the top 10 in none of the draws.
     var freq = row ? row.frequency : 0;
     var text = (100 * freq).toFixed(freq === 1 || freq === 0 ? 0 : 1) + " %";
-    if (!scenario.isDefault) {
+    if (!scenario.studiesOk) {
       return '<span class="na" title="Measured for the default scenario only">' + text + "</span>";
     }
     return text;
@@ -534,7 +553,7 @@
   // 20 m flat-ground check for the same 240 m cell only, so a neighbouring
   // cell never inherits a check.
   function stageBCheck(site) {
-    if (!checks || !checks.sites) {
+    if (!checks || !checks.sites || !studiesMatch(lastScore)) {
       return null;
     }
     var found = null;
@@ -550,11 +569,25 @@
     return (noiseChecks && noiseChecks.threshold) || 0.5;
   }
 
-  // Share of 20 m pixels at or below 8° within 1 km, or null if unchecked.
+  // The per-site gate-layer value from /score, when that layer was built
+  // for the slope limit of the current request; otherwise null.
+  function layerFraction(site) {
+    var detail = lastScore && lastScore.terrain_gate_detail;
+    if (site.terrain_1km_fraction == null || !detail || !lastRequest) {
+      return null;
+    }
+    if (Number(detail.layer_max_slope_deg) !== Number(lastRequest.hard.max_slope_deg)) {
+      return null;
+    }
+    return site.terrain_1km_fraction;
+  }
+
+  // Share of 20 m pixels at or below 8° within 1 km, or null if unchecked:
+  // the full-cap gate layer for every site, else the study file.
   function flatFraction(site) {
-    // A per-site value from /score (20 m terrain gate) wins over the study file.
-    if (site.terrain_1km_fraction != null) {
-      return site.terrain_1km_fraction;
+    var fromLayer = layerFraction(site);
+    if (fromLayer != null) {
+      return fromLayer;
     }
     var check = stageBCheck(site);
     return check ? check.fraction_le_8deg.within_1km : null;
@@ -604,7 +637,7 @@
   function flatCell(site) {
     var value = flatFraction(site);
     if (value == null) {
-      return scenarioNow().isDefault ? verdictHtml("none", "", "not in the 20 m terrain check") : naHtml();
+      return scenarioNow().studiesOk ? verdictHtml("none", "", "not in the 20 m terrain check") : naHtml();
     }
     var pct = Math.round(100 * value) + " %";
     var pass = value >= flatThreshold();
@@ -617,6 +650,9 @@
 
   // DEM-noise verdict for the same 240 m cell only.
   function noiseCheck(site) {
+    if (!studiesMatch(lastScore)) {
+      return null;
+    }
     var found = null;
     ((noiseChecks && noiseChecks.sites) || []).forEach(function (check) {
       if (check.row === site.row && check.col === site.col) {
@@ -661,7 +697,7 @@
 
   function noiseCell(site) {
     var found = noiseCheck(site);
-    if (!found && !scenarioNow().isDefault) {
+    if (!found && !scenarioNow().studiesOk) {
       return naHtml();
     }
     return verdictHtml(noiseKind(found), "", noiseWords(found));
@@ -843,12 +879,12 @@
   // ---- Site cards
 
   function cardSnapshot(index) {
-    var scenario = lastScenario || { isDefault: true, parts: [] };
+    var scenario = lastScenario || { isDefault: true, studiesOk: true, parts: [] };
     return {
       site: currentSites[index],
       rank: index + 1,
       scenario: scenario,
-      scenarioText: scenario.isDefault ? "study defaults" : scenario.parts.join(" · "),
+      scenarioText: scenario.parts.length ? scenario.parts.join(" · ") : "defaults",
       months: (lastRequest && lastRequest.illumination_months) || null,
       maxSlope: lastRequest ? lastRequest.hard.max_slope_deg : null,
     };
@@ -895,7 +931,7 @@
     if (flat == null) {
       out += fact(
         "Flat ground 1 km",
-        card.scenario.isDefault
+        card.scenario.studiesOk
           ? verdictHtml("none", "not checked (only the default top 10 were)")
           : verdictHtml("none", "n/a for this scenario")
       );
@@ -912,7 +948,7 @@
     if (!noise) {
       out += fact(
         "DEM-noise",
-        verdictHtml("none", card.scenario.isDefault ? "not checked (8 sites were)" : "n/a for this scenario")
+        verdictHtml("none", card.scenario.studiesOk ? "not checked (8 sites were)" : "n/a for this scenario")
       );
     } else {
       out += fact("DEM-noise", verdictHtml(noiseKind(noise), "") + " " + escapeHtml(noiseWords(noise)));
@@ -929,7 +965,7 @@
         (win != null ? "; #1 in " + (100 * win).toFixed(1) + " %" : "");
       out += fact(
         "Weight-robust",
-        card.scenario.isDefault
+        card.scenario.studiesOk
           ? escapeHtml(text)
           : row
             ? '<span class="na">' + escapeHtml(text) + " (default scenario only)</span>"
@@ -1239,6 +1275,40 @@
     };
   }
 
+  // ---- 20 m flat-ground rule toggle
+
+  // Enabled only when the gate layer is on this machine and the max slope
+  // is the one it was built for.
+  function updateTerrainToggle() {
+    var gate = (meta && meta.terrain_gate) || null;
+    if (!gate) {
+      els.terrain.disabled = true;
+      els.terrain.checked = false;
+      els.terrainNote.textContent = "This server has no 20 m flat-ground rule.";
+      return;
+    }
+    var built = gate.layer_max_slope_deg != null ? gate.layer_max_slope_deg : (meta.defaults || {}).max_slope_deg;
+    if (!gate.available) {
+      els.terrain.disabled = true;
+      els.terrain.checked = false;
+      els.terrainNote.textContent =
+        "Unavailable on this machine: " + (gate.reason || "layer missing") + ".";
+    } else if (Number(els.slope.value) !== Number(built)) {
+      els.terrain.disabled = true;
+      els.terrain.checked = false;
+      els.terrainNote.textContent =
+        "Built for max slope " + built + "° only; set max slope to " + built + "° to use it.";
+    } else {
+      if (els.terrain.disabled) {
+        els.terrain.checked = !!gate.enabled_by_default;
+      }
+      els.terrain.disabled = false;
+      els.terrainNote.textContent =
+        "Drops cells with under " + Math.round(100 * gate.min_fraction) +
+        " % of 20 m pixels ≤ " + built + "° within " + gate.radius_m / 1000 + " km.";
+    }
+  }
+
   // ---- Scenario vs study defaults
 
   function normalisedWeights(weights) {
@@ -1291,8 +1361,16 @@
     if (request.illumination_months) {
       parts.push("sunlight " + windowLabel(request.illumination_months) + " (modelled daily)");
     }
+    // The studies ranked on slope only, so the gate switch is shown as a
+    // scenario change but does not by itself move away from the studies;
+    // /score's ranking_basis.studies_match decides that.
+    var isDefault = parts.length === 0;
+    var gateSpec = (meta && meta.terrain_gate) || {};
+    if (request.hard.terrain_1km != null && request.hard.terrain_1km !== !!gateSpec.enabled_by_default) {
+      parts.push("20 m flat-ground rule " + (request.hard.terrain_1km ? "on" : "off"));
+    }
     return {
-      isDefault: parts.length === 0,
+      isDefault: isDefault,
       // The 20 m checks were run at 8°; other slope limits make them moot.
       slopeChanged: slopeChanged,
       parts: parts,
@@ -1358,7 +1436,7 @@
   function flatWords(site, scenario) {
     var value = flatFraction(site);
     if (value == null) {
-      return scenario.isDefault ? "flat ground within 1 km not checked" : "flat ground within 1 km n/a for this scenario";
+      return scenario.studiesOk ? "flat ground within 1 km not checked" : "flat ground within 1 km n/a for this scenario";
     }
     var pass = value >= flatThreshold();
     return (
@@ -1371,7 +1449,7 @@
     if (!stability || !stability.available) {
       return "weight robustness not checked";
     }
-    if (!scenario.isDefault) {
+    if (!scenario.studiesOk) {
       return "weight robustness n/a for this scenario";
     }
     var row = stabilityRow(site);
@@ -1383,29 +1461,31 @@
   }
 
   // The optional 20 m terrain gate from /score, read but never required.
+  // The 20 m terrain gate from /score in words, or null if the server has none.
   function terrainGateText(payload) {
     var gate = payload.terrain_gate;
     if (gate == null) {
-      return "20 m terrain rule: not applied";
+      return null;
     }
-    if (typeof gate === "boolean") {
-      return "20 m terrain rule: " + (gate ? "on" : "off");
-    }
+    var detail = payload.terrain_gate_detail || {};
     var status = typeof gate === "string" ? gate : gate.status;
+    if (status === "applied") {
+      var removed = detail.cells_removed != null ? "; " + Number(detail.cells_removed).toLocaleString("en") + " cells removed" : "";
+      return (
+        "20 m flat-ground rule: on (≥ " + Math.round(100 * (detail.min_fraction == null ? 0.5 : detail.min_fraction)) +
+        " % flat within " + ((detail.radius_m || 1000) / 1000) + " km" + removed + ")"
+      );
+    }
     var words = {
-      applied: "on",
       disabled: "off",
       unavailable: "unavailable",
-      slope_mismatch: "not applied (slope limit differs from the 8° it was built for)",
+      slope_mismatch: "not applied (built for " + (detail.layer_max_slope_deg != null ? detail.layer_max_slope_deg : 8) + "° only)",
     };
-    if (status != null) {
-      return "20 m terrain rule: " + (words[status] || String(status));
+    var text = "20 m flat-ground rule: " + (words[status] || String(status));
+    if (status === "unavailable" && detail.message) {
+      text += " — " + detail.message.replace(/^20 m terrain rule not applied: /, "");
     }
-    if (gate.available === false) {
-      return "20 m terrain rule: unavailable";
-    }
-    var on = gate.applied != null ? gate.applied : gate.enabled != null ? gate.enabled : gate.on;
-    return "20 m terrain rule: " + (on === false ? "off" : "on");
+    return text;
   }
 
   // Second banner line: the best ranked site that passes every check run on it.
@@ -1450,19 +1530,21 @@
   }
 
   async function renderAnswer(payload, request, seq) {
-    var scenario = scenarioOf(request);
+    var scenario = lastScenario;
     var meta2 = [];
-    meta2.push('<span class="tag">' + escapeHtml(terrainGateText(payload)) + "</span>");
-    if (payload.ranking_basis) {
-      var basis = payload.ranking_basis;
-      var basisText = typeof basis === "object" ? basis.basis || basis.note : basis;
-      if (basisText) {
-        meta2.push('<span class="tag">Ranked on: ' + escapeHtml(String(basisText)) + "</span>");
-      }
+    var gateText = terrainGateText(payload);
+    if (gateText) {
+      meta2.push('<span class="tag">' + escapeHtml(gateText) + "</span>");
+    }
+    if (!studiesMatch(payload)) {
+      meta2.push(
+        '<span class="tag changed" title="' + escapeHtml(studiesNote()) + '">Weight-robust and DEM-noise n/a: ' +
+          "those studies ranked on slope only, before the 20 m rule</span>"
+      );
     }
     meta2.push(
-      scenario.isDefault
-        ? '<span class="tag">Scenario: study defaults (' + escapeHtml(weightText(request.weights)) +
+      !scenario.parts.length
+        ? '<span class="tag">Scenario: defaults (' + escapeHtml(weightText(request.weights)) +
             ", slope ≤ " + request.hard.max_slope_deg + "°, 18.6-yr average sunlight)</span>"
         : '<span class="tag changed">Scenario: ' + escapeHtml(scenario.parts.join(" · ")) + "</span>"
     );
@@ -1700,8 +1782,13 @@
         max_slope_deg: Number(els.slope.value),
         slope_radius_m: Number(els.slopeRadius.value),
       },
+      // Sent only when the rule can apply; otherwise the server uses its
+      // default and reports why the rule is off.
       n: (meta.defaults && meta.defaults.n) || 10,
     };
+    if (!els.terrain.disabled) {
+      request.hard.terrain_1km = els.terrain.checked;
+    }
     var keepout = currentKeepout();
     if (keepout) {
       request.keepout = keepout;
@@ -1918,7 +2005,12 @@
       }
       lastRequest = request;
       lastScenario = scenarioOf(request);
-      document.getElementById("legend-na").hidden = lastScenario.isDefault;
+      lastScenario.studiesOk = lastScenario.isDefault && studiesMatch(payload);
+      var legendNa = document.getElementById("legend-na");
+      legendNa.hidden = lastScenario.studiesOk;
+      legendNa.lastChild.textContent = studiesMatch(payload)
+        ? " not in that study (studies used the default scenario)"
+        : " not comparable (studies ranked on slope only, before the 20 m rule)";
       renderSites(payload.sites, request.hard.slope_radius_m);
       renderCards();
       renderArtemis(payload.artemis);
@@ -2205,6 +2297,10 @@
       onWindowChange("end");
     });
     els.windowReset.addEventListener("click", resetWindow);
+    els.terrain.addEventListener("change", scheduleScore);
+    ["input", "change"].forEach(function (type) {
+      els.slope.addEventListener(type, updateTerrainToggle);
+    });
 
     try {
       var response = await fetch("/layers");
@@ -2217,6 +2313,8 @@
     applyDefaults(meta);
     fillLayerSelect(meta);
     fillWindowSelects(meta);
+    els.terrain.disabled = true;
+    updateTerrainToggle();
     initMap(meta);
     await loadAnnotations();
     await loadArtemisPoints();
@@ -2270,6 +2368,11 @@
     }
     if (PARAMS.get("slope")) {
       els.slope.value = Number(PARAMS.get("slope"));
+      updateTerrainToggle();
+      changed = true;
+    }
+    if (PARAMS.get("terrain") && !els.terrain.disabled) {
+      els.terrain.checked = PARAMS.get("terrain") === "1";
       changed = true;
     }
     if (PARAMS.get("keepout")) {
