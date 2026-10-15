@@ -200,6 +200,19 @@
     var info = ((meta && meta.layers) || []).filter(function (layer) {
       return layer.name === name;
     })[0] || {};
+    if (info.gate) {
+      // Stage F hard-gate layer: share of flat 20 m ground within 1 km, 0–100 %.
+      els.legendTitle.textContent = info.label || layerLabel(name);
+      els.legendBar.style.background = GREY;
+      els.legendLow.textContent = "0 %";
+      els.legendHigh.textContent = "100 %";
+      var gate = (meta && meta.terrain_gate) || {};
+      els.legendNote.textContent =
+        "hard rule, not scored: cells below " +
+        Math.round(100 * (gate.min_fraction == null ? 0.5 : gate.min_fraction)) +
+        " % are excluded; blank = no data";
+      return;
+    }
     if (info.display_only) {
       // Raw values on a fixed range in metres; not normalised, not scored.
       var u = info.unit ? " " + info.unit : "";
@@ -928,7 +941,7 @@
         layer.label || (layer.name === "dem" ? "DEM" : layer.name.replace(/_/g, " "))
       );
       var value = escapeHtml(layer.name);
-      if (layer.display_only && !layer.available) {
+      if ((layer.display_only || layer.gate) && !layer.available) {
         // Optional layer not built on this machine: listed, but not selectable.
         keep += '<option value="' + value + '" disabled>' + label + " (not available)</option>";
         return;

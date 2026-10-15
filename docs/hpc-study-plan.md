@@ -314,6 +314,16 @@ the held hours: a pilot of 0.5 at QOS `test`, then a production of 3.0 at
 `default`. Production goes ahead only if the pilot projects at most 2.4. See
 [stage-g-darkness-plan.md](stage-g-darkness-plan.md).
 
+## Stage F — full-cap 20 m terrain gate
+
+Planned, not run. Per user decision of 15 October 2026 a 240 m cell is
+eligible only if at least 50 % of the 20 m pixels within 1 km of its centre
+have Horn slope ≤ 8°. Stage F computes that fraction for every cell from the
+Stage B `slope-20m.npy` (job `5334425`), with Stage D's zero-noise geometry.
+Proposed from the held hours: cap 2.0 node-hours (pilot 0.5 on `test`,
+production 1.0 on `default`). See [stage-f-plan.md](stage-f-plan.md) and
+[stage-f-run.md](stage-f-run.md).
+
 ## Review and release discipline
 
 Each stage produces evidence, not a mission claim. Review scientific outputs

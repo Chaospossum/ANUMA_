@@ -28,10 +28,22 @@ class ScoreResult:
     normalization_policy: str
     cfg: dict = field(repr=False)
     ranking_inputs: dict[str, np.ndarray] = field(repr=False)
+    terrain_gate: dict = field(default_factory=dict)
 
 
 def _cfg(cfg: dict | None = None) -> dict:
     return cfg if cfg is not None else load_config()
+
+
+def terrain_pass(
+    fraction: np.ndarray, min_fraction: float, shape: tuple[int, ...] | None = None
+) -> np.ndarray:
+    """True where the 1 km flat-ground fraction is finite and >= ``min_fraction``."""
+    fraction = np.asarray(fraction)
+    if shape is not None and fraction.shape != tuple(shape):
+        raise ValueError("terrain fraction layer does not match the slope grid")
+    with np.errstate(invalid="ignore"):
+        return np.isfinite(fraction) & (fraction >= float(min_fraction))
 
 
 def hard_mask(
@@ -40,8 +52,14 @@ def hard_mask(
     cfg: dict | None = None,
     slope_radius_m: float | None = None,
     resolution_m: float | None = None,
+    terrain_fraction: np.ndarray | None = None,
+    terrain_min_fraction: float | None = None,
 ) -> np.ndarray:
     """True where slope is finite and at or below the HLS threshold.
+
+    With ``terrain_fraction`` (the Stage F ``terrain_1km_fraction`` layer) a
+    pixel must also have a finite fraction ``>= terrain_min_fraction``; NaN
+    fails. Callers decide whether the gate applies (``terrain_gate``).
 
     With ``slope_radius_m`` > 0 a pixel passes only if every pixel whose
     centre lies within that distance of its own centre also passes. Pixel
@@ -59,8 +77,14 @@ def hard_mask(
         raise ValueError("slope_radius_m must be finite and non-negative")
     finite = np.isfinite(slope)
     passing = finite & (slope <= float(max_slope_deg))
+    if terrain_fraction is not None:
+        if terrain_min_fraction is None:
+            raise ValueError("terrain_min_fraction is required with terrain_fraction")
+        terrain_ok = terrain_pass(terrain_fraction, terrain_min_fraction, slope.shape)
+    else:
+        terrain_ok = None
     if radius == 0.0:
-        return passing
+        return passing if terrain_ok is None else passing & terrain_ok
     if resolution_m is None:
         raise ValueError("resolution_m is required when slope_radius_m is positive")
     # Distance from each pixel centre to the nearest failing centre, with a
@@ -69,7 +93,8 @@ def hard_mask(
 
     padded = np.pad(passing, 1, constant_values=False)
     distance_m = distance_transform_edt(padded, sampling=float(resolution_m))[1:-1, 1:-1]
-    return distance_m > radius
+    within = distance_m > radius
+    return within if terrain_ok is None else within & terrain_ok
 
 
 def normalization_rule(cfg: dict, policy: str, layer_name: str) -> dict:
@@ -132,6 +157,74 @@ def is_display_only(cfg: dict, name: str) -> bool:
     return bool((cfg["layers"].get(name) or {}).get("display_only"))
 
 
+def is_gate_layer(cfg: dict, name: str) -> bool:
+    return bool((cfg["layers"].get(name) or {}).get("gate"))
+
+
+TERRAIN_STATUSES = ("applied", "disabled", "unavailable", "slope_mismatch")
+
+
+def terrain_gate(
+    layers: dict[str, np.ndarray], hard: dict, cfg: dict, max_slope_deg: float
+) -> dict:
+    """Decide whether the Stage F 20 m terrain gate applies to this request.
+
+    ``hard`` keys read here (all optional):
+
+    - ``terrain_1km``: True/False forces the gate on/off; None uses config;
+    - ``terrain_1km_min_fraction``: threshold in [0, 1], default from config;
+    - ``terrain_1km_max_slope_deg``: slope limit the layer was built for
+      (the API passes its sidecar value), default ``hard.max_slope_deg``;
+    - ``terrain_1km_unavailable_reason``: why the layer is absent.
+
+    The fraction exists for one slope limit only. If the request's max slope
+    differs, the gate is not applied (status ``slope_mismatch``), because
+    an 8° flat-ground rule under a different slope limit would be a third
+    rule nobody asked for; an explicit ``terrain_1km: True`` then raises.
+    """
+    spec = cfg["hard"].get("terrain_1km") or {}
+    name = str(spec.get("layer", "terrain_1km_fraction"))
+    requested = hard.get("terrain_1km")
+    enabled = bool(spec.get("enabled", False)) if requested is None else bool(requested)
+    min_fraction = hard.get("terrain_1km_min_fraction")
+    if min_fraction is None:
+        min_fraction = spec.get("min_fraction", 0.5)
+    min_fraction = float(min_fraction)
+    if not (np.isfinite(min_fraction) and 0.0 <= min_fraction <= 1.0):
+        raise ValueError("terrain_1km_min_fraction must be between 0 and 1")
+    layer_slope = hard.get("terrain_1km_max_slope_deg")
+    if layer_slope is None:
+        layer_slope = cfg["hard"]["max_slope_deg"]
+    layer_slope = float(layer_slope)
+    info = {
+        "status": "applied",
+        "layer": name,
+        "requested": requested,
+        "min_fraction": min_fraction,
+        "radius_m": float(spec.get("radius_m", 1000.0)),
+        "layer_max_slope_deg": layer_slope,
+        "max_slope_deg": float(max_slope_deg),
+        "message": None,
+    }
+    if not enabled:
+        info.update(status="disabled", message="20 m terrain rule switched off")
+    elif name not in layers:
+        reason = hard.get("terrain_1km_unavailable_reason") or f"{name}.npy is not on this machine"
+        info.update(
+            status="unavailable",
+            message=f"20 m terrain rule not applied: {reason}",
+        )
+    elif not np.isclose(float(max_slope_deg), layer_slope, rtol=0.0, atol=1e-9):
+        message = (
+            f"20 m terrain rule uses {layer_slope:g}° and cannot be recomputed for "
+            f"{float(max_slope_deg):g}°; not applied"
+        )
+        if requested is True:
+            raise ValueError(message)
+        info.update(status="slope_mismatch", message=message)
+    return info
+
+
 def scored_weights(weights: dict[str, float], cfg: dict) -> dict[str, float]:
     """Validate weights and drop display-only layers given weight 0.
 
@@ -146,6 +239,10 @@ def scored_weights(weights: dict[str, float], cfg: dict) -> dict[str, float]:
         if is_display_only(cfg, name):
             if value != 0.0:
                 raise ValueError(f"{name!r} is display only and cannot be weighted")
+            continue
+        if is_gate_layer(cfg, name):
+            if value != 0.0:
+                raise ValueError(f"{name!r} is a hard-gate layer and cannot be weighted")
             continue
         validated[name] = value
     return validated
@@ -172,13 +269,23 @@ def score(
     if "slope" not in layers:
         raise KeyError("layers must include 'slope' for the hard mask")
     weights = scored_weights(weights, cfg)
-    mask = hard_mask(
+    max_slope = hard.get("max_slope_deg")
+    if max_slope is None:
+        max_slope = float(cfg["hard"]["max_slope_deg"])
+    gate = terrain_gate(layers, hard, cfg, float(max_slope))
+    slope_only = hard_mask(
         layers["slope"],
-        hard.get("max_slope_deg"),
+        max_slope,
         cfg=cfg,
         slope_radius_m=hard.get("slope_radius_m"),
         resolution_m=grid.resolution_m,
     )
+    mask = slope_only
+    if gate["status"] == "applied":
+        terrain_ok = terrain_pass(layers[gate["layer"]], gate["min_fraction"], slope_only.shape)
+        mask = slope_only & terrain_ok
+        gate["cells_passing_slope"] = int(np.count_nonzero(slope_only))
+        gate["cells_removed"] = int(np.count_nonzero(slope_only & ~terrain_ok))
     normalized: dict[str, np.ndarray] = {}
     combined = np.zeros(layers["slope"].shape, dtype=np.float64)
     for name, weight in weights.items():
@@ -210,6 +317,7 @@ def score(
             for name in ("slope", "illumination")
             if name in layers
         },
+        terrain_gate=gate,
     )
 
 
@@ -267,6 +375,7 @@ def apply_keepout(
         normalization_policy=result.normalization_policy,
         cfg=result.cfg,
         ranking_inputs=result.ranking_inputs,
+        terrain_gate=result.terrain_gate,
     )
 
 

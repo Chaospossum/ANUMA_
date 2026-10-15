@@ -22,6 +22,18 @@ hard:
   goal_slope_deg: 5.0
   # Slope must pass at every pixel centre within this distance; 0 checks the pixel alone.
   slope_radius_m: 0.0
+  # Stage F 20 m terrain gate (docs/stage-f-plan.md, user decision 2026-10-15):
+  # a 240 m cell is eligible only if at least min_fraction of the 20 m pixels
+  # whose centres lie within radius_m of the cell centre have finite Horn
+  # slope <= max_slope_deg. The fraction layer is precomputed for one slope
+  # limit (hard.max_slope_deg when Stage F ran, recorded in its sidecar);
+  # with any other max slope the gate is not applied (see anuma/score.py).
+  terrain_1km:
+    enabled: true
+    min_fraction: 0.5
+    radius_m: 1000.0
+    layer: terrain_1km_fraction
+    max_slope_deg_from: hard.max_slope_deg
 
 scoring:
   default_normalization_policy: decided_per_layer
@@ -309,6 +321,19 @@ layers:
     data_doi: "https://doi.org/10.60903/gsfcpgda-lola-spole"
     licence: "Citation requested on the PGDA product page; no other licence text."
     catalog: https://pgda.gsfc.nasa.gov/products/90
+
+  # Gate layer: never weighted; used only by the hard terrain rule above.
+  # Built by `python -m anuma.stage_f` (Stage F), not by anuma.ingest.
+  terrain_1km_fraction:
+    name: terrain_1km_fraction
+    label: "Flat ground within 1 km at 20 m (%)"
+    unit: fraction
+    gate: true
+    product_name: LDEM_80S_20MPP_ADJ
+    resolution_m: 20
+    aggregation: "share of 20 m pixels with centre within 1 km of the 240 m cell centre and finite Horn slope <= 8 deg, over finite-slope pixels; NaN outside the cap or with no finite pixel"
+    display_range: [0.0, 1.0]
+    citation: "Derived from LDEM_80S_20MPP_ADJ (Barker et al. 2023, PSJ 4, 183) via the Stage B 20 m Horn slope."
 
 artemis3:
   approximate: true

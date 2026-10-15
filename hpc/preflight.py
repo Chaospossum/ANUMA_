@@ -155,12 +155,38 @@ JOB_PROFILES = {
         "node_hours": 3.0,
         "core_hours": 384.0,
     },
+    # Stage F 20 m terrain gate: pilot 0.5 + production 1.0 = 1.5 node-hours,
+    # within the 2.0 node-hour cap of docs/stage-f-plan.md.
+    "stage-f-pilot": {
+        "qos": "test",
+        "walltime": "00:30:00",
+        "walltime_minutes": 30,
+        "cpus": 128,
+        "memory": "240G",
+        "node_hours": 0.5,
+        "core_hours": 64.0,
+    },
+    "stage-f": {
+        "qos": "default",
+        "walltime": "01:00:00",
+        "walltime_minutes": 60,
+        "cpus": 128,
+        "memory": "240G",
+        "node_hours": 1.0,
+        "core_hours": 128.0,
+    },
 }
 SUN_PROFILES = frozenset({"sun-validation-pilot", "sun-validation"})
 STAGE_B_PROFILES = frozenset({"stage-b-pilot", "stage-b"})
 DAILY_LIT_PROFILES = {"daily-lit-pilot": "pilot", "daily-lit": "production"}
 STAGE_D_PROFILES = {"stage-d-pilot": "pilot", "stage-d": "production"}
 STAGE_G_PROFILES = {"stage-g-pilot": "pilot", "stage-g": "production"}
+STAGE_F_PROFILES = {"stage-f-pilot": "pilot", "stage-f": "production"}
+# Profiles whose preflight hashes or reads large inputs and so runs inside a
+# compute allocation, where myquota does not exist.
+COMPUTE_PREFLIGHT_PROFILES = (
+    frozenset(STAGE_D_PROFILES) | frozenset(STAGE_F_PROFILES) | frozenset(STAGE_G_PROFILES)
+)
 QOS_MAX_WALL_MINUTES = {
     "dev": 6 * 60,
     "test": 30,
@@ -268,12 +294,13 @@ def run_preflight(receipt_path: Path) -> dict:
     missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
     if missing:
         fail("missing required environment variables: " + ", ".join(missing))
-    # myquota exists only on login nodes, while Stage D preflight must run in a
-    # compute allocation. Preflight never calls it; allocation and storage come
-    # from the evidence files captured on the login node within 24 hours.
+    # myquota exists only on login nodes, while Stage D, F and G preflight
+    # must run in a compute allocation. Preflight never calls it; allocation and
+    # storage come from the evidence files captured on the login node within
+    # 24 hours.
     commands = ["myquota", "sbatch", "sacctmgr", "scontrol"]
     in_allocation = bool(os.environ.get("SLURM_JOB_ID", "").strip())
-    if (job_profile in STAGE_D_PROFILES or job_profile in STAGE_G_PROFILES) and in_allocation:
+    if job_profile in COMPUTE_PREFLIGHT_PROFILES and in_allocation:
         commands.remove("myquota")
     for command in commands:
         if shutil.which(command) is None:
@@ -538,6 +565,27 @@ def run_preflight(receipt_path: Path) -> dict:
         stage_g_pin["stage_g_preflight_slurm_job_id"] = slurm_job
         stage_g_pin["stage_g_preflight_host"] = socket.gethostname()
 
+    stage_f_pin: dict = {}
+    if job_profile in STAGE_F_PROFILES:
+        if account != "p201619":
+            fail("Stage F requires account p201619")
+        # Hashes the 20 m DEM and the 3.7 GB Stage B slope: compute only.
+        slurm_job = os.environ.get("SLURM_JOB_ID", "").strip()
+        if not slurm_job:
+            fail("Stage F preflight must run inside a compute allocation")
+        from anuma import stage_f_gate
+
+        paths = stage_d_input_paths(data_root)
+        f_paths = {"dem": paths["dem"], "stage_b_slope": paths["stage_b_slope"]}
+        try:
+            stage_f_pin = stage_f_gate.receipt_pin(**f_paths, mode=STAGE_F_PROFILES[job_profile])
+            stage_f_gate.verify_input_digests(stage_f_gate.expected_inputs(**f_paths))
+        except ValueError as exc:
+            fail(str(exc))
+        stage_f_pin["stage_f_inputs_verified"] = True
+        stage_f_pin["stage_f_preflight_slurm_job_id"] = slurm_job
+        stage_f_pin["stage_f_preflight_host"] = socket.gethostname()
+
     receipt = {
         "schema_version": 1,
         "verified_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -567,6 +615,7 @@ def run_preflight(receipt_path: Path) -> dict:
         **daily_lit_pin,
         **stage_d_pin,
         **stage_g_pin,
+        **stage_f_pin,
     }
     canonical = json.dumps(receipt, sort_keys=True).encode()
     receipt["receipt_sha256"] = hashlib.sha256(canonical).hexdigest()

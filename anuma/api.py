@@ -33,6 +33,7 @@ from anuma.score import (
     artemis_overlap,
     hard_mask,
     is_display_only,
+    is_gate_layer,
     normalize,
     rank_sites,
     score,
@@ -47,6 +48,15 @@ DEM_ERROR_COMMAND = (
     "--out data/grid/dem_error.npy"
 )
 
+TERRAIN_LAYER = "terrain_1km_fraction"
+STAGE_F_COMMAND = (
+    "copy terrain_1km_fraction.npy and terrain_1km_fraction.json from the Stage F "
+    "production output (docs/stage-f-run.md) into data/grid/"
+)
+# What the precomputed studies (Monte Carlo top-10 %, Stage B and Stage D
+# badges) ranked: the slope-only hard mask, before the 20 m terrain gate.
+STUDIES_RANKING_BASIS = "slope_only"
+
 _STORE: dict[str, Any] = {}
 _CUBES: dict[str, DailyLitCube] = {}
 _MONTH = re.compile(r"\A([0-9]{4})-([0-9]{2})\Z")
@@ -57,6 +67,10 @@ logger = logging.getLogger(__name__)
 class HardBody(BaseModel):
     max_slope_deg: float | None = None
     slope_radius_m: float | None = Field(default=None, ge=0.0)
+    # Stage F 20 m terrain gate: None = config default, False = off, True = on
+    # (400 if it cannot apply at the requested max slope).
+    terrain_1km: bool | None = None
+    terrain_1km_min_fraction: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class KeepOutPoint(BaseModel):
@@ -183,6 +197,78 @@ def _load_store(cfg: dict, root: Path) -> dict[str, Any]:
     store = {"grid": grid, "layers": layers, "root": root}
     _STORE[key] = store
     return store
+
+
+def _terrain_layer(cfg: dict, root: Path, store: dict) -> dict:
+    """The Stage F fraction layer and its sidecar, validated once per store.
+
+    Returns ``{"array": ndarray | None, "available": bool, "reason": str |
+    None, "meta": dict | None}``. A layer without a valid full-cap sidecar is
+    unavailable, never applied.
+    """
+    cached = store.get("terrain")
+    if cached is not None and cached["available"]:
+        return cached
+    gdir = _paths(cfg, root)["grid"]
+    npy = gdir / f"{TERRAIN_LAYER}.npy"
+    side = gdir / f"{TERRAIN_LAYER}.json"
+    info: dict = {"array": None, "available": False, "reason": None, "meta": None}
+    if not npy.is_file():
+        info["reason"] = f"{TERRAIN_LAYER}.npy is not on this machine"
+    elif not side.is_file():
+        info["reason"] = f"{TERRAIN_LAYER}.json (Stage F sidecar) is missing"
+    else:
+        from anuma.stage_f import validate_sidecar
+
+        try:
+            meta = json.loads(side.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            meta, problem = None, f"sidecar unreadable: {exc}"
+        else:
+            problem = validate_sidecar(meta, store["grid"], cfg)
+        array = None
+        if problem is None:
+            array = np.load(npy, allow_pickle=False)
+            if array.shape != (store["grid"].height, store["grid"].width):
+                problem = f"layer shape {array.shape} does not match the grid"
+        if problem is None:
+            info.update(array=array, available=True, meta=meta)
+        else:
+            info["reason"] = problem
+            info["meta"] = meta
+    store["terrain"] = info
+    return info
+
+
+def _terrain_summary(cfg: dict, terrain: dict) -> dict:
+    spec = cfg["hard"]["terrain_1km"]
+    meta = terrain.get("meta") or {}
+    return {
+        "available": bool(terrain["available"]),
+        "reason": terrain.get("reason"),
+        "enabled_by_default": bool(spec.get("enabled", False)),
+        "min_fraction": float(spec["min_fraction"]),
+        "radius_m": float(spec["radius_m"]),
+        "layer": TERRAIN_LAYER,
+        "layer_max_slope_deg": _finite_or_none(meta.get("max_slope_deg")),
+        "job": meta.get("job"),
+        "build": None if terrain["available"] else STAGE_F_COMMAND,
+    }
+
+
+def _ranking_basis(gate: dict) -> dict:
+    basis = "slope_and_terrain_1km" if gate["status"] == "applied" else "slope_only"
+    return {
+        "basis": basis,
+        "studies_basis": STUDIES_RANKING_BASIS,
+        "studies_match": basis == STUDIES_RANKING_BASIS,
+        "note": (
+            None
+            if basis == STUDIES_RANKING_BASIS
+            else "Top-10 %, Stage B and Stage D badges were computed for the previous "
+            "(slope-only) ranking"
+        ),
+    }
 
 
 def _previous_month(day: date) -> date:
@@ -320,6 +406,7 @@ def _site_payload(site: dict) -> dict:
         "contributions": contrib,
         "nearest": site.get("nearest"),
         "distance_km": _finite_or_none(site.get("distance_km")),
+        "terrain_1km_fraction": _finite_or_none(site.get("terrain_1km_fraction")),
     }
 
 
@@ -358,6 +445,7 @@ def _stability_payload(cfg: dict, root: Path) -> dict:
     study = summary["policies"][policy]
     return {
         "available": True,
+        "ranking_basis": STUDIES_RANKING_BASIS,
         "job_id": str(spec["monte_carlo_job"]),
         "policy": policy,
         "draw_count": int(summary["draw_count"]),
@@ -425,11 +513,21 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
     absent = [name for name in needed if name not in layers]
     if absent:
         raise _not_ingested(absent)
+    terrain = _terrain_layer(cfg, root, store)
+    hard = {"max_slope_deg": max_slope, "slope_radius_m": slope_radius}
+    if body.hard is not None:
+        hard["terrain_1km"] = body.hard.terrain_1km
+        hard["terrain_1km_min_fraction"] = body.hard.terrain_1km_min_fraction
+    if terrain["available"]:
+        layers = {**layers, TERRAIN_LAYER: terrain["array"]}
+        hard["terrain_1km_max_slope_deg"] = float(terrain["meta"]["max_slope_deg"])
+    else:
+        hard["terrain_1km_unavailable_reason"] = terrain["reason"]
     try:
         result = score(
             layers,
             weights=weights,
-            hard={"max_slope_deg": max_slope, "slope_radius_m": slope_radius},
+            hard=hard,
             grid=store["grid"],
             cfg=cfg,
         )
@@ -437,6 +535,9 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     result = _with_keepout(result, body)
     sites = rank_sites(result, n=n)
+    if terrain["available"]:
+        for site in sites:
+            site["terrain_1km_fraction"] = float(terrain["array"][site["row"], site["col"]])
     geojson = _artemis_feature_collection(cfg, root)
     overlap = artemis_overlap(sites, geojson, result=result)
     grid = store["grid"]
@@ -445,6 +546,9 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
         "sites": [_site_payload(s) for s in overlap["sites"]],
         "artemis": _artemis_payload(overlap, cfg),
         "illumination_window": window,
+        "terrain_gate": result.terrain_gate["status"],
+        "terrain_gate_detail": result.terrain_gate,
+        "ranking_basis": _ranking_basis(result.terrain_gate),
     }
     if include_png:
         png = render_png(result.combined, cmap="viridis")
@@ -455,12 +559,23 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
 def _scenario(payload: dict, body: ScoreBody | None) -> dict:
     """The illumination window and keep-out behind an exported ranking."""
     keepout = body.keepout.model_dump() if body is not None and body.keepout else None
-    return {"illumination_window": payload["illumination_window"], "keepout": keepout}
+    detail = payload["terrain_gate_detail"]
+    return {
+        "illumination_window": payload["illumination_window"],
+        "keepout": keepout,
+        "terrain_gate": {
+            key: detail.get(key)
+            for key in ("status", "min_fraction", "radius_m", "layer_max_slope_deg", "message")
+        },
+    }
 
 
 def _display_range(cfg: dict, name: str, array: np.ndarray) -> tuple[float, float] | None:
     """Colour range in layer units over the pixels the PNG draws (nanmax blocks):
     finite minimum to the configured percentile."""
+    fixed = cfg["layers"][name].get("display_range")
+    if fixed is not None:
+        return float(fixed[0]), float(fixed[1])
     shown = displayed(array)
     finite = shown[np.isfinite(shown)]
     if finite.size == 0:
@@ -477,7 +592,10 @@ def _display_only_png(cfg: dict, name: str, array: np.ndarray, store: dict) -> R
     if name not in ranges:
         ranges[name] = _display_range(cfg, name, array)
     span = ranges[name]
-    headers = {"X-Anuma-Display-Only": "true", "X-Anuma-Range-Basis": "displayed-block-max"}
+    if is_gate_layer(cfg, name):
+        headers = {"X-Anuma-Gate-Layer": "true", "X-Anuma-Range-Basis": "fixed"}
+    else:
+        headers = {"X-Anuma-Display-Only": "true", "X-Anuma-Range-Basis": "displayed-block-max"}
     if span is None:
         png = render_png(array, cmap="gray")
     else:
@@ -510,6 +628,10 @@ def create_app() -> FastAPI:
         missing = _missing_layers(cfg, root)
         layers = []
         gdir = _paths(cfg, root)["grid"]
+        if missing:
+            terrain = {"available": False, "reason": "grid layers are not ingested", "meta": None}
+        else:
+            terrain = _terrain_layer(cfg, root, _load_store(cfg, root))
         for name, meta in cfg["layers"].items():
             npy = gdir / f"{name}.npy"
             entry = {
@@ -526,6 +648,16 @@ def create_app() -> FastAPI:
                     scored=False,
                     available=npy.is_file(),
                     command=DEM_ERROR_COMMAND if name == "dem_error" else None,
+                )
+            if is_gate_layer(cfg, name):
+                available = name == TERRAIN_LAYER and terrain["available"]
+                entry.update(
+                    label=meta.get("label"),
+                    display_only=False,
+                    gate=True,
+                    scored=False,
+                    available=available,
+                    command=None if available else STAGE_F_COMMAND,
                 )
             layers.append(entry)
         return {
@@ -544,6 +676,8 @@ def create_app() -> FastAPI:
                 "n": int(cfg["scoring"]["n_sites"]),
             },
             "illumination_window": _window_meta(cfg, root),
+            "terrain_gate": _terrain_summary(cfg, terrain),
+            "studies_ranking_basis": STUDIES_RANKING_BASIS,
             "layers": layers,
         }
 
@@ -599,6 +733,14 @@ def create_app() -> FastAPI:
         if name not in cfg["layers"]:
             raise HTTPException(status_code=404, detail=f"Unknown layer {name!r}")
         store = _load_store(cfg, root)
+        if is_gate_layer(cfg, name):
+            terrain = _terrain_layer(cfg, root, store)
+            if name != TERRAIN_LAYER or not terrain["available"]:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"{name} is not available: {terrain['reason']}. {STAGE_F_COMMAND}",
+                )
+            return _display_only_png(cfg, name, terrain["array"], store)
         array = store["layers"].get(name)
         npy = _paths(cfg, root)["grid"] / f"{name}.npy"
         if array is None and is_display_only(cfg, name) and npy.is_file():
