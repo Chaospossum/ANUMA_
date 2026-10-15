@@ -34,11 +34,11 @@
   var selectedRank = null;
   var currentSites = null;
   var currentRadius = 0;
-  // Monte Carlo top-10 frequency by "row:col", and the Stage B 20 m checks.
+  // Monte Carlo top-10 frequency by "row:col", and the 20 m flat-ground checks.
   var stability = null;
   var stabilityById = {};
   var checks = null;
-  // Stage D DEM-noise verdicts, matched by exact "row:col".
+  // DEM-noise verdicts, matched by exact "row:col".
   var noiseChecks = null;
   // Cited Artemis III points from /artemis3.geojson, fetched once.
   var artemisGeojson = null;
@@ -119,10 +119,6 @@
     windowNote: document.getElementById("window-note"),
     windowReset: document.getElementById("window-reset"),
   };
-
-  function fmt(n) {
-    return Number(n).toFixed(2);
-  }
 
   function fmtLat(lat) {
     return Math.abs(lat).toFixed(4) + "°" + (lat <= 0 ? "S" : "N");
@@ -235,10 +231,11 @@
   // layer has a scoring mode, so black is the worse end.
   function updateLegend(name) {
     if (name === "score") {
-      els.legendTitle.textContent = "Combined score";
+      els.legendTitle.textContent = "Combined score (0–1)";
       els.legendBar.style.background = VIRIDIS;
-      els.legendLow.textContent = "low";
-      els.legendHigh.textContent = "high";
+      var range = lastScore && lastScore.score_range;
+      els.legendLow.textContent = range ? range[0].toFixed(2) : "low";
+      els.legendHigh.textContent = range ? range[1].toFixed(2) : "high";
       els.legendNote.textContent = "no colour (grey terrain) = fails slope rule";
       return;
     }
@@ -283,9 +280,10 @@
     els.legendTitle.textContent =
       layerLabel(name) + unit + (months ? " · " + windowLabel(months) : "");
     els.legendBar.style.background = GREY;
-    if (info.mode === "lower_better") {
-      els.legendLow.textContent = "high";
-      els.legendHigh.textContent = "low";
+    // Normalised layers run 0 (worse) to 1 (better).
+    if (info.mode) {
+      els.legendLow.textContent = "0 worse";
+      els.legendHigh.textContent = "1 better";
     } else {
       els.legendLow.textContent = "low";
       els.legendHigh.textContent = "high";
@@ -720,7 +718,8 @@
     renderCards();
     // Keep the site visible above a floating card.
     if (document.body.classList.contains("cards-float")) {
-      map.panBy([0, els.cards.offsetHeight / 2], { animate: false });
+      // The floating cards take at most 62 % of the map height (see style.css).
+      map.panBy([0, (0.62 * map.getSize().y) / 2], { animate: false });
     }
   }
 
@@ -1461,7 +1460,7 @@
     updateKeepoutNote();
   }
 
-  // ---- Stage E month window
+  // ---- Sunlight month window
 
   function monthText(value) {
     var parts = value.split("-");
@@ -1526,7 +1525,9 @@
     if (spec.available === false) {
       note += "Daily sunlight data not available on this machine.";
     } else if (months) {
-      note += "Using Stage E daily sunlight, " + windowLabel(months) + ".";
+      note +=
+        "Using modelled daily sunlight for " + windowLabel(months) +
+        " (horizon model validated against the NASA average map, RMSE 0.02).";
     } else {
       note += "Using the " + (spec.default_label || "published map") + ".";
     }
@@ -1584,7 +1585,7 @@
   }
 
   async function downloadRanking(path, filename) {
-    if (showKeepoutError()) {
+    if (showKeepoutError() || showWeightsError()) {
       return;
     }
     var response = await fetch(path, {
@@ -1626,10 +1627,28 @@
     syncSliderLabels();
   }
 
+  // Each slider shows its share of the total, the weight the score uses.
   function syncSliderLabels() {
-    els.illumVal.textContent = fmt(els.illum.value);
-    els.hydroVal.textContent = fmt(els.hydro.value);
-    els.earthVal.textContent = fmt(els.earth.value);
+    var shares = normalisedWeights(currentWeights());
+    els.illumVal.textContent = Math.round(100 * shares.illumination) + " %";
+    els.hydroVal.textContent = Math.round(100 * shares.hydrogen) + " %";
+    els.earthVal.textContent = Math.round(100 * shares.earth_visibility) + " %";
+    showWeightsError();
+  }
+
+  function weightsError() {
+    var w = currentWeights();
+    return w.illumination + w.hydrogen + w.earth_visibility > 0
+      ? ""
+      : "All weights are zero. Set at least one above 0.";
+  }
+
+  function showWeightsError() {
+    var message = weightsError();
+    var box = document.getElementById("weights-error");
+    box.textContent = message;
+    box.hidden = !message;
+    return message;
   }
 
   function fillLayerSelect(info) {
@@ -1706,7 +1725,7 @@
   // single layer on the map and refreshes it instead of switching to score.
   async function runScore(options) {
     var keepLayer = options && options.keepLayer && els.layer.value !== "score";
-    if (showKeepoutError()) {
+    if (showKeepoutError() || showWeightsError()) {
       return;
     }
     var seq = ++scoreSeq;

@@ -31,8 +31,9 @@
         <section class="panel panel-form" id="rail" aria-label="Scenario">
           <form id="score-form" onsubmit="return false;">
             <div class="rail-scroll">
+            <p class="help weights-help">Weights are relative; the score uses each one's share of the total.</p>
             <div class="field">
-              <label for="w-illum">Illumination</label>
+              <label for="w-illum">Sunlight</label>
               <div class="control-row">
                 <input id="w-illum" type="range" min="0" max="1" step="0.01" value="0.5" />
                 <span class="val mono" id="w-illum-val">0.50</span>
@@ -46,12 +47,13 @@
               </div>
             </div>
             <div class="field">
-              <label for="w-earth">Earth visibility</label>
+              <label for="w-earth">Earth view</label>
               <div class="control-row">
                 <input id="w-earth" type="range" min="0" max="1" step="0.01" value="0.2" />
                 <span class="val mono" id="w-earth-val">0.20</span>
               </div>
             </div>
+            <p class="help error" id="weights-error" role="alert" hidden></p>
             <div class="field">
               <div class="field-pair">
                 <div>
@@ -217,9 +219,9 @@
       </div>
 
       <footer class="status" id="status">
-        <span>Layers: LDEM_80S_20MPP_ADJ (slope), AVGVISIB_65S_240M_201608,
-        Lunar Prospector hydrogenhd, Earth visibility from DEM. Artemis III
-        centres are unpublished.</span>
+        <span><b>Not modelled:</b> thermal, rocks/craters &lt; 20 m, comms windows, rover traverse.
+        Layers: LOLA LDEM_80S_20MPP_ADJ (slope), AVGVISIB_65S_240M_201608 (sunlight),
+        Lunar Prospector hydrogen, Earth view from the DEM.</span>
         <span class="disclaimer">Independent student project. Not affiliated with or
         endorsed by ispace, ESA, or the MAGPIE mission team.</span>
       </footer>

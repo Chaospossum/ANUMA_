@@ -482,6 +482,28 @@ def _with_keepout(result, body: ScoreBody | None):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+ALL_ZERO_WEIGHTS = (
+    "All weights are zero. Set at least one of illumination, hydrogen or "
+    "Earth visibility above 0."
+)
+
+
+def _normalised_weights(weights: dict[str, float]) -> dict[str, float]:
+    """Divide by the sum, so scores stay on 0..1 and 1:1 means the same as 0.5:0.5."""
+    total = float(sum(weights.values()))
+    if not total > 0.0:
+        raise HTTPException(status_code=400, detail=ALL_ZERO_WEIGHTS)
+    return {name: float(value) / total for name, value in weights.items()}
+
+
+def _score_range(combined: np.ndarray) -> list[float] | None:
+    """Finite min and max of the score, the colour range of the score PNG."""
+    finite = combined[np.isfinite(combined)]
+    if finite.size == 0:
+        return None
+    return [float(finite.min()), float(finite.max())]
+
+
 def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
     cfg = _cfg()
     root = data_root()
@@ -492,6 +514,7 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
         weights = scored_weights(weights, cfg)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    weights = _normalised_weights(weights)
     max_slope = (
         body.hard.max_slope_deg
         if body.hard is not None and body.hard.max_slope_deg is not None
@@ -550,6 +573,8 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
         "terrain_gate": result.terrain_gate["status"],
         "terrain_gate_detail": result.terrain_gate,
         "ranking_basis": _ranking_basis(result.terrain_gate),
+        "weights_used": weights,
+        "score_range": _score_range(result.combined),
     }
     if include_png:
         png = render_png(result.combined, cmap="viridis")
@@ -663,7 +688,7 @@ def _display_only_png(cfg: dict, name: str, array: np.ndarray, store: dict) -> R
 def create_app() -> FastAPI:
     app = FastAPI(
         title="ANUMA",
-        description="Lunar south-pole landing-site scoring for MAGPIE.",
+        description="Lunar south-pole landing-site screening.",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,

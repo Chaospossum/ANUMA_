@@ -750,3 +750,48 @@ def test_site_month_window_uses_cube(window_client):
     assert client.get(f"/site/{row}/{col}?start=2027-02").status_code == 400
     assert client.get(f"/site/{row}/{col}?start=2027-03&end=2027-02").status_code == 400
     assert client.get(f"/site/{row}/{col}?start=2020-01&end=2020-02").status_code == 400
+
+
+# ------------------------------------------------- weight normalisation
+
+
+def test_weights_are_normalised_to_sum_one(client_ingested: TestClient):
+    base = {"illumination": 0.5, "hydrogen": 0.3, "earth_visibility": 0.2}
+    scaled = {name: 4.0 * value for name, value in base.items()}
+    a = client_ingested.post("/score", json={"weights": base}).json()
+    b = client_ingested.post("/score", json={"weights": scaled}).json()
+    # Same ratios, same ranking and the same 0..1 scores.
+    assert [(s["row"], s["col"]) for s in a["sites"]] == [(s["row"], s["col"]) for s in b["sites"]]
+    for x, y in zip(a["sites"], b["sites"]):
+        assert y["total"] == pytest.approx(x["total"])
+        assert y["contributions"] == pytest.approx(x["contributions"])
+    assert b["weights_used"] == pytest.approx(base)
+    assert sum(b["weights_used"].values()) == pytest.approx(1.0)
+    assert all(0.0 <= s["total"] <= 1.0 + 1e-6 for s in b["sites"])
+
+
+def test_unnormalised_weights_in_exports_match_score(client_ingested: TestClient):
+    body = {"weights": {"illumination": 2.0, "hydrogen": 1.0, "earth_visibility": 1.0}}
+    sites = client_ingested.post("/score", json=body).json()["sites"]
+    text = client_ingested.post("/score.csv", json=body).text
+    rows = list(csv.DictReader(line for line in text.splitlines() if not line.startswith("#")))
+    assert [float(r["score"]) for r in rows] == pytest.approx([s["total"] for s in sites])
+
+
+def test_all_zero_weights_are_rejected(client_ingested: TestClient):
+    zero = {"illumination": 0.0, "hydrogen": 0.0, "earth_visibility": 0.0}
+    for path in ("/score", "/score.csv", "/score.geojson"):
+        response = client_ingested.post(path, json={"weights": zero})
+        assert response.status_code == 400
+        assert "All weights are zero" in response.json()["detail"]
+
+
+def test_score_range_is_reported(client_ingested: TestClient):
+    body = client_ingested.post("/score", json={}).json()
+    low, high = body["score_range"]
+    totals = [s["total"] for s in body["sites"]]
+    assert low <= min(totals) and max(totals) == pytest.approx(high)
+
+
+def test_api_description_is_neutral():
+    assert "MAGPIE" not in (app.description or "")

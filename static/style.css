@@ -221,6 +221,10 @@ body.rail-closed .panel-form {
   background: var(--white);
 }
 
+.weights-help {
+  margin: 0 0 10px;
+}
+
 .regions summary {
   font-weight: 500;
   font-size: 0.8rem;
@@ -240,7 +244,7 @@ body.rail-closed .panel-form {
 
 .control-row {
   display: grid;
-  grid-template-columns: 1fr 2.6rem;
+  grid-template-columns: 1fr 3.2rem;
   align-items: center;
   gap: 8px;
 }
@@ -1242,7 +1246,7 @@ body.cards-float .cards {
   right: 8px;
   bottom: 8px;
   z-index: 650;
-  max-height: calc(100% - 16px);
+  max-height: 62%;
   overflow: auto;
   padding: 0;
   grid-template-columns: minmax(0, 1fr);
