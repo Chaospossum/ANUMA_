@@ -498,7 +498,7 @@ Run preflight inside the `cpudev` compute allocation because it hashes the
 staged arrays. Preflight fails closed if Slurm commands are missing, the account association,
 partition, or selected QOS cannot be queried, evidence is stale or unsafe,
 fewer than 0.5 CPU node-hours remain, project quota or filesystem free space
-leaves less than 100 MiB, `myquota` is unavailable, paths are not writable, the
+leaves less than 100 MiB, `myquota` is unavailable (except Stage D inside an allocation), paths are not writable, the
 repository is dirty, source/derived data is absent, or an input checksum/shape
 is wrong. It does not call `sbatch`.
 
