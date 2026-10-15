@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
 import numpy as np
@@ -15,7 +14,7 @@ from anuma.api import STAGE_F_COMMAND, app, clear_cache
 from anuma.config import load_config
 from anuma.grid import Grid
 from anuma.score import hard_mask, rank_sites, score, scored_weights, terrain_gate
-from tests.test_api import _pixel, ingested_root  # noqa: F401  (module fixture)
+from tests.test_api import _pixel
 
 LAYER = "terrain_1km_fraction"
 
@@ -162,9 +161,15 @@ def _pinned_inputs() -> dict:
 
 
 @pytest.fixture
-def gated_root(ingested_root, tmp_path) -> Path:  # noqa: F811
+def gated_root(ingested_root, tmp_path) -> Path:
+    # Link the shared read-only layers instead of copying ~100 MB per test;
+    # each test writes its own gate layer into its own grid directory.
     root = tmp_path / "gated"
-    shutil.copytree(ingested_root, root)
+    for source in ingested_root.rglob("*"):
+        if source.is_file():
+            target = root / source.relative_to(ingested_root)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.symlink_to(source)
     return root
 
 

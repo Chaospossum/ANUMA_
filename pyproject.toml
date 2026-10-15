@@ -44,3 +44,7 @@ include = ["anuma*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Full-grid fixtures are hundreds of MB and /tmp is often a small tmpfs:
+# keep temp directories only for failed tests, and only for the last run.
+tmp_path_retention_count = 1
+tmp_path_retention_policy = "failed"

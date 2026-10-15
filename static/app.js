@@ -58,6 +58,8 @@
   var keepoutLayer = null;
   var cardsClosed = false;
   var cardsSeq = 0;
+  // The user's last setting of the 20 m rule switch, kept while it is disabled.
+  var terrainChoice = null;
   var MAX_MONTHS = 600;
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -569,16 +571,14 @@
     return (noiseChecks && noiseChecks.threshold) || 0.5;
   }
 
-  // The per-site gate-layer value from /score, when that layer was built
-  // for the slope limit of the current request; otherwise null.
+  // The per-site gate-layer value from /score, or null.
   function layerFraction(site) {
     var detail = lastScore && lastScore.terrain_gate_detail;
     if (site.terrain_1km_fraction == null || !detail || !lastRequest) {
       return null;
     }
-    if (Number(detail.layer_max_slope_deg) !== Number(lastRequest.hard.max_slope_deg)) {
-      return null;
-    }
+    // A terrain property at the layer's slope limit, valid whatever the
+    // request's max slope; only whether the gate applies depends on that.
     return site.terrain_1km_fraction;
   }
 
@@ -634,6 +634,20 @@
     return checkStatus(site) === "pass";
   }
 
+  // "1 pt short of 50 %" for a fail, "" for a pass.
+  function flatShortfall(value) {
+    var gap = 100 * (flatThreshold() - value);
+    if (!(gap > 0)) {
+      return "";
+    }
+    return (gap < 1 ? "under 1 pt" : Math.round(gap) + " pt") + " short of " +
+      Math.round(100 * flatThreshold()) + " %";
+  }
+
+  function flatSlopeHint() {
+    return scenarioNow().slopeChanged ? " (checked at 8°)" : "";
+  }
+
   function flatCell(site) {
     var value = flatFraction(site);
     if (value == null) {
@@ -644,7 +658,8 @@
     return verdictHtml(
       pass ? "pass" : "fail",
       pct,
-      (pass ? "passes" : "fails") + ": " + pct + " of 20 m pixels within 1 km are ≤ 8°"
+      (pass ? "passes" : "fails, " + flatShortfall(value)) + ": " + pct +
+        " of 20 m pixels within 1 km are ≤ 8°" + flatSlopeHint()
     );
   }
 
@@ -685,14 +700,15 @@
       return "not checked";
     }
     var kind = noiseKind(found);
-    var pass = (100 * found.pass_rate).toFixed(0) + " % of " + noiseChecks.draws + " draws pass";
+    var passing = Math.round(found.pass_rate * noiseChecks.draws);
     if (kind === "pass") {
-      return "passes in every one of " + noiseChecks.draws + " DEM-noise draws";
+      return "passes in " + passing + "/" + noiseChecks.draws + " DEM-noise draws";
     }
     if (kind === "fail") {
-      return "fails in every one of " + noiseChecks.draws + " DEM-noise draws";
+      return "fails in " + noiseChecks.draws + "/" + noiseChecks.draws + " DEM-noise draws";
     }
-    return "borderline: " + pass + (found.noise_unstable ? "; sits on the 50 % line" : "");
+    return "borderline: passes in " + passing + "/" + noiseChecks.draws + " DEM-noise draws" +
+      (found.noise_unstable ? "; sits on the 50 % line" : "");
   }
 
   function noiseCell(site) {
@@ -940,7 +956,7 @@
       out += fact(
         "Flat ground 1 km",
         verdictHtml(pass ? "pass" : "fail", "") + " " + Math.round(100 * flat) +
-          " % of 20 m pixels ≤ 8° — " + (pass ? "passes" : "fails") + " the 50 % rule" +
+          " % of 20 m pixels ≤ 8° — " + (pass ? "passes the 50 % rule" : "fails, " + flatShortfall(flat)) +
           (card.scenario.slopeChanged ? ' <span class="na">(checked at 8°)</span>' : "")
       );
     }
@@ -1119,7 +1135,9 @@
       var top = offsets[index][1] - size.h / 2;
       L.marker([site.lat, site.lon], {
         icon: L.divIcon({
-          className: "site-mark" + (selectedRank === index ? " active" : ""),
+          className:
+            "site-mark" + (selectedRank === index ? " active" : "") +
+            (els.onlyPassing.checked && !passesAll(site) ? " dim" : ""),
           html:
             '<svg class="site-leader" width="1" height="1"><line x1="0" y1="0" x2="' +
             offsets[index][0] + '" y2="' + offsets[index][1] + '"></line></svg>' +
@@ -1217,7 +1235,7 @@
     var empty = document.createElement("tr");
     empty.className = "filter-empty";
     empty.innerHTML =
-      '<td colspan="' + columnCount() + '">No site in this list passes all checks run on it.</td>';
+      '<td colspan="' + columnCount() + '">No site in this list passes every check run on it.</td>';
     els.sites.appendChild(empty);
     syncFilter();
     drawMarkers();
@@ -1229,6 +1247,9 @@
     var empty = els.sites.querySelector(".filter-empty");
     if (empty) {
       empty.hidden = !on || els.sites.querySelectorAll("tr.passes-all").length > 0;
+    }
+    if (map) {
+      drawMarkers();
     }
   }
 
@@ -1300,7 +1321,8 @@
         "Built for max slope " + built + "° only; set max slope to " + built + "° to use it.";
     } else {
       if (els.terrain.disabled) {
-        els.terrain.checked = !!gate.enabled_by_default;
+        // Back from disabled: restore the user's last choice, else the default.
+        els.terrain.checked = terrainChoice != null ? terrainChoice : !!gate.enabled_by_default;
       }
       els.terrain.disabled = false;
       els.terrainNote.textContent =
@@ -1440,8 +1462,8 @@
     }
     var pass = value >= flatThreshold();
     return (
-      Math.round(100 * value) + " % flat ground within 1 km (20 m; " +
-      (pass ? "passes" : "fails") + " the 50 % rule)"
+      Math.round(100 * value) + " % flat ground within 1 km (20 m" + flatSlopeHint() + "; " +
+      (pass ? "passes the 50 % rule" : "fails — " + flatShortfall(value)) + ")"
     );
   }
 
@@ -1470,7 +1492,11 @@
     var detail = payload.terrain_gate_detail || {};
     var status = typeof gate === "string" ? gate : gate.status;
     if (status === "applied") {
-      var removed = detail.cells_removed != null ? "; " + Number(detail.cells_removed).toLocaleString("en") + " cells removed" : "";
+      var removed =
+        detail.cells_removed != null
+          ? "; " + Number(detail.cells_removed).toLocaleString("en") +
+            (Number(detail.cells_removed) === 1 ? " cell" : " cells") + " removed"
+          : "";
       return (
         "20 m flat-ground rule: on (≥ " + Math.round(100 * (detail.min_fraction == null ? 0.5 : detail.min_fraction)) +
         " % flat within " + ((detail.radius_m || 1000) / 1000) + " km" + removed + ")"
@@ -1500,8 +1526,8 @@
       return false;
     });
     if (index === 0) {
-      return prefix + "<b>#1 also passes all checks</b> (20 m flat ground" +
-        (noiseCheck(sites[0]) ? ", DEM-noise" : "") + ").";
+      return prefix + "<b>#1 also passes every check run on it</b> (20 m flat ground" +
+        (noiseCheck(sites[0]) ? ", DEM-noise" : "; DEM-noise not run") + ").";
     }
     if (index > 0) {
       var site = sites[index];
@@ -1511,9 +1537,9 @@
         parts.push(Math.round(100 * flat) + " % flat ground within 1 km (20 m)");
       }
       var noise = noiseCheck(site);
-      parts.push(noise ? noiseWords(noise) : "DEM-noise not checked");
+      parts.push(noise ? noiseWords(noise) : "DEM-noise not run");
       return (
-        prefix + "<b>Best site that passes all checks: #" + (index + 1) + " " + placeName(site) +
+        prefix + "<b>Best site that passes every check run on it: #" + (index + 1) + " " + placeName(site) +
         "</b> — " + escapeHtml(parts.join(", ")) + "."
       );
     }
@@ -1524,7 +1550,7 @@
       return prefix + "No ranked site here has had the 20 m flat-ground check, so none can be called passing.";
     }
     return (
-      prefix + "<b>No ranked site passes all checks</b>: " + checked + " of " + sites.length +
+      prefix + "<b>No ranked site passes every check run on it</b>: " + checked + " of " + sites.length +
       " were checked and each fails flat ground or DEM-noise; the rest are not checked."
     );
   }
@@ -2297,7 +2323,10 @@
       onWindowChange("end");
     });
     els.windowReset.addEventListener("click", resetWindow);
-    els.terrain.addEventListener("change", scheduleScore);
+    els.terrain.addEventListener("change", function () {
+      terrainChoice = els.terrain.checked;
+      scheduleScore();
+    });
     ["input", "change"].forEach(function (type) {
       els.slope.addEventListener(type, updateTerrainToggle);
     });
@@ -2373,6 +2402,7 @@
     }
     if (PARAMS.get("terrain") && !els.terrain.disabled) {
       els.terrain.checked = PARAMS.get("terrain") === "1";
+      terrainChoice = els.terrain.checked;
       changed = true;
     }
     if (PARAMS.get("keepout")) {

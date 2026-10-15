@@ -21,52 +21,12 @@ from anuma.api import INGEST_COMMAND, app, clear_cache
 from anuma.config import load_config, repo_root
 from anuma.daily_lit import DailyLitCube
 from anuma.grid import Grid
-from anuma.ingest import write_artemis_geojson
 from tests.test_daily_lit import _write_synthetic_output
 
 
 def _pixel(grid: Grid, lon: float, lat: float) -> tuple[int, int]:
     row, col = grid.to_pixel(lon, lat)
     return int(np.floor(row)), int(np.floor(col))
-
-
-def _empty(shape: tuple[int, int]) -> np.ndarray:
-    return np.full(shape, np.nan, dtype=np.float32)
-
-
-@pytest.fixture(scope="module")
-def ingested_root(tmp_path_factory) -> Path:
-    root = tmp_path_factory.mktemp("anuma_api")
-    cfg = load_config()
-    grid = Grid(cfg)
-    gdir = root / cfg["paths"]["grid"]
-    gdir.mkdir(parents=True)
-    grid.save_json(gdir / "grid.json")
-    shape = (grid.height, grid.width)
-    slope = _empty(shape)
-    illumination = _empty(shape)
-    hydrogen = _empty(shape)
-    earth_visibility = _empty(shape)
-
-    xa, ya = grid.fwd.transform(0.0, -87.0)
-    lon_far, lat_far = grid.inv.transform(xa, ya + 50_000.0)
-    peaks = [
-        (_pixel(grid, 0.0, -87.0), 100.0, 1.0),
-        (_pixel(grid, float(lon_far), float(lat_far)), 80.0, 2.0),
-        (_pixel(grid, 45.0, -87.0), 100.0, 20.0),
-    ]
-    for (row, col), value, slope_deg in peaks:
-        slope[row, col] = slope_deg
-        illumination[row, col] = value
-        hydrogen[row, col] = value
-        earth_visibility[row, col] = value
-
-    np.save(gdir / "slope.npy", slope)
-    np.save(gdir / "illumination.npy", illumination)
-    np.save(gdir / "hydrogen.npy", hydrogen)
-    np.save(gdir / "earth_visibility.npy", earth_visibility)
-    write_artemis_geojson(cfg, root / cfg["paths"]["artemis_geojson"])
-    return root
 
 
 @pytest.fixture
@@ -484,7 +444,7 @@ def test_sites_table_has_noise_column():
     assert "/checks/stage-d-noise.json" in app_js
     assert "check.row === site.row && check.col === site.col" in app_js
     # A tested site with a mixed pass rate is borderline, not untested.
-    assert 'return "borderline: " + pass' in app_js
+    assert 'return "borderline: passes in "' in app_js
     # Verdicts are in a visible legend row, not only in tooltips.
     assert 'id="table-legend"' in html and "not checked</span>" in html
     assert 'id="legend-note">no colour (grey terrain) = fails slope rule' in html
