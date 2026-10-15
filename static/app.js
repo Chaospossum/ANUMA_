@@ -22,6 +22,8 @@
   var stability = null;
   var stabilityById = {};
   var checks = null;
+  // Stage D DEM-noise verdicts, matched by exact "row:col".
+  var noiseChecks = null;
   // Cited Artemis III points from /artemis3.geojson, fetched once.
   var artemisGeojson = null;
   // Only the newest /score and layer request may paint; older replies are dropped.
@@ -367,6 +369,38 @@
     return ' <span class="flag" title="' + title + '" aria-label="' + title + '">⚠</span>';
   }
 
+  // Stage D verdict for the same 240 m cell only; untested sites get a dash.
+  function noiseCell(site) {
+    var found = null;
+    ((noiseChecks && noiseChecks.sites) || []).forEach(function (check) {
+      if (check.row === site.row && check.col === site.col) {
+        found = check;
+      }
+    });
+    if (!found) {
+      return '<span title="Not in the DEM-noise study">–</span>';
+    }
+    var text = noiseChecks.text || {};
+    var symbol;
+    var title;
+    if (found.noise_unstable) {
+      symbol = "≈";
+      title = text.unstable;
+    } else if (found.pass_rate === 1) {
+      symbol = "✓";
+      title = text.stable_pass;
+    } else if (found.pass_rate === 0) {
+      symbol = "✗";
+      title = text.stable_fail;
+    } else {
+      return '<span title="Not in the DEM-noise study">–</span>';
+    }
+    title =
+      title + " (" + Math.round(100 * found.pass_rate) + " % of " + noiseChecks.draws +
+      " draws pass; no noise " + Math.round(100 * found.zero_noise_within_1km) + " %)";
+    return '<span class="noise" title="' + title + '" aria-label="' + title + '">' + symbol + "</span>";
+  }
+
   function renderTableNote() {
     var parts = [];
     if (stability && stability.available) {
@@ -393,6 +427,13 @@
       parts.push(
         "⚠ = " + checks.flag.text + ", job " + checks.source.job +
         "; only the default top 10 were checked."
+      );
+    }
+    if (noiseChecks) {
+      parts.push(
+        "DEM noise: job " + noiseChecks.source.job + ", " + noiseChecks.draws +
+        " draws, LOLA PGDA 90 height error; ✓ passes / ✗ fails the 50 %/1 km rule in every draw," +
+        " ≈ on the 50 % line, – = not tested."
       );
     }
     els.tableNote.textContent = parts.join(" ");
@@ -571,6 +612,8 @@
         contribCell(contrib.earth_visibility) +
         '</td><td class="num">' +
         stabilityCell(site) +
+        '</td><td class="noise-cell">' +
+        noiseCell(site) +
         '</td><td class="wrap">' +
         artemisCell(site) +
         "</td>";
@@ -1122,6 +1165,12 @@
       checks = checkResponse.ok ? await checkResponse.json() : null;
     } catch (err) {
       checks = null;
+    }
+    try {
+      var noiseResponse = await fetch("/checks/stage-d-noise.json");
+      noiseChecks = noiseResponse.ok ? await noiseResponse.json() : null;
+    } catch (err) {
+      noiseChecks = null;
     }
   }
 

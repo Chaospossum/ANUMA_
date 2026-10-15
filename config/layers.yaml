@@ -72,6 +72,8 @@ stability:
   note: "weights varied ±0.1, default normalisation; legacy_global_2_98 picks a different winner"
   # Committed 20 m slope check for the default top 10, read from the repo.
   stage_b_checks: data/checks/stage-b-1km.json
+  # Committed Stage D DEM-noise verdicts (job 5345050), read from the repo.
+  stage_d_checks: data/checks/stage-d-noise.json
 
 # Month window for the Stage E illumination scenario in /score and the layer view.
 # End month is inclusive. Outside this range the request is rejected.

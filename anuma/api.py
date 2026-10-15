@@ -643,6 +643,13 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Stage B check file is missing")
         return JSONResponse(json.loads(path.read_text()))
 
+    @app.get("/checks/stage-d-noise.json")
+    def get_stage_d_checks() -> JSONResponse:
+        path = repo_root() / _cfg()["stability"]["stage_d_checks"]
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Stage D check file is missing")
+        return JSONResponse(json.loads(path.read_text()))
+
     @app.get("/artemis3.geojson")
     def get_artemis_geojson() -> JSONResponse:
         cfg = _cfg()

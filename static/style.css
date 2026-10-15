@@ -545,6 +545,14 @@ select {
   cursor: help;
 }
 
+.sites-table .noise-cell {
+  text-align: center;
+}
+
+.noise {
+  cursor: help;
+}
+
 .table-note {
   margin: 0;
   padding: 6px 8px 8px;

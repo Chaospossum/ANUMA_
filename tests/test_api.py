@@ -442,6 +442,48 @@ def test_stage_b_checks_file_schema(client_empty: TestClient):
     assert set(flagged) == {2, 7, 10}
 
 
+def test_stage_d_noise_file_schema(client_empty: TestClient):
+    cfg = load_config()
+    on_disk = json.loads((repo_root() / cfg["stability"]["stage_d_checks"]).read_text())
+    response = client_empty.get("/checks/stage-d-noise.json")
+    assert response.status_code == 200
+    body = response.json()
+    assert body == on_disk
+    assert body["source"]["job"] == "5345050"
+    assert body["draws"] == 200
+    assert body["threshold"] == 0.5
+    assert set(body["text"]) == {"stable_pass", "stable_fail", "unstable"}
+    assert [site["default_rank"] for site in body["sites"]] == [1, 2, 3, 8, 9, 10, 11, 12]
+    for site in body["sites"]:
+        assert site["site_id"] == f"{site['row']}:{site['col']}"
+        assert 0.0 <= site["pass_rate"] <= 1.0
+        # The UI shows a tick or cross only for an all-or-nothing stable site.
+        if not site["noise_unstable"]:
+            assert site["pass_rate"] in (0.0, 1.0)
+    unstable = [site["default_rank"] for site in body["sites"] if site["noise_unstable"]]
+    passing = [site["default_rank"] for site in body["sites"] if site["pass_rate"] == 1.0]
+    assert unstable == [8]
+    assert passing == [3]
+
+
+def test_stage_d_noise_file_missing_is_404(client_empty: TestClient, monkeypatch):
+    import anuma.api as api
+
+    cfg = load_config()
+    cfg["stability"]["stage_d_checks"] = "data/checks/no-such-file.json"
+    monkeypatch.setattr(api, "_cfg", lambda: cfg)
+    response = client_empty.get("/checks/stage-d-noise.json")
+    assert response.status_code == 404
+
+
+def test_sites_table_has_noise_column():
+    html = (repo_root() / "static" / "index.html").read_text()
+    app_js = (repo_root() / "static" / "app.js").read_text()
+    assert ">Noise</th>" in html
+    assert "/checks/stage-d-noise.json" in app_js
+    assert "check.row === site.row && check.col === site.col" in app_js
+
+
 def _artemis_points(client: TestClient, lists: set[str]) -> list[dict]:
     """Keep-out points as the GUI builds them from the served GeoJSON."""
     features = client.get("/artemis3.geojson").json()["features"]
