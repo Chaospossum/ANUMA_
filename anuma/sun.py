@@ -337,6 +337,59 @@ def _row_blocks(row_count: int, workers: int) -> list[tuple[int, int]]:
     return blocks
 
 
+def _local_frames(
+    longitude: np.ndarray, latitude: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """East, north, and up unit vectors in MOON_ME for every pixel."""
+    lon = np.deg2rad(longitude)
+    lat = np.deg2rad(latitude)
+    east = np.stack((-np.sin(lon), np.cos(lon), np.zeros_like(lon)))
+    north = np.stack(
+        (-np.sin(lat) * np.cos(lon), -np.sin(lat) * np.sin(lon), np.cos(lat))
+    )
+    up = np.stack(
+        (np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat))
+    )
+    return east, north, up
+
+
+def _lit_mask(
+    vector: np.ndarray,
+    horizons: np.ndarray,
+    longitude: np.ndarray,
+    frames: tuple[np.ndarray, np.ndarray, np.ndarray],
+    *,
+    disk_radius_deg: float,
+    azimuth_origin_deg: float,
+) -> np.ndarray:
+    """Boolean lit mask for one Sun direction. The single ANUMA lit rule."""
+    east, north, up = frames
+    azimuth_count = horizons.shape[0]
+    east_component = np.einsum("i,ijk->jk", vector, east)
+    north_component = np.einsum("i,ijk->jk", vector, north)
+    up_component = np.einsum("i,ijk->jk", vector, up)
+    azimuth = np.mod(
+        np.rad2deg(np.arctan2(east_component, north_component)), 360.0
+    )
+    # The horizon cube is indexed clockwise from grid +y. On the south
+    # polar stereographic grid (lon_0 = 0) local north at longitude L
+    # points along grid azimuth L, so grid azimuth = local azimuth + L.
+    grid_azimuth = azimuth + longitude
+    index = np.rint(
+        np.mod(grid_azimuth - azimuth_origin_deg, 360.0)
+        * azimuth_count
+        / 360.0
+    ).astype(np.int64) % azimuth_count
+    terrain = np.take_along_axis(horizons, index[None, ...], axis=0)[0]
+    elevation = np.rad2deg(np.arcsin(np.clip(up_component, -1.0, 1.0)))
+    # PDS AVGVISIB: a timestep is lit when any fraction of the solar disc
+    # is above the horizon. Do not average the visible-disc area.
+    visible_fraction = sun_disk_visible_fraction(
+        elevation, terrain, disk_radius_deg
+    )
+    return visible_fraction > 0.0
+
+
 def _advance_sunlight_block(
     horizons: np.ndarray,
     longitude: np.ndarray,
@@ -350,43 +403,19 @@ def _advance_sunlight_block(
     azimuth_origin_deg: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Advance one row tile. Darkness state does not cross rows."""
-    lon = np.deg2rad(longitude)
-    lat = np.deg2rad(latitude)
-    east = np.stack((-np.sin(lon), np.cos(lon), np.zeros_like(lon)))
-    north = np.stack(
-        (-np.sin(lat) * np.cos(lon), -np.sin(lat) * np.sin(lon), np.cos(lat))
-    )
-    up = np.stack(
-        (np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat))
-    )
+    frames = _local_frames(longitude, latitude)
     total = np.array(total, dtype=np.float64, copy=True)
     current_dark = np.array(current_dark, dtype=np.int64, copy=True)
     longest_dark = np.array(longest_dark, dtype=np.int64, copy=True)
-    azimuth_count = horizons.shape[0]
     for vector in vectors:
-        east_component = np.einsum("i,ijk->jk", vector, east)
-        north_component = np.einsum("i,ijk->jk", vector, north)
-        up_component = np.einsum("i,ijk->jk", vector, up)
-        azimuth = np.mod(
-            np.rad2deg(np.arctan2(east_component, north_component)), 360.0
+        lit = _lit_mask(
+            vector,
+            horizons,
+            longitude,
+            frames,
+            disk_radius_deg=disk_radius_deg,
+            azimuth_origin_deg=azimuth_origin_deg,
         )
-        # The horizon cube is indexed clockwise from grid +y. On the south
-        # polar stereographic grid (lon_0 = 0) local north at longitude L
-        # points along grid azimuth L, so grid azimuth = local azimuth + L.
-        grid_azimuth = azimuth + longitude
-        index = np.rint(
-            np.mod(grid_azimuth - azimuth_origin_deg, 360.0)
-            * azimuth_count
-            / 360.0
-        ).astype(np.int64) % azimuth_count
-        terrain = np.take_along_axis(horizons, index[None, ...], axis=0)[0]
-        elevation = np.rad2deg(np.arcsin(np.clip(up_component, -1.0, 1.0)))
-        # PDS AVGVISIB: a timestep is lit when any fraction of the solar disc
-        # is above the horizon. Do not average the visible-disc area.
-        visible_fraction = sun_disk_visible_fraction(
-            elevation, terrain, disk_radius_deg
-        )
-        lit = visible_fraction > 0.0
         total += lit
         dark = ~lit
         current_dark = np.where(dark, current_dark + 1, 0)

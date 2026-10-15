@@ -170,8 +170,11 @@ are present and were SHA-256 verified twice. Digests stay in that manifest.
 `.venv-hpc-sun` is built. An operator-reported geometry sanity check says
 south-pole Sun elevation over calendar 2029 stays within ±1.53°. No Slurm job
 id was supplied for that check. It is not the AVGVISIB validation gate and not
-a scored illumination result. The RMSE 0.05 gate against
-`avgvisib_65s_240m_201608` remains unrun and blocking.
+a scored illumination result.
+
+Update, 13 October 2026: the RMSE 0.05 gate against
+`avgvisib_65s_240m_201608` passed in job `5334265` (RMSE 0.0198). See
+[stage-a-result.md](stage-a-result.md).
 
 ## Stage B — full-cap 20 m slope and ranking comparison
 
@@ -285,6 +288,16 @@ the need. It does not scale across nodes.
   frozen and justified.
 - Reject more than one node, more than 128 workers, walltime over 50 hours, or
   any full-cap slope rerun per Monte Carlo draw.
+
+## Stage E — 240 m daily lit hours
+
+Done. Stage E reuses the Stage A horizon cube and lit rule to store sunlit
+hours per UTC day for 2026-01-01 to 2044-09-01, so the web GUI can average any
+date range. Reallocated from the 55 held hours on 15 October 2026 (cap 3.5
+node-hours). Pilot job `5342899` passed in 58 s; production job `5342908`
+completed in 00:50:23 for about 1 node-hour. See
+[stage-e-daily-lit-plan.md](stage-e-daily-lit-plan.md) and
+[stage-e-result.md](stage-e-result.md).
 
 ## Review and release discipline
 

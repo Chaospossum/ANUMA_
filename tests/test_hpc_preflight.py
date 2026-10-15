@@ -163,6 +163,103 @@ def test_stage_b_profiles_fit_one_node_and_forty_hours():
     assert "require_stage_a_acceptance" in wrapper
 
 
+def test_daily_lit_profiles_fit_one_node_and_three_and_a_half_hours():
+    pilot = preflight.JOB_PROFILES["daily-lit-pilot"]
+    production = preflight.JOB_PROFILES["daily-lit"]
+    assert pilot["qos"] == "test"
+    assert pilot["walltime"] == "00:30:00"
+    assert production["qos"] == "default"
+    assert production["walltime"] == "03:00:00"
+    assert production["walltime_minutes"] == 180
+    assert pilot["cpus"] == production["cpus"] == 128
+    assert pilot["memory"] == production["memory"] == "240G"
+    assert pilot["node_hours"] + production["node_hours"] <= 3.5
+    script = (REPO_ROOT / "hpc" / "slurm" / "daily-lit.sbatch").read_text()
+    wrapper = (REPO_ROOT / "hpc" / "submit-daily-lit.sh").read_text()
+    assert "--gpu" not in script.lower()
+    assert "--gpu" not in wrapper.lower()
+    assert "p201619" in wrapper
+    assert "reject_daily_lit_receipt" in wrapper
+    assert "reject_daily_lit_receipt" in script
+    assert "srun --export=ALL" in script
+    assert 'expected_time="03:00:00"' in script
+    assert 'expected_memory_mb="245760"' in script
+    assert '"spice_covers_window": True' in wrapper
+
+
+def test_daily_lit_preflight_pins_stage_a_horizon_and_coverage(tmp_path, monkeypatch):
+    import hashlib
+
+    import numpy as np
+
+    from anuma import daily_lit
+
+    _configured_environment(tmp_path, monkeypatch)
+    monkeypatch.setenv("ANUMA_JOB_PROFILE", "daily-lit-pilot")
+    monkeypatch.setenv("ANUMA_ACCOUNT", "p201619")
+    _write_evidence(
+        Path(os.environ["ANUMA_ALLOCATION_EVIDENCE_FILE"]),
+        {
+            "source": "test fixture",
+            "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+            "account": "p201619",
+            "remaining_cpu_node_hours": 10.0,
+        },
+    )
+    original = preflight.run_checked
+
+    def fake_command(command):
+        if "show assoc" in " ".join(str(item) for item in command):
+            return "cluster|p201619|tester|cpu|test\n"
+        return original(command)
+
+    monkeypatch.setattr(preflight, "run_checked", fake_command)
+    stage_a = tmp_path / "stage-a"
+    stage_a.mkdir()
+    cube = stage_a / "terrain-horizon.npy"
+    np.save(cube, np.zeros((2, 2, 2), dtype=np.float32))
+    (stage_a / "validation-report.json").write_text(
+        json.dumps({"status": "passed", "metrics": {"rmse": 0.02, "stop_rmse": 0.05, "passed": True}})
+    )
+    (stage_a / "output-manifest.json").write_text(
+        json.dumps(
+            {
+                "outputs": {
+                    "terrain-horizon.npy": {
+                        "sha256": hashlib.sha256(cube.read_bytes()).hexdigest(),
+                        "bytes": cube.stat().st_size,
+                    }
+                }
+            }
+        )
+    )
+    kernel = tmp_path / "kernel-manifest.json"
+    kernel.write_text("{}")
+    monkeypatch.setenv("ANUMA_STAGE_A_DIR", str(stage_a))
+    monkeypatch.setenv("ANUMA_KERNEL_MANIFEST", str(kernel))
+    windows = []
+
+    def coverage(kernel_manifest, roles, start, end):
+        windows.append((start, end))
+        return {"covers_window": True, "window": [str(start), str(end)]}
+
+    monkeypatch.setattr(daily_lit, "require_spice_coverage", coverage)
+    receipt = preflight.run_preflight(tmp_path / "receipt-daily-lit.json")
+    assert receipt["job_profile"] == "daily-lit-pilot"
+    assert receipt["daily_lit_mode"] == "pilot"
+    assert receipt["horizon_sha256"] == hashlib.sha256(cube.read_bytes()).hexdigest()
+    assert receipt["spice_covers_window"] is True
+    assert receipt["stage_a_status"] == "passed"
+    assert str(windows[0][0]) == "2026-01-01" and str(windows[0][1]) == "2026-02-02"
+
+    def short(kernel_manifest, roles, start, end):
+        raise ValueError("kernels do not cover the period")
+
+    monkeypatch.setattr(daily_lit, "require_spice_coverage", short)
+    with pytest.raises(RuntimeError, match="do not cover"):
+        preflight.run_preflight(tmp_path / "receipt-daily-lit-short.json")
+
+
 def test_full_monte_carlo_requires_default_qos_and_four_hour_cap(
     tmp_path, monkeypatch
 ):
@@ -193,6 +290,7 @@ def test_preflight_refuses_to_overwrite_receipt(tmp_path, monkeypatch):
         "hpc/slurm/monte-carlo.sbatch",
         "hpc/slurm/sun-validation.sbatch",
         "hpc/slurm/stage-b.sbatch",
+        "hpc/slurm/daily-lit.sbatch",
     ),
 )
 def test_staging_module_regex_uses_one_literal_dot_escape(path):
