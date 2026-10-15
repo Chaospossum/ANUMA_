@@ -137,6 +137,30 @@ def agreement_map(
     return out
 
 
+def hard_masks_240_20(
+    slope_240: np.ndarray,
+    slope_20: np.ndarray,
+    grid: Grid,
+    fine_resolution_m: float,
+    cfg: dict,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Hard masks at both resolutions, each using its own pixel size for the radius."""
+    slope_radius_m = float(cfg["hard"].get("slope_radius_m", 0.0))
+    mask_240 = hard_mask(
+        slope_240,
+        cfg=cfg,
+        slope_radius_m=slope_radius_m,
+        resolution_m=grid.resolution_m,
+    )
+    mask_20 = hard_mask(
+        slope_20,
+        cfg=cfg,
+        slope_radius_m=slope_radius_m,
+        resolution_m=fine_resolution_m,
+    )
+    return mask_240, mask_20
+
+
 def _load_240m_layers(files: dict[str, Path], grid: Grid) -> dict[str, np.ndarray]:
     expected = (grid.height, grid.width)
     layers: dict[str, np.ndarray] = {}
@@ -325,6 +349,9 @@ def run_production(
         raise ValueError("hard max_slope_deg must remain 8.0")
     if str(cfg["scoring"]["default_normalization_policy"]) != "decided_per_layer":
         raise ValueError("default normalization policy must remain decided_per_layer")
+    slope_radius_m = float(cfg["hard"].get("slope_radius_m", 0.0))
+    if not np.isfinite(slope_radius_m) or slope_radius_m < 0.0:
+        raise ValueError("hard slope_radius_m must be finite and non-negative")
 
     dem_path = Path(dem_path)
     transform, height, width = dem_affine(dem_path)
@@ -386,8 +413,13 @@ def run_production(
         np.asarray(slope_20), soft_20, fine_meta, cfg, weights
     )
 
-    mask_240 = hard_mask(layers_240["slope"], cfg=cfg)
-    mask_20 = hard_mask(np.asarray(slope_20), cfg=cfg)
+    mask_240, mask_20 = hard_masks_240_20(
+        layers_240["slope"],
+        np.asarray(slope_20),
+        grid,
+        float(bcfg["dem"]["resolution_m"]),
+        cfg,
+    )
     agree = agreement_map(
         mask_240,
         mask_20,
@@ -434,6 +466,7 @@ def run_production(
             "normalization_policy": cfg["scoring"]["default_normalization_policy"],
             "weights": weights,
             "max_slope_deg": float(cfg["hard"]["max_slope_deg"]),
+            "slope_radius_m": slope_radius_m,
             "soft_layer_sampling": bcfg["soft_layer_sampling"],
             "agreement": bcfg["agreement"],
         },

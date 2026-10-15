@@ -240,6 +240,16 @@ def test_layer_png_greyscale(client_ingested: TestClient):
     np.testing.assert_allclose(rgb[opaque, 1], rgb[opaque, 2], atol=0.08)
 
 
+@pytest.mark.parametrize("name", ["slope", "illumination"])
+def test_layer_png_with_slope_radius(client_ingested: TestClient, monkeypatch, name):
+    cfg = load_config()
+    cfg["hard"]["slope_radius_m"] = 240.0
+    monkeypatch.setattr("anuma.api._cfg", lambda: cfg)
+    response = client_ingested.get(f"/layer/{name}.png")
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("image/png")
+
+
 def test_unknown_layer_is_404(client_ingested: TestClient):
     response = client_ingested.get("/layer/not_a_layer.png")
     assert response.status_code == 404

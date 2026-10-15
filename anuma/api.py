@@ -215,7 +215,7 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
         if body.hard is not None and body.hard.slope_radius_m is not None
         else float(cfg["hard"]["slope_radius_m"])
     )
-    n =body.n if body.n is not None else int(cfg["scoring"]["n_sites"])
+    n = body.n if body.n is not None else int(cfg["scoring"]["n_sites"])
     layers = store["layers"]
     needed = ["slope", *weights.keys()]
     absent = [name for name in needed if name not in layers]
@@ -334,7 +334,11 @@ def create_app() -> FastAPI:
                 mode,
                 layer_name=name,
                 policy=cfg["scoring"]["default_normalization_policy"],
-                valid_mask=hard_mask(store["layers"]["slope"], cfg=cfg),
+                valid_mask=hard_mask(
+                    store["layers"]["slope"],
+                    cfg=cfg,
+                    resolution_m=store["grid"].resolution_m,
+                ),
                 cfg=cfg,
             )
         else:

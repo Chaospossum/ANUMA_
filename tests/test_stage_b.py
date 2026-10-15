@@ -12,10 +12,12 @@ from affine import Affine
 
 from anuma.config import load_config
 from anuma.grid import Grid
+from anuma.score import hard_mask
 from anuma.stage_b import (
     FROZEN_STOP_RMSE,
     agreement_map,
     build_rank_table,
+    hard_masks_240_20,
     load_demo_weights,
     load_stage_b_config,
     require_stage_a_acceptance,
@@ -133,6 +135,45 @@ def test_sample_coarse_to_fine_nearest_and_agreement_map():
         mask_240, mask_fine, fine_transform, Tiny(), valid_20=valid_fine
     )
     assert np.isnan(masked_fine[1, 1])
+
+
+def test_agreement_map_with_slope_radius():
+    # Same nested 3x3 (240 m) and 12x12 (60 m) squares, one steep cell in the middle.
+    class Tiny:
+        width = 3
+        height = 3
+        resolution_m = 240.0
+        affine = Affine(240.0, 0.0, 0.0, 0.0, -240.0, 720.0)
+
+        def pixel_centers(self):
+            cols = np.arange(self.width, dtype=np.float64) + 0.5
+            rows = np.arange(self.height, dtype=np.float64) + 0.5
+            x = self.affine.c + cols * self.affine.a
+            y = self.affine.f + rows * self.affine.e
+            return np.meshgrid(x, y)
+
+    fine_transform = Affine(60.0, 0.0, 0.0, 0.0, -60.0, 720.0)
+    slope_240 = np.ones((3, 3), dtype=np.float32)
+    slope_240[1, 1] = 20.0
+    slope_20 = np.ones((12, 12), dtype=np.float32)
+    slope_20[6, 6] = 20.0
+    cfg = load_config()
+    cfg["hard"]["slope_radius_m"] = 100.0
+    # Without a pixel size the radius cannot be applied.
+    with pytest.raises(ValueError, match="resolution_m"):
+        hard_mask(slope_20, cfg=cfg)
+
+    mask_240, mask_20 = hard_masks_240_20(slope_240, slope_20, Tiny(), 60.0, cfg)
+    # 100 m is less than one 240 m pixel, so only the steep cell fails there.
+    expected_240 = np.ones((3, 3), dtype=bool)
+    expected_240[1, 1] = False
+    assert np.array_equal(mask_240, expected_240)
+    # At 60 m the radius also removes the steep cell's neighbours and the edge ring.
+    assert not mask_20[6, 7] and not mask_20[5, 5] and not mask_20[0, 4]
+    assert mask_20[6, 8] and mask_20[2, 2]
+
+    agree = agreement_map(mask_240, mask_20, fine_transform, Tiny())
+    assert np.array_equal(agree, np.ones((3, 3), dtype=np.float32))
 
 
 def test_build_rank_table_pairs_and_membership():
