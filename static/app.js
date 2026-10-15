@@ -13,13 +13,13 @@
 
   // Hand-placed offline labels: approximate crater centres (deg, east positive).
   var PLACES = [
-    { name: "Shackleton", lat: -89.67, lon: 129.78 },
+    { name: "Shackleton", lat: -89.67, lon: 129.78, nearPole: true },
     { name: "de Gerlache", lat: -88.5, lon: -87.1 },
     { name: "Shoemaker", lat: -88.1, lon: 44.9 },
     { name: "Haworth", lat: -87.45, lon: -5.0 },
     { name: "Faustini", lat: -87.3, lon: 77.0 },
     { name: "Nobile", lat: -85.2, lon: 53.5 },
-    { name: "Malapert", lat: -84.9, lon: 12.9 },
+    { name: "Malapert (crater)", lat: -84.9, lon: 12.9 },
     { name: "Amundsen", lat: -84.5, lon: 82.8 },
   ];
 
@@ -47,7 +47,6 @@
   var layerSeq = 0;
   // Colour range of the last display-only layer PNG, from its response headers.
   var layerRange = null;
-  var initialSiteShown = false;
   // Raw layer values from /site, by "row:col|window".
   var siteValueCache = {};
   // The request behind the table on screen, and how it differs from the defaults.
@@ -58,6 +57,7 @@
   var previousRanks = null;
   var keepoutLayer = null;
   var cardsClosed = false;
+  var cardsSeq = 0;
   var MAX_MONTHS = 600;
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -98,6 +98,9 @@
     tableNote: document.getElementById("table-note"),
     infoButton: document.getElementById("info-button"),
     answerMain: document.getElementById("answer-main"),
+    answerPass: document.getElementById("answer-pass"),
+    onlyPassing: document.getElementById("only-passing"),
+    sitesTable: document.querySelector(".sites-table"),
     cards: document.getElementById("cards"),
     cardsEmpty: document.getElementById("cards-empty"),
     mapFrame: document.getElementById("map-frame"),
@@ -377,9 +380,15 @@
 
   function addPlaceLabels() {
     PLACES.forEach(function (place) {
-      placeLabel(place.name, place.lat, place.lon, "place-label");
+      placeLabel(place.name, place.lat, place.lon, "place-label" + (place.nearPole ? " near-pole" : ""));
     });
-    placeLabel("South Pole", -90, 0, "place-label pole-label");
+    placeLabel("South Pole", -90, 0, "place-label pole-label near-pole");
+    // Below zoom 3 the near-pole labels would sit on the ranked-site labels.
+    var syncZoomClass = function () {
+      map.getContainer().classList.toggle("zoom-lt3", map.getZoom() < 3);
+    };
+    map.on("zoomend", syncZoomClass);
+    syncZoomClass();
   }
 
   function addPoleMarker() {
@@ -543,8 +552,53 @@
 
   // Share of 20 m pixels at or below 8° within 1 km, or null if unchecked.
   function flatFraction(site) {
+    // A per-site value from /score (20 m terrain gate) wins over the study file.
+    if (site.terrain_1km_fraction != null) {
+      return site.terrain_1km_fraction;
+    }
     var check = stageBCheck(site);
     return check ? check.fraction_le_8deg.within_1km : null;
+  }
+
+  // ---- "Passes all checks"
+
+  // True when /score says the 20 m flat-ground rule already filtered the
+  // ranking, so every ranked site passes it by construction.
+  function gateApplied(payload) {
+    var gate = payload && payload.terrain_gate;
+    if (gate == null) {
+      return false;
+    }
+    if (typeof gate === "string") {
+      return gate === "applied";
+    }
+    if (typeof gate === "boolean") {
+      return gate;
+    }
+    if (gate.status != null) {
+      return gate.status === "applied";
+    }
+    return gate.applied === true;
+  }
+
+  // "pass", "fail", or "unchecked" for flat ground plus DEM-noise.
+  function checkStatus(site) {
+    var noise = noiseCheck(site);
+    if (noise && noiseKind(noise) !== "pass") {
+      return "fail";
+    }
+    if (gateApplied(lastScore)) {
+      return "pass";
+    }
+    var flat = flatFraction(site);
+    if (flat == null) {
+      return "unchecked";
+    }
+    return flat >= flatThreshold() ? "pass" : "fail";
+  }
+
+  function passesAll(site) {
+    return checkStatus(site) === "pass";
   }
 
   function flatCell(site) {
@@ -929,6 +983,8 @@
   }
 
   async function renderCards() {
+    // Only the newest call may redraw after its /site fetches return.
+    var seq = ++cardsSeq;
     var list = [];
     if (pinned) {
       list.push({ card: pinned, kind: "pinned" });
@@ -969,6 +1025,9 @@
           });
         })
       );
+      if (seq !== cardsSeq) {
+        return;
+      }
       draw();
     }
   }
@@ -1088,9 +1147,7 @@
     currentSites.forEach(function (site, index) {
       var contrib = site.contributions || {};
       var tr = document.createElement("tr");
-      if (selectedRank === index) {
-        tr.className = "active";
-      }
+      tr.className = (selectedRank === index ? "active " : "") + (passesAll(site) ? "passes-all" : "fails-checks");
       tr.innerHTML =
         '<td class="num rank">' +
         pad2(index + 1) +
@@ -1120,7 +1177,23 @@
       });
       els.sites.appendChild(tr);
     });
+    // Shown only when the filter hides every row.
+    var empty = document.createElement("tr");
+    empty.className = "filter-empty";
+    empty.innerHTML =
+      '<td colspan="' + columnCount() + '">No site in this list passes all checks run on it.</td>';
+    els.sites.appendChild(empty);
+    syncFilter();
     drawMarkers();
+  }
+
+  function syncFilter() {
+    var on = els.onlyPassing.checked;
+    els.sitesTable.classList.toggle("only-passing-on", on);
+    var empty = els.sites.querySelector(".filter-empty");
+    if (empty) {
+      empty.hidden = !on || els.sites.querySelectorAll("tr.passes-all").length > 0;
+    }
   }
 
   // Artemis III regions ranked by the score at their approximate point; the
@@ -1265,18 +1338,21 @@
     }
     return (
       "lit " + Math.round(100 * v) + " % of " +
-      (months ? windowLabel(months) + " (modelled daily)" : "the time")
+      (months ? windowLabel(months) + " (modelled daily)" : "the time (18.6-yr average)")
     );
   }
 
-  function earthWords(values) {
+  function earthWords(values, short) {
     var v = values && values.values ? values.values.earth_visibility : null;
     if (v == null) {
       return "Earth view not checked";
     }
-    return v >= 0
-      ? "Earth " + v.toFixed(1) + "° above the local horizon"
-      : "Earth hidden " + Math.abs(v).toFixed(1) + "° below the local horizon";
+    // Clearance toward the sub-Earth point at zero libration.
+    return (
+      "Earth clearance " + (v < 0 ? "−" : "") + Math.abs(v).toFixed(1) + "°" +
+      (v < 0 ? " (below terrain" : " (") + (v < 0 ? "; " : "") +
+      (short ? "libration not modelled)" : "mean libration; libration not modelled)")
+    );
   }
 
   function flatWords(site, scenario) {
@@ -1315,8 +1391,15 @@
     if (typeof gate === "boolean") {
       return "20 m terrain rule: " + (gate ? "on" : "off");
     }
-    if (typeof gate === "string") {
-      return "20 m terrain rule: " + gate;
+    var status = typeof gate === "string" ? gate : gate.status;
+    var words = {
+      applied: "on",
+      disabled: "off",
+      unavailable: "unavailable",
+      slope_mismatch: "not applied (slope limit differs from the 8° it was built for)",
+    };
+    if (status != null) {
+      return "20 m terrain rule: " + (words[status] || String(status));
     }
     if (gate.available === false) {
       return "20 m terrain rule: unavailable";
@@ -1325,12 +1408,57 @@
     return "20 m terrain rule: " + (on === false ? "off" : "on");
   }
 
+  // Second banner line: the best ranked site that passes every check run on it.
+  function passLine(sites, payload) {
+    var prefix = gateApplied(payload) ? "All ranked sites pass the 20 m flat-ground rule. " : "";
+    var index = -1;
+    sites.some(function (site, i) {
+      if (passesAll(site)) {
+        index = i;
+        return true;
+      }
+      return false;
+    });
+    if (index === 0) {
+      return prefix + "<b>#1 also passes all checks</b> (20 m flat ground" +
+        (noiseCheck(sites[0]) ? ", DEM-noise" : "") + ").";
+    }
+    if (index > 0) {
+      var site = sites[index];
+      var flat = flatFraction(site);
+      var parts = [];
+      if (flat != null) {
+        parts.push(Math.round(100 * flat) + " % flat ground within 1 km (20 m)");
+      }
+      var noise = noiseCheck(site);
+      parts.push(noise ? noiseWords(noise) : "DEM-noise not checked");
+      return (
+        prefix + "<b>Best site that passes all checks: #" + (index + 1) + " " + placeName(site) +
+        "</b> — " + escapeHtml(parts.join(", ")) + "."
+      );
+    }
+    var checked = sites.filter(function (site) {
+      return checkStatus(site) !== "unchecked";
+    }).length;
+    if (!checked) {
+      return prefix + "No ranked site here has had the 20 m flat-ground check, so none can be called passing.";
+    }
+    return (
+      prefix + "<b>No ranked site passes all checks</b>: " + checked + " of " + sites.length +
+      " were checked and each fails flat ground or DEM-noise; the rest are not checked."
+    );
+  }
+
   async function renderAnswer(payload, request, seq) {
     var scenario = scenarioOf(request);
     var meta2 = [];
     meta2.push('<span class="tag">' + escapeHtml(terrainGateText(payload)) + "</span>");
     if (payload.ranking_basis) {
-      meta2.push('<span class="tag">Ranked on: ' + escapeHtml(String(payload.ranking_basis)) + "</span>");
+      var basis = payload.ranking_basis;
+      var basisText = typeof basis === "object" ? basis.basis || basis.note : basis;
+      if (basisText) {
+        meta2.push('<span class="tag">Ranked on: ' + escapeHtml(String(basisText)) + "</span>");
+      }
     }
     meta2.push(
       scenario.isDefault
@@ -1340,6 +1468,7 @@
     );
     els.answerMeta.innerHTML = meta2.join("");
     var best = (payload.sites || [])[0];
+    els.answerPass.innerHTML = best ? passLine(payload.sites, payload) : "";
     if (!best) {
       els.answerMain.textContent = "No site passes the slope rule in this scenario.";
       return;
@@ -1359,7 +1488,7 @@
     els.answerMain.innerHTML =
       head + " — " + [
         sunlightWords(values, months),
-        earthWords(values),
+        earthWords(values, true),
         flatWords(best, scenario),
         robustWords(best, scenario),
       ].join(", ") + ".";
@@ -1769,6 +1898,9 @@
       hideVeil();
       if (keepLayer) {
         await showSingleLayer(els.layer.value);
+        if (seq !== scoreSeq) {
+          return;
+        }
       } else {
         setOverlay("data:image/png;base64," + payload.png, payload.bounds, "score");
         els.layer.value = "score";
@@ -1793,18 +1925,6 @@
       drawKeepout(request.keepout);
       renderWindowBadge(request.illumination_months);
       renderAnswer(payload, request, seq);
-      if (PARAMS.get("site") && !initialSiteShown) {
-        initialSiteShown = true;
-        var pinIndex = Number(PARAMS.get("pin")) - 1;
-        if (pinIndex >= 0 && pinIndex < currentSites.length) {
-          selectedRank = pinIndex;
-          pinned = cardSnapshot(pinIndex);
-        }
-        var wanted = Number(PARAMS.get("site")) - 1;
-        if (wanted >= 0 && wanted < currentSites.length) {
-          selectSite(wanted);
-        }
-      }
       els.csv.disabled = false;
       els.geojson.disabled = false;
     } catch (err) {
@@ -2018,6 +2138,10 @@
       setRail(!isPresenting());
     });
     els.cards.addEventListener("click", onCardClick);
+    els.onlyPassing.addEventListener("change", syncFilter);
+    document.getElementById("present-csv").addEventListener("click", function () {
+      els.csv.click();
+    });
     window.addEventListener("resize", debounce(placeCards, 150));
     els.railToggle.addEventListener("click", function () {
       setRail(!railOpen());
@@ -2110,6 +2234,27 @@
       if (applyUrlScenario()) {
         await runScore({ keepLayer: true });
       }
+      applyUrlSite();
+    }
+  }
+
+  // ?pin=N&site=M, applied after the last score so a URL scenario keeps them.
+  function applyUrlSite() {
+    if (PARAMS.get("only") === "1") {
+      els.onlyPassing.checked = true;
+      syncFilter();
+    }
+    if (!PARAMS.get("site") || !currentSites || !currentSites.length) {
+      return;
+    }
+    var pinIndex = Number(PARAMS.get("pin")) - 1;
+    if (pinIndex >= 0 && pinIndex < currentSites.length) {
+      selectedRank = pinIndex;
+      pinned = cardSnapshot(pinIndex);
+    }
+    var wanted = Number(PARAMS.get("site")) - 1;
+    if (wanted >= 0 && wanted < currentSites.length) {
+      selectSite(wanted);
     }
   }
 

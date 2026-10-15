@@ -106,16 +106,24 @@ geometry. The exporter does not invent coordinates or a plume radius. It prints 
 
 ## Ten-line UI demo
 
-1. With the server running and real grids ingested, open `http://localhost:8000`.
-2. Wait for the automatic default score to finish and the map veil to disappear.
-3. Show the current ranked sites by reading the table on the right (up to ten rows).
-4. Select the first row to center and zoom the map on the current top-ranked site.
-5. Note its score and the Illumination, Hydrogen, and Earth vis. contribution tick bars.
-6. Change only **Max slope (deg)** from `8` to the displayed HLS goal of `5`.
-7. Select **Score** to apply the stricter slope requirement and calculate the ranking again.
-8. Read the refreshed table and select its first row to inspect the newly ranked top site.
-9. Read which criterion has the largest contribution tick bar at that site, then choose that criterion under **Show single layer** to inspect its map; the UI shows weighted contributions, not causal attribution.
+On a projector (1280×720 or 1366×768) use **Presentation mode** (header
+button, or open `/?present=1`): the scenario rail becomes a drawer behind
+**Scenario ▸**, the table is 18 px and all ten rows fit. Normal mode at
+1280×720 needs a small scroll in the table to reach row 10.
+
+1. With the server running and real grids ingested, open `http://localhost:8000/?present=1`.
+2. Wait for the default score; read the banner sentence above the map aloud.
+3. Read its second line: the best site that also passes the 20 m flat-ground and DEM-noise checks.
+4. Tick **Only sites passing all checks** to show just those rows.
+5. Click row 1 for its site card: score split, raw values, verdicts in words.
+6. Press **Compare** on that card, then click the passing site to see the two side by side.
+7. Open **Scenario ▸**, tick **Avoid Artemis III candidate regions** and pick a sunlight window.
+8. The map shows hatched keep-out disks and a sunlight badge; the table shows each site's previous rank in grey.
+9. Point at the grey **n/a** cells: those sites were not in the studies, which used the default scenario.
 10. State explicitly: “This result is decision-support screening, not landing clearance.”
+
+For a prepared view, URL switches set the same state:
+`?present=1&site=1&pin=3&keepout=5&start=2027-01&end=2027-03&w=0.6,0.2,0.2`.
 
 Unit tests use constructed arrays and `--synthetic` ingest only:
 

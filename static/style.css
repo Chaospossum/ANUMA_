@@ -943,7 +943,7 @@ body.present .sites-table {
 
 body.present .sites-table th,
 body.present .sites-table td {
-  padding: 4px 7px;
+  padding: 3px 7px;
 }
 
 body.present .table-legend {
@@ -959,7 +959,7 @@ body.present .answer {
 }
 
 body.present .answer-main {
-  font-size: 19px;
+  font-size: 18px;
   line-height: 1.3;
 }
 
@@ -1060,12 +1060,26 @@ body.present .status {
   font-size: 11px;
 }
 
+/* Only the data-source list may be cut short; the disclaimer and the
+   "not modelled" line always show in full. */
 body.present .status > span {
-  flex: 0 1 auto;
+  flex: none;
+}
+
+body.present .status .layers-note {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+body.present .status .not-modelled {
+  white-space: nowrap;
+}
+
+body.present .status .disclaimer {
+  white-space: nowrap;
 }
 
 @media (max-width: 960px) {
@@ -1370,4 +1384,50 @@ body.present .place-label {
 
 body.present .sites-table .rank .was {
   display: inline;
+}
+
+.zoom-lt3 .near-pole {
+  display: none;
+}
+
+/* ---- Passes all checks */
+
+.answer-pass {
+  margin-top: 2px !important;
+  font-size: 0.9rem;
+}
+
+.answer-pass:empty {
+  display: none;
+}
+
+body.present .answer-pass {
+  font-size: 15px;
+}
+
+.only-passing {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.sites-table.only-passing-on tr.fails-checks {
+  display: none;
+}
+
+.filter-empty td {
+  color: var(--muted);
+}
+
+.present-csv {
+  display: none;
+  margin: 0;
+}
+
+body.present .present-csv {
+  display: inline;
+  font-size: inherit;
 }

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>anuma · lunar south-pole landing-site screening</title>
     <link rel="stylesheet" href="/vendor/leaflet.css" />
-    <link rel="stylesheet" href="/style.css?v=demo-story" />
+    <link rel="stylesheet" href="/style.css?v=demo-story-2" />
   </head>
   <body>
     <div class="app">
@@ -24,6 +24,7 @@
 
       <section class="answer" id="answer" aria-live="polite" aria-label="Answer">
         <p class="answer-main" id="answer-main">Scoring the default scenario…</p>
+        <p class="answer-pass" id="answer-pass"></p>
         <p class="answer-meta" id="answer-meta"></p>
       </section>
 
@@ -199,10 +200,12 @@
             </table>
           </div>
           <div class="table-legend" id="table-legend">
+            <label class="only-passing"><input type="checkbox" id="only-passing" /> Only sites passing all checks</label>
             <span><b class="v v-pass">✓</b> passes</span>
             <span><b class="v v-fail">✗</b> fails</span>
             <span><b class="v v-edge">≈</b> borderline</span>
             <span><b class="v v-none">–</b> not checked</span>
+            <button type="button" class="link-button present-csv" id="present-csv">Download CSV</button>
             <span id="legend-na" hidden><b class="na">n/a</b> not in that study (studies used the default scenario)</span>
             <span class="info">
               <button type="button" class="info-button" id="info-button" aria-expanded="false" aria-controls="table-note" aria-label="About these columns">i</button>
@@ -219,8 +222,8 @@
       </div>
 
       <footer class="status" id="status">
-        <span><b>Not modelled:</b> thermal, rocks/craters &lt; 20 m, comms windows, rover traverse.
-        Layers: LOLA LDEM_80S_20MPP_ADJ (slope), AVGVISIB_65S_240M_201608 (sunlight),
+        <span class="not-modelled"><b>Not modelled:</b> thermal, rocks/craters &lt; 20 m, comms windows, rover traverse.</span>
+        <span class="layers-note">Layers: LOLA LDEM_80S_20MPP_ADJ (slope), AVGVISIB_65S_240M_201608 (sunlight),
         Lunar Prospector hydrogen, Earth view from the DEM.</span>
         <span class="disclaimer">Independent student project. Not affiliated with or
         endorsed by ispace, ESA, or the MAGPIE mission team.</span>
@@ -230,6 +233,6 @@
     <script src="/vendor/leaflet.js"></script>
     <script src="/vendor/proj4.js"></script>
     <script src="/vendor/proj4leaflet.js"></script>
-    <script src="/app.js?v=demo-story"></script>
+    <script src="/app.js?v=demo-story-2"></script>
   </body>
 </html>
