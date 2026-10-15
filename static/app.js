@@ -40,6 +40,9 @@
   // The request behind the table on screen, and how it differs from the defaults.
   var lastRequest = null;
   var lastScenario = null;
+  // A pinned site card for side-by-side comparison: a snapshot, kept across re-scores.
+  var pinned = null;
+  var cardsClosed = false;
   var MAX_MONTHS = 600;
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -80,6 +83,10 @@
     tableNote: document.getElementById("table-note"),
     infoButton: document.getElementById("info-button"),
     answerMain: document.getElementById("answer-main"),
+    cards: document.getElementById("cards"),
+    cardsEmpty: document.getElementById("cards-empty"),
+    mapFrame: document.getElementById("map-frame"),
+    sitesPanel: document.querySelector(".panel-sites"),
     answerMeta: document.getElementById("answer-meta"),
     railToggle: document.getElementById("rail-toggle"),
     present: document.getElementById("present-toggle"),
@@ -599,8 +606,228 @@
   function selectSite(index) {
     var site = currentSites[index];
     selectedRank = index;
-    map.setView([site.lat, site.lon], Math.max(map.getZoom(), 4));
+    cardsClosed = false;
+    map.setView([site.lat, site.lon], Math.max(map.getZoom(), 4), { animate: false });
     renderSites(currentSites, currentRadius);
+    renderCards();
+    // Keep the site visible above a floating card.
+    if (document.body.classList.contains("cards-float")) {
+      map.panBy([0, els.cards.offsetHeight / 2], { animate: false });
+    }
+  }
+
+  // ---- Site cards
+
+  function cardSnapshot(index) {
+    var scenario = lastScenario || { isDefault: true, parts: [] };
+    return {
+      site: currentSites[index],
+      rank: index + 1,
+      scenario: scenario,
+      scenarioText: scenario.isDefault ? "study defaults" : scenario.parts.join(" · "),
+      months: (lastRequest && lastRequest.illumination_months) || null,
+      maxSlope: lastRequest ? lastRequest.hard.max_slope_deg : null,
+    };
+  }
+
+  function fact(label, html) {
+    return "<dt>" + label + "</dt><dd>" + html + "</dd>";
+  }
+
+  function rawFacts(card, values) {
+    if (!values) {
+      return fact("Layer values", '<span class="na">loading…</span>');
+    }
+    var v = values.values || {};
+    var out = "";
+    out += fact(
+      "Sunlight",
+      v.illumination == null
+        ? '<span class="na">not checked</span>'
+        : "lit " + (100 * v.illumination).toFixed(0) + " % of " +
+            (card.months ? escapeHtml(windowLabel(card.months)) + " (modelled daily)" : "the time (18.6-yr average)")
+    );
+    out += fact(
+      "Slope (240 m)",
+      v.slope == null
+        ? '<span class="na">not checked</span>'
+        : v.slope.toFixed(1) + "°" + (card.maxSlope != null ? ' <span class="na">limit ' + card.maxSlope + "°</span>" : "")
+    );
+    out += fact("Earth view", escapeHtml(earthWords(values)));
+    out += fact(
+      "Hydrogen",
+      v.hydrogen == null ? '<span class="na">not checked</span>' : v.hydrogen.toFixed(0) + " ppm"
+    );
+    if (v.dem != null) {
+      out += fact("Elevation", v.dem.toFixed(0) + " m");
+    }
+    return out;
+  }
+
+  function checkFacts(card) {
+    var site = card.site;
+    var out = "";
+    var flat = flatFraction(site);
+    if (flat == null) {
+      out += fact(
+        "Flat ground 1 km",
+        card.scenario.isDefault
+          ? verdictHtml("none", "not checked (only the default top 10 were)")
+          : verdictHtml("none", "n/a for this scenario")
+      );
+    } else {
+      var pass = flat >= flatThreshold();
+      out += fact(
+        "Flat ground 1 km",
+        verdictHtml(pass ? "pass" : "fail", "") + " " + Math.round(100 * flat) +
+          " % of 20 m pixels ≤ 8° — " + (pass ? "passes" : "fails") + " the 50 % rule" +
+          (card.scenario.slopeChanged ? ' <span class="na">(checked at 8°)</span>' : "")
+      );
+    }
+    var noise = noiseCheck(site);
+    if (!noise) {
+      out += fact(
+        "DEM-noise",
+        verdictHtml("none", card.scenario.isDefault ? "not checked (8 sites were)" : "n/a for this scenario")
+      );
+    } else {
+      out += fact("DEM-noise", verdictHtml(noiseKind(noise), "") + " " + escapeHtml(noiseWords(noise)));
+    }
+    if (!stability || !stability.available) {
+      out += fact("Weight-robust", verdictHtml("none", "not checked"));
+    } else {
+      var row = stabilityRow(site);
+      var freq = row ? row.frequency : 0;
+      var win = winnerFrequency(site);
+      var text =
+        "top 10 in " + (100 * freq).toFixed(freq === 1 || freq === 0 ? 0 : 1) + " % of " +
+        stability.draw_count + " weight draws" +
+        (win != null ? "; #1 in " + (100 * win).toFixed(1) + " %" : "");
+      out += fact(
+        "Weight-robust",
+        card.scenario.isDefault
+          ? escapeHtml(text)
+          : row
+            ? '<span class="na">' + escapeHtml(text) + " (default scenario only)</span>"
+            : '<span class="na">n/a for this scenario</span>'
+      );
+    }
+    var near = site.nearest
+      ? escapeHtml(site.nearest) + ", " + Number(site.distance_km).toFixed(1) +
+        ' km <span class="na">(approximate point, not a NASA centre)</span>'
+      : '<span class="na">none cited</span>';
+    out += fact("Nearest Artemis III", near);
+    return out;
+  }
+
+  function cardHtml(card, values, kind) {
+    var site = card.site;
+    var c = site.contributions || {};
+    var parts = [
+      ["Sunlight", c.illumination, "c-sun"],
+      ["Hydrogen", c.hydrogen, "c-hyd"],
+      ["Earth view", c.earth_visibility, "c-earth"],
+    ];
+    var bar = parts
+      .map(function (p) {
+        var w = Math.max(0, Math.min(1, Number(p[1]) || 0));
+        return '<i class="' + p[2] + '" style="width:' + (100 * w).toFixed(1) + '%" title="' + p[0] + " " + contribCell(p[1]) + '"></i>';
+      })
+      .join("");
+    var key = parts
+      .map(function (p) {
+        return '<span><i class="sw ' + p[2] + '"></i>' + p[0] + " " + contribCell(p[1]) + "</span>";
+      })
+      .join("");
+    var buttons =
+      kind === "pinned"
+        ? '<button type="button" class="card-btn" data-act="unpin">Unpin</button>'
+        : '<button type="button" class="card-btn" data-act="pin" title="Keep this card to compare with another site">Compare</button>';
+    buttons += '<button type="button" class="card-btn card-close" data-act="close-' + kind + '" aria-label="Close card">×</button>';
+    return (
+      '<article class="card' + (kind === "pinned" ? " pinned" : "") + '">' +
+      '<header class="card-head"><span class="card-rank">#' + pad2(card.rank) + "</span>" +
+      '<span class="card-loc">' + fmtLocation(site.lat, site.lon) + "</span>" +
+      '<span class="card-actions">' + buttons + "</span></header>" +
+      (kind === "pinned" ? '<p class="card-scn">Pinned · scored under: ' + escapeHtml(card.scenarioText) + "</p>" : "") +
+      '<div class="card-score"><span class="card-total">' + Number(site.total).toFixed(3) + "</span>" +
+      '<span class="card-bar">' + bar + "</span></div>" +
+      '<p class="card-key">' + key + "</p>" +
+      '<dl class="card-facts">' + rawFacts(card, values) + checkFacts(card) + "</dl>" +
+      "</article>"
+    );
+  }
+
+  async function renderCards() {
+    var list = [];
+    if (pinned) {
+      list.push({ card: pinned, kind: "pinned" });
+    }
+    if (!cardsClosed && selectedRank != null && currentSites && currentSites[selectedRank]) {
+      var current = cardSnapshot(selectedRank);
+      var same =
+        pinned && pinned.site.row === current.site.row && pinned.site.col === current.site.col &&
+        pinned.scenarioText === current.scenarioText;
+      if (!same) {
+        list.push({ card: current, kind: "current" });
+      }
+    }
+    document.body.classList.toggle("has-cards", list.length > 0);
+    els.cards.classList.toggle("two", list.length > 1);
+    if (!list.length) {
+      els.cards.innerHTML = "";
+      els.cards.appendChild(els.cardsEmpty);
+      return;
+    }
+    var draw = function () {
+      els.cards.innerHTML = list
+        .map(function (item) {
+          var values = siteValueCache[siteValueKey(item.card.site, item.card.months)] || null;
+          return cardHtml(item.card, values, item.kind);
+        })
+        .join("");
+    };
+    draw();
+    var missing = list.filter(function (item) {
+      return !siteValueCache[siteValueKey(item.card.site, item.card.months)];
+    });
+    if (missing.length) {
+      await Promise.all(
+        missing.map(function (item) {
+          return siteValues(item.card.site, item.card.months).catch(function () {
+            return null;
+          });
+        })
+      );
+      draw();
+    }
+  }
+
+  function onCardClick(event) {
+    var button = event.target.closest("button[data-act]");
+    if (!button) {
+      return;
+    }
+    var act = button.getAttribute("data-act");
+    if (act === "pin" && selectedRank != null) {
+      pinned = cardSnapshot(selectedRank);
+    } else if (act === "unpin" || act === "close-pinned") {
+      pinned = null;
+    } else if (act === "close-current") {
+      cardsClosed = true;
+    }
+    renderCards();
+  }
+
+  // Presentation mode and short screens have no room under the table, so
+  // the cards float over the bottom of the map there.
+  function placeCards() {
+    var float = isPresenting() || window.innerHeight < 900;
+    document.body.classList.toggle("cards-float", float);
+    var target = float ? els.mapFrame : els.sitesPanel;
+    if (els.cards.parentNode !== target) {
+      target.appendChild(els.cards);
+    }
   }
 
   function drawMarkers() {
@@ -1345,12 +1572,18 @@
       }
       selectedRank = null;
       renderSites(payload.sites, request.hard.slope_radius_m);
+      renderCards();
       renderArtemis(payload.artemis);
       lastRequest = request;
       lastScenario = scenarioOf(request);
       renderAnswer(payload, request, seq);
       if (PARAMS.get("site") && !initialSiteShown) {
         initialSiteShown = true;
+        var pinIndex = Number(PARAMS.get("pin")) - 1;
+        if (pinIndex >= 0 && pinIndex < currentSites.length) {
+          selectedRank = pinIndex;
+          pinned = cardSnapshot(pinIndex);
+        }
         var wanted = Number(PARAMS.get("site")) - 1;
         if (wanted >= 0 && wanted < currentSites.length) {
           selectSite(wanted);
@@ -1502,6 +1735,7 @@
     } catch (err) {
       // Storage can be blocked; the toggle still works for this page.
     }
+    placeCards();
     if (map) {
       map.invalidateSize();
       drawMarkers();
@@ -1548,6 +1782,8 @@
       setPresenting(!isPresenting());
       setRail(!isPresenting());
     });
+    els.cards.addEventListener("click", onCardClick);
+    window.addEventListener("resize", debounce(placeCards, 150));
     els.railToggle.addEventListener("click", function () {
       setRail(!railOpen());
     });

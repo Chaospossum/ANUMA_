@@ -1098,3 +1098,172 @@ body.present .status > span {
     min-height: 70vw;
   }
 }
+
+/* ---- Site cards */
+
+.cards {
+  flex: 1 1 auto !important;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px;
+  align-content: start;
+}
+
+.cards.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cards-empty {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.card {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--accent);
+  background: var(--white);
+  font-size: 0.78rem;
+}
+
+.card.pinned {
+  border-top-color: var(--ink);
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.card-rank {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.card.pinned .card-rank {
+  color: var(--ink);
+}
+
+.card-loc {
+  font-family: var(--mono);
+  font-weight: 500;
+}
+
+.card-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.card-btn {
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  background: var(--white);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.card-btn:hover {
+  border-color: var(--ink);
+}
+
+.card-close {
+  padding: 1px 6px;
+}
+
+.card-scn {
+  margin: 2px 0 0;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.card-score {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.card-total {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+
+.card-bar {
+  flex: 1;
+  display: flex;
+  height: 12px;
+  background: var(--line);
+}
+
+.card-bar i {
+  display: block;
+  height: 100%;
+}
+
+.card-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin: 3px 0 6px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.card-key .sw {
+  margin-left: 0;
+}
+
+.card-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 10px;
+  margin: 0;
+}
+
+.card-facts dt {
+  color: var(--muted);
+}
+
+.card-facts dd {
+  margin: 0;
+}
+
+/* Short screens and presentation: the cards float over the bottom of the map. */
+body.cards-float .cards {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  z-index: 650;
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  padding: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.cards-float .cards.two {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+body.cards-float .cards-empty {
+  display: none;
+}
+
+body.cards-float .card {
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+}
+
+body.present .card {
+  font-size: 15px;
+}
+
+body.cards-float.has-cards .legend {
+  display: none;
+}
