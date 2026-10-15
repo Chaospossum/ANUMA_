@@ -291,6 +291,7 @@ def test_preflight_refuses_to_overwrite_receipt(tmp_path, monkeypatch):
         "hpc/slurm/sun-validation.sbatch",
         "hpc/slurm/stage-b.sbatch",
         "hpc/slurm/daily-lit.sbatch",
+        "hpc/slurm/darkness.sbatch",
     ),
 )
 def test_staging_module_regex_uses_one_literal_dot_escape(path):
@@ -369,3 +370,129 @@ def test_myquota_is_still_required_outside_stage_d(tmp_path, monkeypatch):
     )
     with pytest.raises(RuntimeError, match="unavailable: myquota"):
         preflight.run_preflight(tmp_path / "receipt.json")
+
+
+def test_stage_g_profiles_fit_one_node_and_three_and_a_half_hours():
+    pilot = preflight.JOB_PROFILES["stage-g-pilot"]
+    production = preflight.JOB_PROFILES["stage-g"]
+    assert pilot["qos"] == "test" and pilot["walltime"] == "00:30:00"
+    assert production["qos"] == "default" and production["walltime"] == "03:00:00"
+    assert production["node_hours"] <= 3.0
+    assert pilot["node_hours"] + production["node_hours"] <= 3.5
+    assert pilot["cpus"] == production["cpus"] == 128
+    assert pilot["memory"] == production["memory"] == "240G"
+    script = (REPO_ROOT / "hpc" / "slurm" / "darkness.sbatch").read_text()
+    wrapper = (REPO_ROOT / "hpc" / "submit-darkness.sh").read_text()
+    assert "--gpu" not in script.lower() and "--gpu" not in wrapper.lower()
+    assert "reject_darkness_receipt" in wrapper and "reject_darkness_receipt" in script
+    assert "srun --export=ALL" in script
+    assert "-m anuma.darkness" in script
+    assert 'expected_time="03:00:00"' in script and 'expected_memory_mb="245760"' in script
+    assert 'profile="stage-g-pilot"' in wrapper and 'profile="stage-g"' in wrapper
+    assert '"spice_covers_window": True' in wrapper
+    assert "RESUME" not in script and "RESUME" not in wrapper
+
+
+def _stage_g_inputs(tmp_path, monkeypatch):
+    import hashlib
+
+    import numpy as np
+
+    from anuma import daily_lit
+
+    stage_a = tmp_path / "stage-a"
+    stage_a.mkdir()
+    cube = stage_a / "terrain-horizon.npy"
+    np.save(cube, np.zeros((2, 2, 2), dtype=np.float32))
+    digest = hashlib.sha256(cube.read_bytes()).hexdigest()
+    (stage_a / "validation-report.json").write_text(
+        json.dumps({"status": "passed", "metrics": {"rmse": 0.02, "stop_rmse": 0.05, "passed": True}})
+    )
+    (stage_a / "output-manifest.json").write_text(
+        json.dumps({"outputs": {"terrain-horizon.npy": {"sha256": digest, "bytes": cube.stat().st_size}}})
+    )
+    kernel = tmp_path / "kernel-manifest.json"
+    kernel.write_text("{}")
+    stage_e = tmp_path / "daily-lit-production-1"
+    stage_e.mkdir()
+    (stage_e / "daily-lit-report.json").write_text(json.dumps({"mode": "production", "passed": True}))
+    (stage_e / "run-config.json").write_text(
+        json.dumps(
+            {
+                "horizon_sha256": digest,
+                "kernel_manifest_sha256": hashlib.sha256(kernel.read_bytes()).hexdigest(),
+                "daily_lit_config_sha256": hashlib.sha256(
+                    daily_lit.config_path().read_bytes()
+                ).hexdigest(),
+                "period_start_day": "2026-01-01",
+                "period_end_day_exclusive": "2044-09-01",
+            }
+        )
+    )
+    (stage_e / "daily-lit-index.json").write_text(
+        json.dumps(
+            {
+                "period": {"start_day_utc": "2026-01-01", "end_day_exclusive_utc": "2044-09-01"},
+                "chunks": [{"file": "daily/lit-hours-2026.npy"}],
+            }
+        )
+    )
+    entry = {"sha256": "b" * 64, "bytes": 10}
+    (stage_e / "output-manifest.json").write_text(
+        json.dumps({"outputs": {"cumulative-monthly.npy": entry, "daily/lit-hours-2026.npy": entry}})
+    )
+    monkeypatch.setenv("ANUMA_STAGE_A_DIR", str(stage_a))
+    monkeypatch.setenv("ANUMA_STAGE_E_DIR", str(stage_e))
+    monkeypatch.setenv("ANUMA_KERNEL_MANIFEST", str(kernel))
+    windows = []
+
+    def coverage(kernel_manifest, roles, start, end):
+        windows.append((start, end))
+        return {"covers_window": True, "window": [str(start), str(end)]}
+
+    monkeypatch.setattr(daily_lit, "require_spice_coverage", coverage)
+    return digest, windows, stage_e
+
+
+def test_stage_g_preflight_needs_an_allocation_and_pins_stage_e(tmp_path, monkeypatch):
+    _configured_environment(tmp_path, monkeypatch)
+    monkeypatch.setenv("ANUMA_JOB_PROFILE", "stage-g-pilot")
+    monkeypatch.setenv("ANUMA_ACCOUNT", "p201619")
+    _write_evidence(
+        Path(os.environ["ANUMA_ALLOCATION_EVIDENCE_FILE"]),
+        {
+            "source": "test fixture",
+            "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+            "account": "p201619",
+            "remaining_cpu_node_hours": 10.0,
+        },
+    )
+    original = preflight.run_checked
+
+    def fake_command(command):
+        if "show assoc" in " ".join(str(item) for item in command):
+            return "cluster|p201619|tester|cpu|test\n"
+        return original(command)
+
+    monkeypatch.setattr(preflight, "run_checked", fake_command)
+    digest, windows, stage_e = _stage_g_inputs(tmp_path, monkeypatch)
+    monkeypatch.delenv("SLURM_JOB_ID", raising=False)
+    with pytest.raises(RuntimeError, match="compute allocation"):
+        preflight.run_preflight(tmp_path / "receipt-g-login.json")
+    # Inside an allocation myquota is absent; the evidence files stand in.
+    monkeypatch.setenv("SLURM_JOB_ID", "777")
+    monkeypatch.setattr(
+        preflight.shutil, "which", lambda command: None if command == "myquota" else f"/bin/{command}"
+    )
+    receipt = preflight.run_preflight(tmp_path / "receipt-g.json")
+    assert receipt["job_profile"] == "stage-g-pilot"
+    assert receipt["darkness_mode"] == "pilot"
+    assert receipt["horizon_sha256"] == digest
+    assert receipt["stage_e_dir"] == str(stage_e.resolve())
+    assert receipt["spice_covers_window"] is True
+    assert receipt["stage_g_preflight_slurm_job_id"] == "777"
+    assert str(windows[-1][0]) == "2026-01-01" and str(windows[-1][1]) == "2026-04-01"
+
+    (stage_e / "daily-lit-report.json").write_text(json.dumps({"mode": "production", "passed": False}))
+    with pytest.raises(RuntimeError, match="has not passed"):
+        preflight.run_preflight(tmp_path / "receipt-g-unpassed.json")

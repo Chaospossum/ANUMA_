@@ -135,11 +135,32 @@ JOB_PROFILES = {
         "node_hours": 1.5,
         "core_hours": 192.0,
     },
+    # Stage G longest dark/lit runs: pilot 0.5 + production 3.0 = 3.5 node-hours,
+    # proposed from the held node-hours (docs/stage-g-darkness-plan.md).
+    "stage-g-pilot": {
+        "qos": "test",
+        "walltime": "00:30:00",
+        "walltime_minutes": 30,
+        "cpus": 128,
+        "memory": "240G",
+        "node_hours": 0.5,
+        "core_hours": 64.0,
+    },
+    "stage-g": {
+        "qos": "default",
+        "walltime": "03:00:00",
+        "walltime_minutes": 3 * 60,
+        "cpus": 128,
+        "memory": "240G",
+        "node_hours": 3.0,
+        "core_hours": 384.0,
+    },
 }
 SUN_PROFILES = frozenset({"sun-validation-pilot", "sun-validation"})
 STAGE_B_PROFILES = frozenset({"stage-b-pilot", "stage-b"})
 DAILY_LIT_PROFILES = {"daily-lit-pilot": "pilot", "daily-lit": "production"}
 STAGE_D_PROFILES = {"stage-d-pilot": "pilot", "stage-d": "production"}
+STAGE_G_PROFILES = {"stage-g-pilot": "pilot", "stage-g": "production"}
 QOS_MAX_WALL_MINUTES = {
     "dev": 6 * 60,
     "test": 30,
@@ -251,7 +272,8 @@ def run_preflight(receipt_path: Path) -> dict:
     # compute allocation. Preflight never calls it; allocation and storage come
     # from the evidence files captured on the login node within 24 hours.
     commands = ["myquota", "sbatch", "sacctmgr", "scontrol"]
-    if job_profile in STAGE_D_PROFILES and os.environ.get("SLURM_JOB_ID", "").strip():
+    in_allocation = bool(os.environ.get("SLURM_JOB_ID", "").strip())
+    if (job_profile in STAGE_D_PROFILES or job_profile in STAGE_G_PROFILES) and in_allocation:
         commands.remove("myquota")
     for command in commands:
         if shutil.which(command) is None:
@@ -467,6 +489,55 @@ def run_preflight(receipt_path: Path) -> dict:
         stage_d_pin["stage_d_preflight_slurm_job_id"] = slurm_job
         stage_d_pin["stage_d_preflight_host"] = socket.gethostname()
 
+    stage_g_pin: dict = {}
+    if job_profile in STAGE_G_PROFILES:
+        if account != "p201619":
+            fail("Stage G requires account p201619")
+        # Preflight hashes the SPICE kernels (coverage) and reads Stage A/E
+        # records; gate 6 keeps that off login nodes.
+        slurm_job = os.environ.get("SLURM_JOB_ID", "").strip()
+        if not slurm_job:
+            fail("Stage G preflight must run inside a compute allocation")
+        from anuma import daily_lit, darkness
+        from anuma.sun import load_sun_config
+
+        sun_cfg = load_sun_config()
+        g_cfg = darkness.load_darkness_config()
+        kernel_manifest = Path(
+            os.environ.get("ANUMA_KERNEL_MANIFEST", sun_cfg["sun"]["kernel_manifest"])
+        )
+        stage_a_dir = Path(
+            os.environ.get(
+                "ANUMA_STAGE_A_DIR",
+                daily_lit.load_daily_lit_config()["stage_a"]["default_dir"],
+            )
+        )
+        stage_e_dir = Path(os.environ.get("ANUMA_STAGE_E_DIR", g_cfg["stage_e"]["default_dir"]))
+        horizon_cube = Path(
+            os.environ.get("ANUMA_HORIZON_CUBE", str(stage_a_dir / "terrain-horizon.npy"))
+        )
+        mode = STAGE_G_PROFILES[job_profile]
+        try:
+            stage_g_pin = darkness.receipt_pin(
+                kernel_manifest=kernel_manifest,
+                stage_a_dir=stage_a_dir,
+                stage_e_dir=stage_e_dir,
+                horizon_cube=horizon_cube,
+                mode=mode,
+            )
+            start, end = darkness.period_days(
+                g_cfg, daily_lit.load_daily_lit_config(), mode
+            )
+            coverage = daily_lit.require_spice_coverage(
+                kernel_manifest, sun_cfg["sun"]["required_kernel_roles"], start, end
+            )
+        except ValueError as exc:
+            fail(str(exc))
+        stage_g_pin["spice_coverage_window"] = coverage["window"]
+        stage_g_pin["spice_covers_window"] = coverage["covers_window"]
+        stage_g_pin["stage_g_preflight_slurm_job_id"] = slurm_job
+        stage_g_pin["stage_g_preflight_host"] = socket.gethostname()
+
     receipt = {
         "schema_version": 1,
         "verified_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -495,6 +566,7 @@ def run_preflight(receipt_path: Path) -> dict:
         **stage_b_pin,
         **daily_lit_pin,
         **stage_d_pin,
+        **stage_g_pin,
     }
     canonical = json.dumps(receipt, sort_keys=True).encode()
     receipt["receipt_sha256"] = hashlib.sha256(canonical).hexdigest()

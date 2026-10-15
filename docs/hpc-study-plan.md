@@ -304,6 +304,16 @@ completed in 00:50:23 for about 1 node-hour. See
 [stage-e-daily-lit-plan.md](stage-e-daily-lit-plan.md) and
 [stage-e-result.md](stage-e-result.md).
 
+## Stage G — 240 m longest continuous dark and lit periods
+
+Planned, not run. Stage G replays Stage E's hourly epochs, using the same lit
+rule, horizon cube and kernels. It stores the longest dark and lit run per
+pixel, and per-month dark-run summaries that give the exact longest dark run
+of any month window. It needs a reviewed draw of at most 3.5 node-hours from
+the held hours: a pilot of 0.5 at QOS `test`, then a production of 3.0 at
+`default`. Production goes ahead only if the pilot projects at most 2.4. See
+[stage-g-darkness-plan.md](stage-g-darkness-plan.md).
+
 ## Review and release discipline
 
 Each stage produces evidence, not a mission claim. Review scientific outputs

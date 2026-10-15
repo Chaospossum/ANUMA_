@@ -1,0 +1,45 @@
+# Stage G — 240 m longest continuous dark and lit periods.
+# Replays Stage E's hourly epochs (period from config/daily-lit.yaml, whose
+# digest must equal the one in Stage E's run key) through the same lit rule,
+# Stage A horizon cube and SPICE kernels. Not a mission claim.
+
+stage: G-darkness-240m
+
+stage_e:
+  # Production job 5342908 passed; its daily files are the reference for the
+  # per-day lit-hour check and its cumulative file for the lit-total check.
+  job_id: "5342908"
+  default_dir: /project/home/p201619/ANUMA_/out/hpc/daily-lit-production-5342908
+
+pilot:
+  # Three whole months on the full grid: 2,160 epochs in three monthly
+  # dispatches, so the last one is timed warm. Six month windows are checked
+  # against brute force.
+  start_utc: "2026-01-01T00:00:00Z"
+  months: 3
+  # Rows re-evaluated serially and by brute force for the pilot checks.
+  check_row_stride: 32
+
+output:
+  hours_fill_uint32: 4294967295
+  month_fill_uint16: 65535
+  flags_fill_uint8: 255
+
+execution:
+  nodes: 1
+  maximum_workers: 128
+  accelerators: false
+  memory: 240G
+  # One calendar month per dispatch; one SPICE call per calendar year.
+  pilot_node_hours: 0.5
+  production_node_hours: 3.0
+  production_walltime: "03:00:00"
+  # Stage G cannot resume (the run state spans the whole period), so the
+  # pilot projection must leave 20 % of the walltime as headroom.
+  projection_limit_node_hours: 2.4
+  # Proposed draw from the held node-hours; not authorized by this file.
+  stage_node_hour_cap: 3.5
+
+acceptance:
+  # Exact equalities; nothing is tuned after a run.
+  tune_after_run: false
