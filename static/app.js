@@ -634,8 +634,8 @@
     return lastScenario || { isDefault: true, studiesOk: true, slopeChanged: false, parts: [] };
   }
 
-  // False when /score ranked on a different basis (20 m terrain gate on)
-  // than the precomputed studies, which ranked on slope only.
+  // False when /score ranked on a different basis than the studies the
+  // server serves (slope-only, or the 20 m terrain gate of Stage H).
   function studiesMatch(payload) {
     var basis = payload && payload.ranking_basis;
     return !(basis && typeof basis === "object" && basis.studies_match === false);
@@ -647,6 +647,16 @@
       return basis.note || "the studies were computed for a different ranking";
     }
     return "the site was not in the study, which used the default scenario";
+  }
+
+  // Why the served studies do not describe this ranking, in words from /score.
+  function studiesWhy(payload) {
+    var basis = payload && payload.ranking_basis;
+    return (basis && basis.note) || "the studies were computed for a different ranking";
+  }
+
+  function noiseSiteCount() {
+    return ((noiseChecks && noiseChecks.sites) || []).length;
   }
 
   function naHtml() {
@@ -899,7 +909,7 @@
         "<p><b>DEM-noise</b>: the flat-ground rule (≥ 50 % within 1 km) re-run in " +
         noiseChecks.draws + " draws of the published LOLA height error (job " +
         escapeHtml(noiseChecks.source.job) + "). ✓/✗ = same answer in every draw; " +
-        "≈ = the answer flips or sits on the 50 % line. Only 8 sites were tested.</p>"
+        "≈ = the answer flips or sits on the 50 % line. Only " + noiseSiteCount() + " sites were tested.</p>"
       );
     }
     els.tableNote.innerHTML = parts.join("");
@@ -1114,7 +1124,7 @@
     if (!noise) {
       out += fact(
         "DEM-noise",
-        verdictHtml("none", card.scenario.studiesOk ? "not checked (8 sites were)" : "n/a for this scenario")
+        verdictHtml("none", card.scenario.studiesOk ? "not checked (" + noiseSiteCount() + " sites were)" : "n/a for this scenario")
       );
     } else {
       out += fact("DEM-noise", verdictHtml(noiseKind(noise), "") + " " + escapeHtml(noiseWords(noise)));
@@ -1535,8 +1545,8 @@
     if (request.illumination_months) {
       parts.push("sunlight " + windowLabel(request.illumination_months) + " (modelled daily)");
     }
-    // The studies ranked on slope only, so the gate switch is shown as a
-    // scenario change but does not by itself move away from the studies;
+    // The gate switch is shown as a scenario change but does not by itself
+    // move away from the served studies;
     // /score's ranking_basis.studies_match decides that.
     var isDefault = parts.length === 0;
     var gateSpec = (meta && meta.terrain_gate) || {};
@@ -1628,9 +1638,11 @@
     }
     var row = stabilityRow(site);
     var freq = row ? row.frequency : 0;
+    var win = winnerFrequency(site);
     return (
       "in the top 10 in " + (100 * freq).toFixed(freq === 1 || freq === 0 ? 0 : 1) +
-      " % of " + stability.draw_count + " weight draws"
+      " % of " + stability.draw_count + " weight draws" +
+      (win != null ? " and #1 in " + (100 * win).toFixed(1) + " %" : "")
     );
   }
 
@@ -1717,7 +1729,7 @@
     if (!studiesMatch(payload)) {
       meta2.push(
         '<span class="tag changed" title="' + escapeHtml(studiesNote()) + '">Weight-robust and DEM-noise n/a: ' +
-          "those studies ranked on slope only, before the 20 m rule</span>"
+          escapeHtml(studiesWhy(payload)) + "</span>"
       );
     }
     meta2.push(
@@ -2189,7 +2201,7 @@
       legendNa.hidden = lastScenario.studiesOk;
       legendNa.lastChild.textContent = studiesMatch(payload)
         ? " not in that study (studies used the default scenario)"
-        : " not comparable (studies ranked on slope only, before the 20 m rule)";
+        : " not comparable (" + studiesWhy(payload) + ")";
       renderSites(payload.sites, request.hard.slope_radius_m);
       renderCards();
       renderArtemis(payload.artemis);
