@@ -313,8 +313,17 @@ def test_sidecar_validation():
     cfg = load_config()
     grid = Grid(cfg)
     spec = stage_f.require_frozen_config(cfg)
-    meta = stage_f.sidecar(spec=spec, grid=grid, coverage="full_cap", inputs={}, stats={}, job="1")
+    pinned = {
+        "dem": {"sha256": stage_f_gate.DEM_SHA256},
+        "stage_b_slope": {"sha256": stage_f_gate.SLOPE_20M_SHA256},
+    }
+    meta = stage_f.sidecar(spec=spec, grid=grid, coverage="full_cap", inputs=pinned, stats={}, job="1")
+    meta["fraction_sha256"] = "a" * 64
     assert stage_f.validate_sidecar(meta, grid, cfg) is None
+    assert "job id" in stage_f.validate_sidecar({**meta, "job": None}, grid, cfg)
+    unpinned = {**pinned, "stage_b_slope": {"sha256": "496f554f" + "0" * 56}}
+    assert "pinned Stage B" in stage_f.validate_sidecar({**meta, "inputs": unpinned}, grid, cfg)
+    assert "fraction_sha256" in stage_f.validate_sidecar({**meta, "fraction_sha256": None}, grid, cfg)
     assert "full cap" in stage_f.validate_sidecar({**meta, "coverage": "window"}, grid, cfg)
     assert "grid" in stage_f.validate_sidecar({**meta, "grid_sha256": "0" * 64}, grid, cfg)
     assert "radius" in stage_f.validate_sidecar({**meta, "radius_m": 500.0}, grid, cfg)

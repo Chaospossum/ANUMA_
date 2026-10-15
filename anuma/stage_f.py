@@ -570,7 +570,14 @@ def stage_d_path_check(dem_path: Path, coarse_transform, lookup, max_slope_deg: 
                 slope, circle, cell, max_slope_deg=max_slope_deg, cell_m=FINE_M
             )
             finite, passing = lookup(row, col)
-            expected_passing = int(round(stats["fraction_1km"] * stats["circle_finite_pixels"]))
+            # Count directly with Stage D's circle and limit; the fraction
+            # from slope_statistics is checked against the same counts.
+            ok = np.isfinite(slope) & circle
+            expected_passing = int(
+                np.count_nonzero(ok & (np.where(ok, slope, np.inf) <= float(max_slope_deg)))
+            )
+            if int(np.count_nonzero(ok)) != stats["circle_finite_pixels"]:
+                raise RuntimeError("direct circle count disagrees with slope_statistics")
             rows.append(
                 {
                     "site_id": f"{row}:{col}",
@@ -719,15 +726,34 @@ def sidecar(
     }
 
 
-def validate_sidecar(meta: dict, grid, cfg: dict) -> str | None:
-    """Why a fraction layer cannot be used as the gate, or None if it can."""
+def validate_sidecar(meta: dict, grid, cfg: dict, npy_path: Path | None = None) -> str | None:
+    """Why a fraction layer cannot be used as the gate, or None if it can.
+
+    Only a layer from a pinned MeluXina run qualifies: the sidecar must name
+    the pinned Stage B slope and DEM digests and a Slurm job id, and, when
+    ``npy_path`` is given, that file's sha256 must equal the sidecar's
+    ``fraction_sha256``.
+    """
     from anuma.dem_error import grid_sha256
+    from anuma.stage_f_gate import DEM_SHA256, SLOPE_20M_SHA256
 
     spec = cfg["hard"]["terrain_1km"]
     if meta.get("layer") != LAYER:
         return "sidecar is not for terrain_1km_fraction"
     if meta.get("coverage") != "full_cap":
         return f"layer covers {meta.get('coverage')!r}, not the full cap"
+    inputs = meta.get("inputs") or {}
+    if (inputs.get("stage_b_slope") or {}).get("sha256") != SLOPE_20M_SHA256:
+        return "layer was not built from the pinned Stage B slope-20m.npy"
+    if (inputs.get("dem") or {}).get("sha256") != DEM_SHA256:
+        return "layer was not built with the pinned 20 m DEM"
+    if not str(meta.get("job") or "").strip():
+        return "sidecar has no Slurm job id (not a MeluXina run)"
+    digest = meta.get("fraction_sha256")
+    if not isinstance(digest, str) or len(digest) != 64:
+        return "sidecar lacks fraction_sha256"
+    if npy_path is not None and sha256_file(Path(npy_path)) != digest:
+        return "terrain_1km_fraction.npy does not match the sidecar's fraction_sha256"
     if meta.get("grid_sha256") != grid_sha256(grid):
         return "layer was built for a different 240 m grid"
     try:
@@ -1010,6 +1036,7 @@ def run_stage_f(
             spec=spec, grid=grid, coverage="full_cap" if passed else "failed_acceptance",
             inputs=inputs_report, stats=stats, job=job,
         )
+        meta["fraction_sha256"] = sha256_file(output_dir / FRACTION_FILE)
         _atomic_json(output_dir / SIDECAR_FILE, meta)
         written.append(output_dir / SIDECAR_FILE)
         report["completed_at_utc"] = datetime.now(timezone.utc).isoformat()

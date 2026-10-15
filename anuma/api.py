@@ -67,8 +67,9 @@ logger = logging.getLogger(__name__)
 class HardBody(BaseModel):
     max_slope_deg: float | None = None
     slope_radius_m: float | None = Field(default=None, ge=0.0)
-    # Stage F 20 m terrain gate: None = config default, False = off, True = on
-    # (400 if it cannot apply at the requested max slope).
+    # Stage F 20 m terrain gate: None = config default (degrades to
+    # "unavailable" or "slope_mismatch" with a message), False = off,
+    # True = on, or 400 if the layer is unavailable or the max slope differs.
     terrain_1km: bool | None = None
     terrain_1km_min_fraction: float | None = Field(default=None, ge=0.0, le=1.0)
 
@@ -225,7 +226,7 @@ def _terrain_layer(cfg: dict, root: Path, store: dict) -> dict:
         except (OSError, json.JSONDecodeError) as exc:
             meta, problem = None, f"sidecar unreadable: {exc}"
         else:
-            problem = validate_sidecar(meta, store["grid"], cfg)
+            problem = validate_sidecar(meta, store["grid"], cfg, npy_path=npy)
         array = None
         if problem is None:
             array = np.load(npy, allow_pickle=False)

@@ -180,7 +180,8 @@ def terrain_gate(
     The fraction exists for one slope limit only. If the request's max slope
     differs, the gate is not applied (status ``slope_mismatch``), because
     an 8° flat-ground rule under a different slope limit would be a third
-    rule nobody asked for; an explicit ``terrain_1km: True`` then raises.
+    rule nobody asked for. An explicit ``terrain_1km: True`` raises instead
+    of degrading, both for a slope mismatch and for a missing layer.
     """
     spec = cfg["hard"].get("terrain_1km") or {}
     name = str(spec.get("layer", "terrain_1km_fraction"))
@@ -210,6 +211,8 @@ def terrain_gate(
         info.update(status="disabled", message="20 m terrain rule switched off")
     elif name not in layers:
         reason = hard.get("terrain_1km_unavailable_reason") or f"{name}.npy is not on this machine"
+        if requested is True:
+            raise ValueError(f"20 m terrain rule requested but not available: {reason}")
         info.update(
             status="unavailable",
             message=f"20 m terrain rule not applied: {reason}",

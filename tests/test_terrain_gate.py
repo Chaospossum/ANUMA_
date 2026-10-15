@@ -94,6 +94,9 @@ def test_gate_switch_threshold_and_slope_mismatch():
     assert mismatch.hard_mask.sum() == 5  # slope-only at 10°
     with pytest.raises(ValueError, match="cannot be recomputed"):
         score(layers, hard={"max_slope_deg": 10.0, "terrain_1km": True}, cfg=cfg, grid=_grid_stub())
+    with pytest.raises(ValueError, match="requested but not available"):
+        score(_small_layers(), hard={"max_slope_deg": 8.0, "terrain_1km": True}, cfg=cfg,
+              grid=_grid_stub())
     with pytest.raises(ValueError, match="between 0 and 1"):
         terrain_gate(layers, {"terrain_1km_min_fraction": 1.5}, cfg, 8.0)
 
@@ -140,10 +143,22 @@ def _write_layer(root: Path, fraction: np.ndarray, **overrides) -> None:
     grid = Grid(cfg)
     gdir = root / cfg["paths"]["grid"]
     spec = stage_f.require_frozen_config(cfg)
-    meta = stage_f.sidecar(spec=spec, grid=grid, coverage="full_cap", inputs={}, stats={}, job="test")
-    meta.update(overrides)
+    meta = stage_f.sidecar(
+        spec=spec, grid=grid, coverage="full_cap", inputs=_pinned_inputs(), stats={}, job="5400000"
+    )
     np.save(gdir / f"{LAYER}.npy", fraction.astype(np.float32))
+    meta["fraction_sha256"] = stage_f.sha256_file(gdir / f"{LAYER}.npy")
+    meta.update(overrides)
     (gdir / f"{LAYER}.json").write_text(json.dumps(meta))
+
+
+def _pinned_inputs() -> dict:
+    from anuma.stage_f_gate import DEM_SHA256, SLOPE_20M_SHA256
+
+    return {
+        "dem": {"path": "/x/LDEM_80S_20MPP_ADJ.TIF", "sha256": DEM_SHA256},
+        "stage_b_slope": {"path": "/x/slope-20m.npy", "sha256": SLOPE_20M_SHA256},
+    }
 
 
 @pytest.fixture
@@ -228,9 +243,27 @@ def test_api_other_max_slope_turns_the_gate_off_or_400(gated_root, monkeypatch):
     assert bad.status_code == 422
 
 
+def test_api_explicit_gate_without_layer_is_400(gated_root, monkeypatch):
+    client = _client(gated_root, monkeypatch)
+    forced = client.post("/score", json={"hard": {"terrain_1km": True}})
+    assert forced.status_code == 400
+    assert "requested but not available" in forced.json()["detail"]
+    # Omitted switch degrades with a status instead.
+    assert _client_score(client, {})["terrain_gate"] == "unavailable"
+
+
 @pytest.mark.parametrize(
     "override, reason",
-    [({"coverage": "window"}, "full cap"), ({"grid_sha256": "0" * 64}, "different 240 m grid")],
+    [
+        ({"coverage": "window"}, "full cap"),
+        ({"grid_sha256": "0" * 64}, "different 240 m grid"),
+        ({"job": None}, "no Slurm job id"),
+        ({"inputs": {**_pinned_inputs(), "stage_b_slope": {"sha256": "496f554f" + "0" * 56}}},
+         "pinned Stage B slope"),
+        ({"inputs": {**_pinned_inputs(), "dem": {"sha256": "0" * 64}}}, "pinned 20 m DEM"),
+        ({"fraction_sha256": "0" * 64}, "does not match the sidecar"),
+        ({"fraction_sha256": None}, "lacks fraction_sha256"),
+    ],
 )
 def test_api_refuses_a_layer_with_a_bad_sidecar(gated_root, monkeypatch, override, reason):
     _write_layer(gated_root, _peak_fraction(gated_root, 0.49), **override)

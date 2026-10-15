@@ -53,7 +53,7 @@ In `out/hpc/stage-f-production-<job>/`:
 | --- | --- |
 | `terrain_1km_fraction.npy` | float32, 2534 × 2534, NaN outside the cap or with no finite pixel — the gate layer |
 | `terrain_1km_finite_count.npy`, `terrain_1km_pass_count.npy` | int16 counts behind the fraction (whole grid, not cap-masked) |
-| `terrain_1km_fraction.json` | sidecar: slope limit (8°), radius, centre and NaN conventions, grid sha256, input digests, job id, layer statistics, `coverage: "full_cap"` only if every acceptance check passed |
+| `terrain_1km_fraction.json` | sidecar: slope limit (8°), radius, centre and NaN conventions, grid sha256, input digests, job id, sha256 of the fraction `.npy` (`fraction_sha256`), layer statistics, `coverage: "full_cap"` only if every acceptance check passed |
 | `stage-f-summary.json`, `output-manifest.json` | report, checks, timings, sha256 and bytes of every output |
 | `progress.log`, `module-list.txt`, `myquota-before.txt`, `myquota-after.txt` | run evidence |
 
@@ -65,12 +65,24 @@ pass array is written, so a changed threshold needs no rerun.
 - `hard.terrain_1km: {enabled: true, min_fraction: 0.5, radius_m: 1000,
   layer: terrain_1km_fraction, max_slope_deg_from: hard.max_slope_deg}`.
 - The API loads `data/grid/terrain_1km_fraction.npy` only with a valid
-  sidecar (`coverage: full_cap`, same grid sha256, same radius). Otherwise
+  sidecar: `coverage: full_cap`, same grid sha256, same radius, input
+  digests equal to the pinned Stage B slope (`08b2e17b…`) and DEM
+  (`09b7ca80…`), a non-null Slurm job id, and a `fraction_sha256` that the
+  installed `.npy` matches (the API hashes it on load). Otherwise
   the gate is **unavailable**: the ranking is today's, and `/score` and
   `/layers` say so (`terrain_gate: "unavailable"` with the reason).
 - Request switch: `hard.terrain_1km` (true / false / omitted = config) and
   `hard.terrain_1km_min_fraction` (0–1), so the UI can show the ranking
-  with and without the rule.
+  with and without the rule. Omitted, the switch degrades with a status
+  (`unavailable`, `slope_mismatch`); an explicit `terrain_1km: true` is a
+  400 when the layer is unavailable or the max slope differs.
+- **Normalisation side effect.** The gate narrows the hard mask. Under
+  `decided_per_layer` slope's min–max is scoped to the hard mask
+  (`scope: hard_mask`), so with the gate on, slope's 0–1 range is taken over
+  the gated cells only. This matters only when slope is weighted (it is not
+  by default). Illumination, hydrogen and Earth visibility use
+  `scope: valid` and are unaffected; so are the other policies, whose rules
+  all use `scope: valid`.
 - **Max slope other than 8°.** The fraction exists for 8° only and cannot be
   recomputed in the app. Decision: the gate is **not applied** and the
   response says `terrain_gate: "slope_mismatch"`, "20 m terrain rule uses

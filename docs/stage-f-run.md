@@ -35,11 +35,15 @@ ten Stage B values within two decimals, Stage D's own window path equal.
 
 The pilot and production drivers were also run end to end on the laptop
 against a `slope-20m.npy` recomputed locally with `anuma.slope20` from the
-pinned DEM (4 workers; the slope digest pin was overridden, since the local
-file's sha256 is `496f554f…`, not `08b2e17b…`). Both passed every check
-(production: 4,096 brute-force cells, all equal). This is a dry run of the
-code, not the Stage F result; the MeluXina run on the pinned slope is the
-record.
+pinned DEM (4 workers; the slope digest pin was overridden for that dry run
+only). Both passed every check (production: 4,096 brute-force cells, all
+equal). The local slope's sha256 was `496f554f…`, not the pinned
+`08b2e17b…`; the difference is libm 1-ULP rounding in the float64 Horn
+slope before the cast to float32, and every count was identical. That slope
+and its outputs were deleted on 15 October 2026 and must never be installed:
+the sidecar check now refuses any layer whose inputs are not the pinned
+digests or that has no Slurm job id. The official run uses the pinned
+`08b2e17b…` slope on MeluXina.
 
 ## Commands (MeluXina)
 
