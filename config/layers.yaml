@@ -139,6 +139,13 @@ hpc_studies:
       # fraction is wider than 0.10 or straddles threshold_fraction.
       interval_percentiles: [5, 95]
       max_interval_width: 0.10
+      percentile_method: linear   # numpy default
+      # Straddle is expected for default ranks 1, 8, 9; it means pass/fail is
+      # undecidable under the DEM error. Width carries noise sensitivity.
+      # Report which clause fired per site.
+      report_clause_fired: true
+      # About +-15 % sampling uncertainty on a width at N=200.
+      borderline_width_band: [0.085, 0.115]
       # Pass/fail and flip rate are reported, not decisive.
       report_pass_fail: true
       patch_connectivity: 8
@@ -152,6 +159,10 @@ hpc_studies:
       zero_noise_slope_atol_deg: 1.0e-4
       noise_std_ratio_tolerance: 0.05
       slope_noise_vs_ldsm_err_max_factor: 2.0
+      # Decisive for the primary run only; reported for the sensitivity run.
+      slope_noise_check_decisive_runs: [primary]
+      # Stage B 1 km fractions exist for default ranks 1-10 only.
+      stage_b_fraction_check_ranks: [1, 10]
     execution:
       nodes: 1
       pilot_qos: test

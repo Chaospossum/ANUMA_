@@ -147,6 +147,19 @@ percentile interval of its ≤ 8° fraction within 1 km over the 200 draws
 - is wider than **0.10**, or
 - straddles **0.50** (5th percentile < 0.50 ≤ 95th percentile).
 
+Percentiles use numpy's default linear method (`np.percentile(...,
+method="linear")`). The output reports, per site, which clause fired
+(width, straddle, both or neither).
+
+Straddling 0.50 is expected for default ranks 1, 8 and 9 (zero-noise 0.49,
+0.50, 0.47). For those sites it means "pass/fail is undecidable under the
+published DEM error", not "noise-sensitive"; the width clause carries noise
+sensitivity.
+
+The 0.10 width threshold is estimated from 200 draws, so a measured width
+has roughly ±15 % sampling uncertainty. Widths within that band of 0.10
+(about 0.085–0.115) are reported as **borderline** next to the verdict.
+
 Why distributional: ranks 1 (0.49), 8 (0.50) and 9 (0.47) sit on the 50 %
 line at zero noise, and zero-mean height noise tends to roughen terrain and
 push the ≤ 8° fraction down. A pass/fail flip rate around that line would be
@@ -194,9 +207,12 @@ count and scheduling.
 
 The three GeoTIFFs are being downloaded on MeluXina into
 `/project/home/p201619/ANUMA_/data/raw/`, next to the DEM, with their
-sha256 in `pgda90-sha256.txt` there. The job verifies those digests before
-reading. Reading the rasters, including hashing them, happens only inside
-compute jobs, never on a login node (global gate 6). Record `myquota`
+sha256 in `pgda90-sha256.txt` there. The download itself runs in a compute
+allocation (`salloc` on `cpudev`, script `$HOME/stage-pgda90.sh`, log
+`data/raw/pgda90-download.log`), not on the login node. The Stage D job
+verifies those digests before reading. Reading the rasters, including
+hashing them, happens only inside compute jobs, never on a login node
+(global gate 6). Record `myquota`
 before and after the download and before and after each job.
 
 Only windows are read; no full-cap array is loaded and no full-cap slope is
@@ -228,16 +244,21 @@ Pilot (2 sites × 8 draws, primary run, plus their zero-noise passes):
    outputs.
 3. Zero-noise window slope equals the matching slice of Stage B
    `slope-20m.npy` within 1e-4°, and its 1 km fraction equals the Stage B
-   table to two decimals.
+   table to two decimals. The two-decimal comparison applies only to default
+   ranks 1–10; Stage B did not tabulate ranks 11–12, so for them only the
+   slope-slice check applies.
 4. The noise field's sample standard deviation divided by `ERR`, pooled over
    the window and draws, is within 1 ± 0.05.
 5. Slope-noise scale: the standard deviation of (noisy − zero-noise) Horn
    slope over the window, pooled over draws, is compared with the median of
-   `LDSM_80S_20MPP_ADJ_ERR` in the same window. A ratio above 2 or below 0.5
-   rejects the run until the noise model is reviewed.
+   `LDSM_80S_20MPP_ADJ_ERR` in the same window. For the **primary** run, a
+   ratio above 2 or below 0.5 rejects the run until the noise model is
+   reviewed. For the σ = EFFRES sensitivity run the ratio is reported, not
+   a rejection criterion.
 6. Projected production time fits 2.0 node-hours.
 
-Production: checks 1–3 and 5 for all 8 sites and both runs, then the
+Production: checks 1–3 for all 8 sites and both runs, check 5 decisive for
+the primary run and reported for the sensitivity run, then the
 per-site table and the per-draw records with environment, resource and
 checksum manifests.
 
