@@ -461,6 +461,15 @@ array shape. It does not create the output directory or compute a ranking.
 
 ## Display-only DEM height error (no Slurm job)
 
+The three PGDA product 90 files used here and by Stage D
+(`LDEM_80S_20MPP_ADJ_ERR.TIF`, `LDEM_80S_20MPP_ADJ_EFFRES.TIF`,
+`LDSM_80S_20MPP_ADJ_ERR.TIF`) were downloaded on 2026-10-15 on cpudev
+allocations `5344516` and `5344820` (cpudev nodes have internet; the login
+nodes are not used), each with
+`wget -q -c https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/<file> -O <file>.part`,
+then renamed and hashed into `data/raw/pgda90-sha256.txt`; the log is
+`data/raw/pgda90-download.log`.
+
 `data/grid/dem_error.npy` is the mean LOLA height error per 240 m cell, from
 PGDA product 90 `LDEM_80S_20MPP_ADJ_ERR.TIF`. It is display only: it is not in
 the scoring weights, the input manifest, or the smoke check. It is built by
