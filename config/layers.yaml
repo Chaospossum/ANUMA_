@@ -14,6 +14,8 @@ paths:
   quicklook: data/quicklook
   grid_json: data/grid/grid.json
   artemis_geojson: data/artemis3_regions.geojson
+  # Stage E daily lit hours (job 5342908); read from the data root like the grid.
+  daily_lit: out/hpc/daily-lit-production-5342908
 
 hard:
   max_slope_deg: 8.0
@@ -70,6 +72,14 @@ stability:
   note: "weights varied ±0.1, default normalisation; legacy_global_2_98 picks a different winner"
   # Committed 20 m slope check for the default top 10, read from the repo.
   stage_b_checks: data/checks/stage-b-1km.json
+
+# Month window for the Stage E illumination scenario in /score and the layer view.
+# End month is inclusive. Outside this range the request is rejected.
+illumination_window:
+  first_month: "2026-01"
+  last_month: "2044-08"
+  default_label: "18.6-yr average (published map)"
+  note: "Scenario window, not mission dates"
 
 provenance:
   illumination_affine_revision: pds3-pixel-center-v2

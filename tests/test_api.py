@@ -7,7 +7,9 @@ import csv
 import io
 import json
 import os
+import shutil
 import time
+from datetime import date
 from pathlib import Path
 
 import matplotlib.image as mpimg
@@ -19,6 +21,7 @@ from anuma.api import INGEST_COMMAND, app, clear_cache
 from anuma.config import load_config, repo_root
 from anuma.grid import Grid
 from anuma.ingest import write_artemis_geojson
+from tests.test_daily_lit import _write_synthetic_output
 
 
 def _pixel(grid: Grid, lon: float, lat: float) -> tuple[int, int]:
@@ -426,3 +429,140 @@ def test_stage_b_checks_file_schema(client_empty: TestClient):
         if site["fraction_le_8deg"]["within_1km"] < body["flag"]["below"]
     ]
     assert set(flagged) == {2, 7, 10}
+
+
+def _artemis_points(client: TestClient, lists: set[str]) -> list[dict]:
+    """Keep-out points as the GUI builds them from the served GeoJSON."""
+    features = client.get("/artemis3.geojson").json()["features"]
+    return [
+        {"lon": feat["geometry"]["coordinates"][0], "lat": feat["geometry"]["coordinates"][1]}
+        for feat in features
+        if feat["geometry"] is not None and lists & set(feat["properties"]["lists"])
+    ]
+
+
+def test_keepout_artemis_points_change_the_ranking(client_ingested: TestClient):
+    request = {"hard": {"max_slope_deg": 8}, "n": 10}
+    default = client_ingested.post("/score", json=request).json()["sites"]
+    points = _artemis_points(client_ingested, {"2022", "2024"})
+    assert len(points) == 13
+    hard = client_ingested.post(
+        "/score",
+        json={**request, "keepout": {"points": points, "radius_km": 50.0, "mode": "hard"}},
+    )
+    assert hard.status_code == 200, hard.text
+    sites = hard.json()["sites"]
+    assert [(s["row"], s["col"]) for s in sites] != [(s["row"], s["col"]) for s in default]
+    # distance_km is the distance to the nearest cited Artemis III point.
+    assert all(site["distance_km"] > 50.0 for site in sites)
+
+    penalty = client_ingested.post(
+        "/score",
+        json={
+            **request,
+            "keepout": {"points": points, "radius_km": 50.0, "mode": "penalty", "penalty": 0.25},
+        },
+    ).json()["sites"]
+    by_cell = {(s["row"], s["col"]): s["total"] for s in penalty}
+    near = [s for s in default if s["distance_km"] <= 50.0]
+    assert near
+    for site in near:
+        assert by_cell[(site["row"], site["col"])] == pytest.approx(site["total"] - 0.25, abs=1e-5)
+
+
+def test_keepout_2024_list_has_fewer_points(client_empty: TestClient):
+    both = _artemis_points(client_empty, {"2022", "2024"})
+    only_2024 = _artemis_points(client_empty, {"2024"})
+    assert 0 < len(only_2024) < len(both)
+
+
+# ------------------------------------------------- Stage E month window
+
+
+WINDOW_START, WINDOW_END = date(2027, 1, 1), date(2027, 7, 1)
+
+
+@pytest.fixture
+def window_client(tmp_path, monkeypatch):
+    """A coarse grid with finite layers and a synthetic daily-lit cube of the same shape."""
+    cfg = load_config()
+    cfg["projection"]["resolution_m"] = 12000.0
+    grid = Grid(cfg)
+    shape = (grid.height, grid.width)
+    gdir = tmp_path / cfg["paths"]["grid"]
+    gdir.mkdir(parents=True)
+    grid.save_json(gdir / "grid.json")
+    generator = np.random.default_rng(4)
+    np.save(gdir / "slope.npy", np.ones(shape, dtype=np.float32))
+    for name in ("illumination", "hydrogen", "earth_visibility"):
+        np.save(gdir / f"{name}.npy", generator.random(shape).astype(np.float32))
+    cube_dir = tmp_path / cfg["paths"]["daily_lit"]
+    cube_dir.mkdir(parents=True)
+    data, valid, _ = _write_synthetic_output(cube_dir, WINDOW_START, WINDOW_END, shape=shape)
+    monkeypatch.setenv("ANUMA_ROOT", str(tmp_path))
+    monkeypatch.setattr("anuma.api._cfg", lambda: cfg)
+    clear_cache()
+    yield TestClient(app), data, valid, cube_dir
+    clear_cache()
+
+
+def test_month_window_changes_the_score(window_client):
+    client, data, valid, _ = window_client
+    default = client.post("/score", json={}).json()
+    assert default["illumination_window"]["source"] == "published"
+    windowed = client.post(
+        "/score", json={"illumination_months": {"start": "2027-02", "end": "2027-03"}}
+    )
+    assert windowed.status_code == 200, windowed.text
+    body = windowed.json()
+    assert body["illumination_window"]["source"] == "daily_lit"
+    assert body["illumination_window"]["start_day"] == "2027-02-01"
+    # End month is inclusive: March 2027 runs to 1 April.
+    assert body["illumination_window"]["end_day_exclusive"] == "2027-04-01"
+    assert [s["total"] for s in body["sites"]] != [s["total"] for s in default["sites"]]
+    assert body["png"] != default["png"]
+    # Out-of-cap cube pixels are NaN, so no ranked site sits on one.
+    assert all(valid[s["row"], s["col"]] for s in body["sites"])
+
+
+def test_month_window_layer_png(window_client):
+    client, *_ = window_client
+    plain = client.get("/layer/illumination.png")
+    windowed = client.get("/layer/illumination.png?start=2027-01&end=2027-03")
+    assert plain.status_code == 200 and windowed.status_code == 200, windowed.text
+    assert windowed.headers["content-type"].startswith("image/png")
+    assert windowed.content != plain.content
+    assert client.get("/layer/slope.png?start=2027-01&end=2027-03").status_code == 400
+    assert client.get("/layer/illumination.png?start=2027-01").status_code == 400
+    assert client.get("/layer/illumination.png?start=2027-13&end=2027-03").status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "status", "text"),
+    [
+        ("2026-13", "2027-01", 422, "YYYY-MM"),
+        ("2027-1", "2027-03", 422, "YYYY-MM"),
+        ("2027-03", "2027-01", 422, "after end month"),
+        ("2025-12", "2026-02", 400, "outside 2026-01..2044-08"),
+        ("2044-08", "2044-09", 400, "outside 2026-01..2044-08"),
+        ("2030-01", "2030-02", 400, "outside"),  # in range, but not in the synthetic cube
+    ],
+)
+def test_month_window_rejects_bad_ranges(window_client, start, end, status, text):
+    client, *_ = window_client
+    response = client.post("/score", json={"illumination_months": {"start": start, "end": end}})
+    assert response.status_code == status, response.text
+    assert text in json.dumps(response.json())
+
+
+def test_month_window_without_cube_is_400(window_client):
+    client, _, _, cube_dir = window_client
+    shutil.rmtree(cube_dir)
+    clear_cache()
+    response = client.post(
+        "/score", json={"illumination_months": {"start": "2027-01", "end": "2027-02"}}
+    )
+    assert response.status_code == 400
+    assert "daily sunlight data not available on this machine" in response.json()["detail"]
+    assert client.post("/score", json={}).status_code == 200
+    assert client.get("/layers").json()["illumination_window"]["available"] is False

@@ -236,6 +236,88 @@ select {
   cursor: pointer;
 }
 
+/* Keep-out and illumination-window groups; selects shrink inside the 240 px rail. */
+.group {
+  min-width: 0;
+  padding: 8px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.group legend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-weight: 500;
+  font-size: 0.8rem;
+}
+
+.group .check label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.group-body {
+  margin-top: 8px;
+}
+
+.group-body > select,
+.group-body > div {
+  margin-bottom: 8px;
+}
+
+.group .field-pair > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.group label.sub {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+#keepout-radius,
+#keepout-penalty {
+  width: 5rem;
+  padding: 4px 6px;
+  font-family: var(--mono);
+  border: 1px solid var(--line);
+}
+
+.link-button {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 0.72rem;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link-button:disabled {
+  color: var(--muted);
+  text-decoration: none;
+  cursor: default;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.group [hidden] {
+  display: none !important;
+}
+
 .primary {
   display: block;
   width: 100%;

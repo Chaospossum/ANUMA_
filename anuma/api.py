@@ -9,17 +9,20 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
+from datetime import date
 from pathlib import Path
 from typing import Annotated, Any
 
 import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from anuma.artemis import distinction, feature_collection
 from anuma.config import load_config, repo_root
+from anuma.daily_lit import DailyLitCube
 from anuma.export import sites_csv, sites_geojson
 from anuma.grid import Grid
 from anuma.heatmap import render_png
@@ -30,6 +33,9 @@ REQUIRED_FOR_SCORE = ("slope", "illumination", "hydrogen", "earth_visibility")
 DISPLAY_LAYERS = ("dem", "slope", "illumination", "hydrogen", "earth_visibility")
 
 _STORE: dict[str, Any] = {}
+_CUBES: dict[str, DailyLitCube] = {}
+_MONTH = re.compile(r"^(\d{4})-(\d{2})$")
+DAILY_LIT_MISSING = "daily sunlight data not available on this machine"
 
 
 class HardBody(BaseModel):
@@ -51,11 +57,46 @@ class KeepOutBody(BaseModel):
     penalty: float | None = None
 
 
+def _parse_month(value: str) -> date:
+    match = _MONTH.match(value)
+    if match is None or not 1 <= int(match.group(2)) <= 12:
+        raise ValueError(f"month {value!r} must be YYYY-MM with MM in 01..12")
+    return date(int(match.group(1)), int(match.group(2)), 1)
+
+
+def _next_month(day: date) -> date:
+    return date(day.year + day.month // 12, day.month % 12 + 1, 1)
+
+
+class MonthWindow(BaseModel):
+    """Inclusive month range for the Stage E illumination scenario."""
+
+    start: str
+    end: str
+
+    @field_validator("start", "end")
+    @classmethod
+    def _month_format(cls, value: str) -> str:
+        _parse_month(value)
+        return value
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "MonthWindow":
+        if _parse_month(self.start) > _parse_month(self.end):
+            raise ValueError(f"start month {self.start} is after end month {self.end}")
+        return self
+
+    def days(self) -> tuple[date, date]:
+        """First day of start, and first day after the inclusive end month."""
+        return _parse_month(self.start), _next_month(_parse_month(self.end))
+
+
 class ScoreBody(BaseModel):
     weights: dict[str, Annotated[float, Field(ge=0.0)]] | None = None
     hard: HardBody | None = None
     n: int | None = Field(default=None, ge=1, le=50)
     keepout: KeepOutBody | None = None
+    illumination_months: MonthWindow | None = None
 
 
 def data_root() -> Path:
@@ -65,6 +106,7 @@ def data_root() -> Path:
 
 def clear_cache() -> None:
     _STORE.clear()
+    _CUBES.clear()
 
 
 def _cfg() -> dict:
@@ -77,6 +119,7 @@ def _paths(cfg: dict, root: Path) -> dict[str, Path]:
         "grid": root / p["grid"],
         "grid_json": root / p["grid_json"],
         "artemis_geojson": root / p["artemis_geojson"],
+        "daily_lit": root / p["daily_lit"],
     }
 
 
@@ -124,6 +167,73 @@ def _load_store(cfg: dict, root: Path) -> dict[str, Any]:
     store = {"grid": grid, "layers": layers, "root": root}
     _STORE[key] = store
     return store
+
+
+def _window_bounds(cfg: dict) -> tuple[date, date]:
+    spec = cfg["illumination_window"]
+    return _parse_month(spec["first_month"]), _parse_month(spec["last_month"])
+
+
+def _load_cube(cfg: dict, root: Path, shape: tuple[int, int]) -> DailyLitCube:
+    path = _paths(cfg, root)["daily_lit"]
+    key = str(path.resolve())
+    cube = _CUBES.get(key)
+    if cube is None:
+        if not path.is_dir():
+            raise HTTPException(status_code=400, detail=f"{DAILY_LIT_MISSING} ({path})")
+        try:
+            cube = DailyLitCube(path)
+        except (FileNotFoundError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400, detail=f"{DAILY_LIT_MISSING}: {exc}"
+            ) from exc
+        _CUBES[key] = cube
+    if tuple(cube.shape) != tuple(shape):
+        raise HTTPException(
+            status_code=400,
+            detail=f"daily sunlight cube shape {tuple(cube.shape)} does not match grid {tuple(shape)}",
+        )
+    return cube
+
+
+def _window_illumination(
+    cfg: dict, root: Path, store: dict, window: MonthWindow
+) -> tuple[np.ndarray, dict]:
+    """Mean lit fraction over the month window, NaN out of cap like the PDS layer."""
+    first, last = _window_bounds(cfg)
+    lo, hi = _parse_month(window.start), _parse_month(window.end)
+    if lo < first or hi > last:
+        spec = cfg["illumination_window"]
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"illumination months {window.start}..{window.end} are outside "
+                f"{spec['first_month']}..{spec['last_month']}"
+            ),
+        )
+    grid = store["grid"]
+    cube = _load_cube(cfg, root, (grid.height, grid.width))
+    start, end = window.days()
+    try:
+        hours = cube.lit_hours_mean(start, end)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=f"{DAILY_LIT_MISSING}: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"daily sunlight cube: {exc}") from exc
+    fraction = (hours / 24.0).astype(np.float32)
+    used = {
+        "source": "daily_lit",
+        "start": window.start,
+        "end": window.end,
+        "start_day": start.isoformat(),
+        "end_day_exclusive": end.isoformat(),
+        "note": cfg["illumination_window"]["note"],
+    }
+    return fraction, used
+
+
+def _default_window(cfg: dict) -> dict:
+    return {"source": "published", "label": cfg["illumination_window"]["default_label"]}
 
 
 def _finite_or_none(value: Any) -> float | None:
@@ -239,6 +349,12 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
     )
     n = body.n if body.n is not None else int(cfg["scoring"]["n_sites"])
     layers = store["layers"]
+    window = _default_window(cfg)
+    if body.illumination_months is not None:
+        layers = dict(layers)
+        layers["illumination"], window = _window_illumination(
+            cfg, root, store, body.illumination_months
+        )
     needed = ["slope", *weights.keys()]
     absent = [name for name in needed if name not in layers]
     if absent:
@@ -262,6 +378,7 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
         "bounds": [grid.xmin, grid.ymin, grid.xmax, grid.ymax],
         "sites": [_site_payload(s) for s in overlap["sites"]],
         "artemis": _artemis_payload(overlap, cfg),
+        "illumination_window": window,
     }
     if include_png:
         png = render_png(result.combined, cmap="viridis")
@@ -312,6 +429,13 @@ def create_app() -> FastAPI:
                 "slope_radius_m": float(cfg["hard"]["slope_radius_m"]),
                 "n": int(cfg["scoring"]["n_sites"]),
             },
+            "illumination_window": {
+                "first_month": cfg["illumination_window"]["first_month"],
+                "last_month": cfg["illumination_window"]["last_month"],
+                "default_label": cfg["illumination_window"]["default_label"],
+                "note": cfg["illumination_window"]["note"],
+                "available": _paths(cfg, root)["daily_lit"].is_dir(),
+            },
             "layers": layers,
         }
 
@@ -340,7 +464,24 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/layer/{name}.png")
-    def get_layer_png(name: str) -> Response:
+    def get_layer_png(
+        name: str,
+        start: Annotated[str | None, Query()] = None,
+        end: Annotated[str | None, Query()] = None,
+    ) -> Response:
+        window = None
+        if start is not None or end is not None:
+            if name != "illumination":
+                raise HTTPException(
+                    status_code=400, detail="start/end months apply only to illumination"
+                )
+            if start is None or end is None:
+                raise HTTPException(status_code=400, detail="give both start and end months")
+            try:
+                window = MonthWindow(start=start, end=end)
+            except ValidationError as exc:
+                detail = "; ".join(item["msg"] for item in exc.errors())
+                raise HTTPException(status_code=400, detail=detail) from exc
         if name == "score":
             # Combined score at the config defaults, in the same viridis as /score.
             png = base64.b64decode(_run_score()["png"])
@@ -353,6 +494,8 @@ def create_app() -> FastAPI:
         array = store["layers"].get(name)
         if array is None:
             raise _not_ingested([name])
+        if window is not None:
+            array, _ = _window_illumination(cfg, root, store, window)
         mode = cfg["layers"][name].get("mode")
         if mode:
             painted = normalize(

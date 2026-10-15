@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>anuma · lunar south-pole landing-site screening</title>
     <link rel="stylesheet" href="/vendor/leaflet.css" />
-    <link rel="stylesheet" href="/style.css?v=demo-ui" />
+    <link rel="stylesheet" href="/style.css?v=keepout-window" />
   </head>
   <body>
     <div class="app">
@@ -56,6 +56,55 @@
               </div>
               <p class="help">Slope requirement must be valid in the circle defined by the radius.</p>
             </div>
+            <fieldset class="field group" id="keepout-group">
+              <legend class="visually-hidden">Artemis III keep-out</legend>
+              <div class="check">
+                <label>
+                  <input id="keepout-toggle" type="checkbox" />
+                  Avoid Artemis III candidate regions
+                </label>
+              </div>
+              <div class="group-body" id="keepout-body" hidden>
+                <label for="keepout-lists">Candidate list</label>
+                <select id="keepout-lists">
+                  <option value="2022,2024">2022 + 2024 lists</option>
+                  <option value="2024">Oct 2024 list only</option>
+                </select>
+                <div class="field-pair">
+                  <div>
+                    <label for="keepout-radius">Radius (km)</label>
+                    <input id="keepout-radius" type="number" min="0.5" step="0.5" value="5" />
+                  </div>
+                  <div>
+                    <label for="keepout-mode">Mode</label>
+                    <select id="keepout-mode">
+                      <option value="hard">hard</option>
+                      <option value="penalty">penalty</option>
+                    </select>
+                  </div>
+                </div>
+                <div id="keepout-penalty-row">
+                  <label for="keepout-penalty">Penalty (score units)</label>
+                  <input id="keepout-penalty" type="number" min="0" max="1" step="0.05" value="0.25" />
+                </div>
+                <p class="help" id="keepout-note">Approximate points (Goossens et al. 2025), not NASA centres.</p>
+              </div>
+            </fieldset>
+            <fieldset class="field group" id="window-group">
+              <legend>Illumination window</legend>
+              <div class="field-pair">
+                <div>
+                  <label for="window-start" class="sub">From</label>
+                  <select id="window-start"></select>
+                </div>
+                <div>
+                  <label for="window-end" class="sub">To (incl.)</label>
+                  <select id="window-end"></select>
+                </div>
+              </div>
+              <p class="help" id="window-note">Scenario window, not mission dates.</p>
+              <button type="button" id="window-reset" class="link-button">18.6-yr average (published map)</button>
+            </fieldset>
             <div class="field">
               <label for="layer-select">Show single layer</label>
               <select id="layer-select">
@@ -146,6 +195,6 @@
     <script src="/vendor/leaflet.js"></script>
     <script src="/vendor/proj4.js"></script>
     <script src="/vendor/proj4leaflet.js"></script>
-    <script src="/app.js?v=demo-ui"></script>
+    <script src="/app.js?v=keepout-window"></script>
   </body>
 </html>

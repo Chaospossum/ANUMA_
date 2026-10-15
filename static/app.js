@@ -22,6 +22,9 @@
   var stability = null;
   var stabilityById = {};
   var checks = null;
+  // Cited Artemis III points from /artemis3.geojson, fetched once.
+  var artemisGeojson = null;
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   var els = {
     illum: document.getElementById("w-illum"),
@@ -59,6 +62,18 @@
     legendNote: document.getElementById("legend-note"),
     tableNote: document.getElementById("table-note"),
     present: document.getElementById("present-toggle"),
+    keepout: document.getElementById("keepout-toggle"),
+    keepoutBody: document.getElementById("keepout-body"),
+    keepoutLists: document.getElementById("keepout-lists"),
+    keepoutRadius: document.getElementById("keepout-radius"),
+    keepoutMode: document.getElementById("keepout-mode"),
+    keepoutPenalty: document.getElementById("keepout-penalty"),
+    keepoutPenaltyRow: document.getElementById("keepout-penalty-row"),
+    keepoutNote: document.getElementById("keepout-note"),
+    windowStart: document.getElementById("window-start"),
+    windowEnd: document.getElementById("window-end"),
+    windowNote: document.getElementById("window-note"),
+    windowReset: document.getElementById("window-reset"),
   };
 
   function fmt(n) {
@@ -160,7 +175,9 @@
       return layer.name === name;
     })[0] || {};
     var unit = info.unit ? " (" + info.unit + ")" : "";
-    els.legendTitle.textContent = layerLabel(name) + unit;
+    var months = name === "illumination" ? currentWindow() : null;
+    els.legendTitle.textContent =
+      layerLabel(name) + unit + (months ? " · " + windowLabel(months) : "");
     els.legendBar.style.background = GREY;
     if (info.mode === "lower_better") {
       els.legendLow.textContent = "high";
@@ -541,8 +558,165 @@
     };
   }
 
+  // ---- Artemis III keep-out
+
+  function keepoutLists() {
+    return els.keepoutLists.value.split(",");
+  }
+
+  // Cited points on the chosen lists. Regions without a published point are
+  // counted so the note can say how many were skipped.
+  function keepoutPoints() {
+    var lists = keepoutLists();
+    var points = [];
+    var skipped = 0;
+    ((artemisGeojson && artemisGeojson.features) || []).forEach(function (feat) {
+      var props = feat.properties || {};
+      var onList = (props.lists || []).some(function (year) {
+        return lists.indexOf(year) >= 0;
+      });
+      if (!onList) {
+        return;
+      }
+      if (!feat.geometry) {
+        skipped += 1;
+        return;
+      }
+      points.push({ lon: feat.geometry.coordinates[0], lat: feat.geometry.coordinates[1] });
+    });
+    return { points: points, skipped: skipped };
+  }
+
+  function updateKeepoutNote() {
+    els.keepoutBody.hidden = !els.keepout.checked;
+    els.keepoutPenaltyRow.hidden = els.keepoutMode.value !== "penalty";
+    var label = els.keepoutLists.options[els.keepoutLists.selectedIndex].text;
+    if (!artemisGeojson) {
+      els.keepoutNote.textContent = "Artemis III points not loaded.";
+      return;
+    }
+    var used = keepoutPoints();
+    els.keepoutNote.textContent =
+      used.points.length + " approximate points from the " + label +
+      " (Goossens et al. 2025, not NASA centres)" +
+      (used.skipped ? "; " + used.skipped + " regions have no cited point and are not avoided." : ".");
+  }
+
+  function currentKeepout() {
+    if (!els.keepout.checked) {
+      return null;
+    }
+    var spec = {
+      points: keepoutPoints().points,
+      radius_km: Number(els.keepoutRadius.value),
+      mode: els.keepoutMode.value,
+    };
+    if (spec.mode === "penalty") {
+      spec.penalty = Number(els.keepoutPenalty.value);
+    }
+    return spec;
+  }
+
+  async function loadArtemisPoints() {
+    try {
+      var response = await fetch("/artemis3.geojson");
+      artemisGeojson = response.ok ? await response.json() : null;
+    } catch (err) {
+      artemisGeojson = null;
+    }
+    updateKeepoutNote();
+  }
+
+  // ---- Stage E month window
+
+  function monthText(value) {
+    var parts = value.split("-");
+    return MONTHS[Number(parts[1]) - 1] + " " + parts[0];
+  }
+
+  function windowLabel(months) {
+    return months.start === months.end
+      ? monthText(months.start)
+      : monthText(months.start) + " – " + monthText(months.end);
+  }
+
+  function currentWindow() {
+    if (!els.windowStart.value || !els.windowEnd.value) {
+      return null;
+    }
+    return { start: els.windowStart.value, end: els.windowEnd.value };
+  }
+
+  function fillWindowSelects(info) {
+    var spec = info.illumination_window;
+    if (!spec) {
+      return;
+    }
+    var html = '<option value="">average</option>';
+    var year = Number(spec.first_month.slice(0, 4));
+    var month = Number(spec.first_month.slice(5, 7));
+    var last = spec.last_month;
+    var value = "";
+    while (value !== last) {
+      value = year + "-" + pad2(month);
+      html += '<option value="' + value + '">' + monthText(value) + "</option>";
+      month += 1;
+      if (month > 12) {
+        month = 1;
+        year += 1;
+      }
+    }
+    els.windowStart.innerHTML = html;
+    els.windowEnd.innerHTML = html;
+    els.windowReset.textContent = spec.default_label;
+    if (!spec.available) {
+      els.windowStart.disabled = true;
+      els.windowEnd.disabled = true;
+    }
+    updateWindowNote();
+  }
+
+  function updateWindowNote() {
+    var spec = (meta && meta.illumination_window) || {};
+    var months = currentWindow();
+    var note = (spec.note || "Scenario window, not mission dates") + ". ";
+    if (spec.available === false) {
+      note += "Daily sunlight data not available on this machine.";
+    } else if (months) {
+      note += "Using Stage E daily sunlight, " + windowLabel(months) + ".";
+    } else {
+      note += "Using the " + (spec.default_label || "published map") + ".";
+    }
+    els.windowNote.textContent = note;
+    // Disabled while the published average is already in use.
+    els.windowReset.disabled = !months;
+  }
+
+  // Keep start <= end, then re-score once both months are set.
+  function onWindowChange(changed) {
+    var start = els.windowStart.value;
+    var end = els.windowEnd.value;
+    if (changed === "start" && start && (!end || end < start)) {
+      els.windowEnd.value = start;
+    } else if (changed === "end" && end && (!start || start > end)) {
+      els.windowStart.value = end;
+    } else if (!start || !end) {
+      els.windowStart.value = "";
+      els.windowEnd.value = "";
+    }
+    updateWindowNote();
+    runScore({ keepLayer: true });
+  }
+
+  function resetWindow() {
+    els.windowStart.value = "";
+    els.windowEnd.value = "";
+    updateWindowNote();
+    runScore({ keepLayer: true });
+  }
+
   function currentRequest() {
-    return {
+    var request = {
       weights: currentWeights(),
       hard: {
         max_slope_deg: Number(els.slope.value),
@@ -550,6 +724,15 @@
       },
       n: (meta.defaults && meta.defaults.n) || 10,
     };
+    var keepout = currentKeepout();
+    if (keepout) {
+      request.keepout = keepout;
+    }
+    var months = currentWindow();
+    if (months) {
+      request.illumination_months = months;
+    }
+    return request;
   }
 
   async function downloadRanking(path, filename) {
@@ -653,7 +836,10 @@
     return payload || { message: "HTTP " + response.status };
   }
 
-  async function runScore() {
+  // keepLayer: a re-score from the keep-out or window controls leaves a
+  // single layer on the map and refreshes it instead of switching to score.
+  async function runScore(options) {
+    var keepLayer = options && options.keepLayer && els.layer.value !== "score";
     els.score.disabled = true;
     els.csv.disabled = true;
     els.geojson.disabled = true;
@@ -689,8 +875,12 @@
       }
       lastScore = payload;
       hideVeil();
-      setOverlay("data:image/png;base64," + payload.png, payload.bounds, "score");
-      els.layer.value = "score";
+      if (keepLayer) {
+        await showSingleLayer(els.layer.value);
+      } else {
+        setOverlay("data:image/png;base64," + payload.png, payload.bounds, "score");
+        els.layer.value = "score";
+      }
       selectedRank = null;
       renderSites(payload.sites, request.hard.slope_radius_m);
       renderArtemis(payload.artemis);
@@ -722,14 +912,27 @@
       return;
     }
     try {
-      var response = await fetch("/layer/" + encodeURIComponent(name) + ".png");
+      var path = "/layer/" + encodeURIComponent(name) + ".png";
+      var months = name === "illumination" ? currentWindow() : null;
+      if (months) {
+        path += "?start=" + encodeURIComponent(months.start) + "&end=" + encodeURIComponent(months.end);
+      }
+      var response = await fetch(path);
       if (response.status === 412) {
         var payload = await response.json();
         showNotIngested(detailFrom(response, payload).ingest_command);
         return;
       }
       if (!response.ok) {
-        showVeil("Layer missing", "Could not load " + name + ".", "", "");
+        var failure = await response.json().catch(function () {
+          return {};
+        });
+        showVeil(
+          "Layer missing",
+          (typeof failure.detail === "string" && failure.detail) || "Could not load " + name + ".",
+          "",
+          ""
+        );
         return;
       }
       var blob = await response.blob();
@@ -834,7 +1037,9 @@
     [els.illum, els.hydro, els.earth].forEach(function (slider) {
       slider.addEventListener("input", syncSliderLabels);
     });
-    els.score.addEventListener("click", runScore);
+    els.score.addEventListener("click", function () {
+      runScore();
+    });
     els.csv.addEventListener("click", function () {
       downloadRanking("/score.csv", "anuma-ranked-sites.csv").catch(function (err) {
         showVeil("Export failed", String(err), "", "");
@@ -849,6 +1054,25 @@
       showSingleLayer(els.layer.value);
     });
     els.artemis.addEventListener("change", toggleArtemis);
+    els.keepout.addEventListener("change", function () {
+      updateKeepoutNote();
+      runScore({ keepLayer: true });
+    });
+    [els.keepoutLists, els.keepoutRadius, els.keepoutMode, els.keepoutPenalty].forEach(function (input) {
+      input.addEventListener("change", function () {
+        updateKeepoutNote();
+        if (els.keepout.checked) {
+          runScore({ keepLayer: true });
+        }
+      });
+    });
+    els.windowStart.addEventListener("change", function () {
+      onWindowChange("start");
+    });
+    els.windowEnd.addEventListener("change", function () {
+      onWindowChange("end");
+    });
+    els.windowReset.addEventListener("click", resetWindow);
 
     try {
       var response = await fetch("/layers");
@@ -860,8 +1084,10 @@
 
     applyDefaults(meta);
     fillLayerSelect(meta);
+    fillWindowSelects(meta);
     initMap(meta);
     await loadAnnotations();
+    await loadArtemisPoints();
 
     if (!meta.ingested) {
       showNotIngested(meta.ingest_command);
