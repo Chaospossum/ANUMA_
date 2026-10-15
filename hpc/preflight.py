@@ -94,9 +94,30 @@ JOB_PROFILES = {
         "node_hours": 6.0,
         "core_hours": 768.0,
     },
+    # Stage E daily lit hours: pilot 0.5 + production 3.0 = 3.5 node-hours,
+    # proposed from the 55 held node-hours (docs/stage-e-daily-lit-plan.md).
+    "daily-lit-pilot": {
+        "qos": "test",
+        "walltime": "00:30:00",
+        "walltime_minutes": 30,
+        "cpus": 128,
+        "memory": "240G",
+        "node_hours": 0.5,
+        "core_hours": 64.0,
+    },
+    "daily-lit": {
+        "qos": "default",
+        "walltime": "03:00:00",
+        "walltime_minutes": 3 * 60,
+        "cpus": 128,
+        "memory": "240G",
+        "node_hours": 3.0,
+        "core_hours": 384.0,
+    },
 }
 SUN_PROFILES = frozenset({"sun-validation-pilot", "sun-validation"})
 STAGE_B_PROFILES = frozenset({"stage-b-pilot", "stage-b"})
+DAILY_LIT_PROFILES = {"daily-lit-pilot": "pilot", "daily-lit": "production"}
 QOS_MAX_WALL_MINUTES = {
     "dev": 6 * 60,
     "test": 30,
@@ -328,6 +349,45 @@ def run_preflight(receipt_path: Path) -> dict:
                 "not required for pilot; production refuses without a pass"
             )
 
+    daily_lit_pin: dict = {}
+    if job_profile in DAILY_LIT_PROFILES:
+        if account != "p201619":
+            fail("daily lit requires account p201619")
+        from anuma import daily_lit
+        from anuma.sun import load_sun_config
+
+        sun_cfg = load_sun_config()
+        kernel_manifest = Path(
+            os.environ.get("ANUMA_KERNEL_MANIFEST", sun_cfg["sun"]["kernel_manifest"])
+        )
+        stage_a_dir = Path(
+            os.environ.get(
+                "ANUMA_STAGE_A_DIR",
+                daily_lit.load_daily_lit_config()["stage_a"]["default_dir"],
+            )
+        )
+        horizon_cube = Path(
+            os.environ.get("ANUMA_HORIZON_CUBE", str(stage_a_dir / "terrain-horizon.npy"))
+        )
+        mode = DAILY_LIT_PROFILES[job_profile]
+        try:
+            daily_lit_pin = daily_lit.receipt_pin(
+                kernel_manifest=kernel_manifest,
+                stage_a_dir=stage_a_dir,
+                horizon_cube=horizon_cube,
+                mode=mode,
+            )
+            # Refuse a period the verified kernels do not cover. This reads
+            # the kernels on the compute allocation; it does not hash the cube.
+            start, end = daily_lit.period_days(daily_lit.load_daily_lit_config(), mode)
+            coverage = daily_lit.require_spice_coverage(
+                kernel_manifest, sun_cfg["sun"]["required_kernel_roles"], start, end
+            )
+        except ValueError as exc:
+            fail(str(exc))
+        daily_lit_pin["spice_coverage_window"] = coverage["window"]
+        daily_lit_pin["spice_covers_window"] = coverage["covers_window"]
+
     receipt = {
         "schema_version": 1,
         "verified_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -354,6 +414,7 @@ def run_preflight(receipt_path: Path) -> dict:
         "job_memory": profile["memory"],
         **sun_pin,
         **stage_b_pin,
+        **daily_lit_pin,
     }
     canonical = json.dumps(receipt, sort_keys=True).encode()
     receipt["receipt_sha256"] = hashlib.sha256(canonical).hexdigest()
