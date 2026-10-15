@@ -425,4 +425,4 @@ def test_stage_b_checks_file_schema(client_empty: TestClient):
         for site in body["sites"]
         if site["fraction_le_8deg"]["within_1km"] < body["flag"]["below"]
     ]
-    assert 2 in flagged and 10 in flagged
+    assert set(flagged) == {2, 7, 10}

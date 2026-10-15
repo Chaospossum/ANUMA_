@@ -612,12 +612,12 @@ body.present .site-leader {
   overflow: visible;
 }
 
-.site-leader line {
+body.present .site-leader line {
   stroke: var(--ink);
   stroke-width: 1;
 }
 
-.site-dot {
+body.present .site-dot {
   left: -5px;
   top: -5px;
   width: 10px;

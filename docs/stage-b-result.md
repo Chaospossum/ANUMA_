@@ -45,7 +45,8 @@ What the run does show:
 | 9 | 85.48°S 31.39°E | 0.68 | 0.53 | 0.47 |
 | 10 | 89.80°S 54.73°E | **0.59** | 0.39 | **0.21** |
 
-Ranks 2 and 10 are mostly steeper than 8° at 20 m within 1 km.
+Ranks 2 and 10 are mostly steeper than 8° at 20 m within 1 km. Rank 7 is close behind
+(0.24); the web app flags all three, using the rule "within 1 km below 0.25".
 
 ## Caveats
 

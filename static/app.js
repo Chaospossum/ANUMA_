@@ -153,7 +153,7 @@
       els.legendBar.style.background = VIRIDIS;
       els.legendLow.textContent = "low";
       els.legendHigh.textContent = "high";
-      els.legendNote.textContent = "white = fails slope rule";
+      els.legendNote.textContent = "blank = fails slope rule";
       return;
     }
     var info = ((meta && meta.layers) || []).filter(function (layer) {
@@ -277,18 +277,14 @@
     if (!checks || !checks.sites) {
       return null;
     }
-    var p = proj4(PROJ4, [site.lon, site.lat]);
-    var best = null;
-    var bestM = Infinity;
+    // Same 240 m cell only, so a neighbouring cell never inherits a check.
+    var found = null;
     checks.sites.forEach(function (check) {
-      var q = proj4(PROJ4, [check.lon, check.lat]);
-      var d = Math.hypot(p[0] - q[0], p[1] - q[1]);
-      if (d < bestM) {
-        bestM = d;
-        best = check;
+      if (check.row === site.row && check.col === site.col) {
+        found = check;
       }
     });
-    return bestM <= checks.match_km * 1000 ? best : null;
+    return found;
   }
 
   function flagHtml(site) {
