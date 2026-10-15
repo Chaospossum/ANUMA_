@@ -11,7 +11,20 @@
   // URL switches for demos and screenshots: ?present=1&rail=0&site=1
   var PARAMS = new URLSearchParams(window.location.search);
 
+  // Hand-placed offline labels: approximate crater centres (deg, east positive).
+  var PLACES = [
+    { name: "Shackleton", lat: -89.67, lon: 129.78 },
+    { name: "de Gerlache", lat: -88.5, lon: -87.1 },
+    { name: "Shoemaker", lat: -88.1, lon: 44.9 },
+    { name: "Haworth", lat: -87.45, lon: -5.0 },
+    { name: "Faustini", lat: -87.3, lon: 77.0 },
+    { name: "Nobile", lat: -85.2, lon: 53.5 },
+    { name: "Malapert", lat: -84.9, lon: 12.9 },
+    { name: "Amundsen", lat: -84.5, lon: 82.8 },
+  ];
+
   var map = null;
+  var baseLayer = null;
   var overlay = null;
   var siteLayer = null;
   var artemisLayer = null;
@@ -224,7 +237,7 @@
       els.legendBar.style.background = VIRIDIS;
       els.legendLow.textContent = "low";
       els.legendHigh.textContent = "high";
-      els.legendNote.textContent = "blank = fails slope rule";
+      els.legendNote.textContent = "no colour (grey terrain) = fails slope rule";
       return;
     }
     var info = ((meta && meta.layers) || []).filter(function (layer) {
@@ -256,12 +269,10 @@
         els.legendLow.textContent = "low";
         els.legendHigh.textContent = "high";
       }
-      // The PNG draws the largest error in each block; the range is over those pixels.
+      // The PNG is the grid pixel for pixel; the range is over those pixels.
       els.legendNote.textContent =
         "display only, not scored; black = smallest error, white = largest error" +
-        (layerRange && layerRange.pct
-          ? " (≥ p" + layerRange.pct + " of shown pixels, each its block maximum)"
-          : "") +
+        (layerRange && layerRange.pct ? " (≥ p" + layerRange.pct + " of grid cells)" : "") +
         "; blank = no data";
       return;
     }
@@ -278,7 +289,7 @@
       els.legendHigh.textContent = "high";
     }
     if (name === "slope") {
-      els.legendNote.textContent = "normalised; white = flattest, blank = fails slope rule";
+      els.legendNote.textContent = "normalised; white = flattest, no grey = fails slope rule";
     } else if (info.mode) {
       els.legendNote.textContent = "normalised; black = worse, blank = no data";
     } else {
@@ -299,12 +310,76 @@
       URL.revokeObjectURL(overlayUrl);
     }
     overlayUrl = url;
+    // Semi-transparent over the grey terrain, so blank cells show the ground.
     overlay = L.Proj.imageOverlay(url, projectedBounds(bounds), {
-      opacity: 0.92,
-      pane: "overlayPane",
+      opacity: 0.78,
+      pane: "scorePane",
     });
     overlay.addTo(map);
     updateLegend(name || "score");
+  }
+
+  // Grey LOLA elevation under the score, so the map reads as terrain.
+  async function addTerrain(info) {
+    try {
+      var response = await fetch("/layer/dem.png");
+      if (!response.ok) {
+        return;
+      }
+      var url = URL.createObjectURL(await response.blob());
+      baseLayer = L.Proj.imageOverlay(url, projectedBounds(info.bounds), {
+        opacity: 0.5,
+        pane: "basePane",
+        interactive: false,
+      }).addTo(map);
+    } catch (err) {
+      // No terrain backdrop; the score still draws.
+    }
+  }
+
+  // Circle of constant latitude, traced in the map's stereographic metres.
+  function latitudeRing(crs, lat) {
+    var radius = Math.abs(crs.projection.project(L.latLng(lat, 0)).y);
+    var ring = [];
+    var i;
+    for (i = 0; i <= 180; i += 1) {
+      var angle = (2 * Math.PI * i) / 180;
+      ring.push(crs.projection.unproject(L.point(radius * Math.cos(angle), radius * Math.sin(angle))));
+    }
+    return ring;
+  }
+
+  function addGraticule(crs) {
+    L.polyline(latitudeRing(crs, -85), {
+      color: "#161921",
+      weight: 1,
+      opacity: 0.55,
+      dashArray: "4 4",
+      interactive: false,
+      pane: "labelPane",
+    }).addTo(map);
+    placeLabel("85°S", -85, 135, "grat-label");
+  }
+
+  function placeLabel(text, lat, lon, cls) {
+    L.marker([lat, lon], {
+      icon: L.divIcon({
+        className: "place-mark",
+        html: '<span class="' + cls + '">' + escapeHtml(text) + "</span>",
+        iconSize: [0, 0],
+        iconAnchor: [0, 0],
+      }),
+      interactive: false,
+      keyboard: false,
+      pane: "labelPane",
+    }).addTo(map);
+  }
+
+  function addPlaceLabels() {
+    PLACES.forEach(function (place) {
+      placeLabel(place.name, place.lat, place.lon, "place-label");
+    });
+    placeLabel("South Pole", -90, 0, "place-label pole-label");
   }
 
   function addPoleMarker() {
@@ -1478,15 +1553,22 @@
       crs: crs,
       center: [-90, 0],
       zoom: 2,
-      minZoom: 0,
-      maxZoom: 8,
+      zoomSnap: 1,
+      minZoom: 1,
+      maxZoom: 5,
       zoomControl: false,
       attributionControl: false,
       boxZoom: false,
     });
-    var sw = crs.projection.unproject(L.point(info.bounds[0], info.bounds[1]));
-    var ne = crs.projection.unproject(L.point(info.bounds[2], info.bounds[3]));
-    map.fitBounds(L.latLngBounds(sw, ne), { animate: false, padding: [4, 4] });
+    // Zoom 1 shows the whole 80°S cap; zoom 2 opens on the pole out to about 85°S.
+    map.setView([-90, 0], Number(PARAMS.get("zoom")) || 2, { animate: false });
+    map.createPane("basePane").style.zIndex = 250;
+    map.createPane("scorePane").style.zIndex = 350;
+    map.createPane("labelPane").style.zIndex = 450;
+    map.getPane("labelPane").style.pointerEvents = "none";
+    addTerrain(info);
+    addGraticule(crs);
+    addPlaceLabels();
     addPoleMarker();
     map.on("mousemove", function (event) {
       updateCoords(event.latlng);
@@ -1694,6 +1776,25 @@
         weight: 1,
         fill: false,
       },
+      pointToLayer: function (feature, latlng) {
+        return L.marker(latlng, {
+          icon: L.divIcon({
+            className: "artemis-mark",
+            html: '<span class="artemis-square"></span>',
+            iconSize: [10, 10],
+            iconAnchor: [5, 5],
+          }),
+          keyboard: false,
+        });
+      },
+      onEachFeature: function (feature, layer) {
+        var props = feature.properties || {};
+        layer.bindTooltip(
+          escapeHtml(props.name || "Artemis III region") +
+            ' <span class="tip-note">approx. point, ' + escapeHtml((props.lists || []).join(" + ")) + " list</span>",
+          { direction: "top", offset: [0, -6] }
+        );
+      },
     }).addTo(map);
   }
 
@@ -1861,6 +1962,10 @@
     initMap(meta);
     await loadAnnotations();
     await loadArtemisPoints();
+    if (PARAMS.get("artemis") === "1") {
+      els.artemis.checked = true;
+      toggleArtemis();
+    }
 
     if (!meta.ingested) {
       showNotIngested(meta.ingest_command);

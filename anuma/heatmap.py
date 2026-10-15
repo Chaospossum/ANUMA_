@@ -10,6 +10,7 @@ matplotlib.use("Agg")
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+from PIL import Image
 
 
 def _downsample(array: np.ndarray, max_dim: int) -> np.ndarray:
@@ -30,11 +31,15 @@ def _downsample(array: np.ndarray, max_dim: int) -> np.ndarray:
     return reduced
 
 
-PNG_MAX_DIM = 1024
+# Above the 2534 px south-polar grid, so map overlays are the grid pixel for
+# pixel: a blank pixel on the map is exactly a cell that fails the slope rule.
+# Larger arrays still fall back to nanmax blocks.
+PNG_MAX_DIM = 4096
 
 
 def displayed(array: np.ndarray, max_dim: int = PNG_MAX_DIM) -> np.ndarray:
-    """The pixels render_png draws: nanmax blocks when larger than max_dim."""
+    """The pixels render_png draws: the array itself, or nanmax blocks when
+    larger than max_dim."""
     return _downsample(np.asarray(array, dtype=np.float64), max_dim)
 
 
@@ -45,45 +50,27 @@ def render_png(
     vmin: float | None = None,
     vmax: float | None = None,
 ) -> bytes:
-    """Render a 2-D array as a tight PNG. NaN / masked pixels are transparent.
+    """Render a 2-D array as a PNG, one image pixel per array cell.
 
-    Without vmin/vmax the colour range is the finite min/max after downsampling.
+    NaN / masked pixels are transparent. Without vmin/vmax the colour range is
+    the finite min/max after downsampling. Values outside the range take the
+    end colours.
     """
     data = _downsample(np.asarray(array, dtype=np.float64), max_dim)
     finite = np.isfinite(data)
     h, w = data.shape
-    dpi = 100.0
-    fig = Figure(figsize=(w / dpi, h / dpi), dpi=dpi)
-    FigureCanvasAgg(fig)
-    ax = fig.add_axes((0.0, 0.0, 1.0, 1.0), frameon=False)
-    ax.set_axis_off()
+    rgba = np.zeros((h, w, 4), dtype=np.uint8)
     if finite.any():
-        vmin = float(np.min(data[finite])) if vmin is None else float(vmin)
-        vmax = float(np.max(data[finite])) if vmax is None else float(vmax)
-        if vmin >= vmax:
-            vmax = vmin + 1.0
-        cmap_obj = matplotlib.colormaps[cmap].with_extremes(bad=(0.0, 0.0, 0.0, 0.0))
-        masked = np.ma.masked_invalid(data)
-        ax.imshow(
-            masked,
-            cmap=cmap_obj,
-            origin="upper",
-            interpolation="nearest",
-            vmin=vmin,
-            vmax=vmax,
-            aspect="equal",
-        )
-    else:
-        ax.imshow(
-            np.zeros((h, w, 4), dtype=np.float32),
-            origin="upper",
-            interpolation="nearest",
-            aspect="equal",
-        )
-    ax.set_xlim(-0.5, w - 0.5)
-    ax.set_ylim(h - 0.5, -0.5)
+        lo = float(np.min(data[finite])) if vmin is None else float(vmin)
+        hi = float(np.max(data[finite])) if vmax is None else float(vmax)
+        if lo >= hi:
+            hi = lo + 1.0
+        scaled = np.clip((np.where(finite, data, lo) - lo) / (hi - lo), 0.0, 1.0)
+        rgba = matplotlib.colormaps[cmap](scaled, bytes=True)
+        rgba[~finite] = 0
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", transparent=True, pad_inches=0)
+    # Low zlib effort: a 2534 px score PNG encodes in about a second.
+    Image.fromarray(np.ascontiguousarray(rgba), "RGBA").save(buf, format="png", compress_level=3)
     return buf.getvalue()
 
 

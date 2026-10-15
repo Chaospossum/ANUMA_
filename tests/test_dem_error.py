@@ -310,11 +310,11 @@ def test_api_dem_error_present(api_root):
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert response.content[:8] == b"\x89PNG\r\n\x1a\n"
-    # The range is over the pixels the PNG draws (nanmax blocks), not the full grid.
+    # The range is over the pixels the PNG draws: the grid itself at native size.
     shown = displayed(array)
-    assert shown.shape[0] < array.shape[0]
+    assert shown.shape == array.shape
     finite = shown[np.isfinite(shown)]
-    assert response.headers["X-Anuma-Range-Basis"] == "displayed-block-max"
+    assert response.headers["X-Anuma-Range-Basis"] == "displayed-pixels"
     assert float(response.headers["X-Anuma-Range-Min"]) == pytest.approx(float(finite.min()), rel=1e-5)
     assert float(response.headers["X-Anuma-Range-Max"]) == pytest.approx(
         float(np.percentile(finite, 95)), rel=1e-5

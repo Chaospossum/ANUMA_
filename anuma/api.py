@@ -616,8 +616,9 @@ def _site_values(row: int, col: int, window: MonthWindow | None) -> dict:
 
 
 def _display_range(cfg: dict, name: str, array: np.ndarray) -> tuple[float, float] | None:
-    """Colour range in layer units over the pixels the PNG draws (nanmax blocks):
-    finite minimum to the configured percentile."""
+    """Colour range in layer units: a configured fixed range (gate layer), or
+    over the pixels the PNG draws (the grid itself, or nanmax blocks for
+    oversized arrays), finite minimum to the configured percentile."""
     fixed = cfg["layers"][name].get("display_range")
     if fixed is not None:
         return float(fixed[0]), float(fixed[1])
@@ -640,7 +641,10 @@ def _display_only_png(cfg: dict, name: str, array: np.ndarray, store: dict) -> R
     if is_gate_layer(cfg, name):
         headers = {"X-Anuma-Gate-Layer": "true", "X-Anuma-Range-Basis": "fixed"}
     else:
-        headers = {"X-Anuma-Display-Only": "true", "X-Anuma-Range-Basis": "displayed-block-max"}
+        basis = (
+            "displayed-pixels" if displayed(array).shape == array.shape else "displayed-block-max"
+        )
+        headers = {"X-Anuma-Display-Only": "true", "X-Anuma-Range-Basis": basis}
     if span is None:
         png = render_png(array, cmap="gray")
     else:

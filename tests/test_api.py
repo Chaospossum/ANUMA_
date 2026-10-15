@@ -487,7 +487,7 @@ def test_sites_table_has_noise_column():
     assert 'return "borderline: " + pass' in app_js
     # Verdicts are in a visible legend row, not only in tooltips.
     assert 'id="table-legend"' in html and "not checked</span>" in html
-    assert 'id="legend-note">blank = fails slope rule' in html
+    assert 'id="legend-note">no colour (grey terrain) = fails slope rule' in html
 
 
 def _artemis_points(client: TestClient, lists: set[str]) -> list[dict]:

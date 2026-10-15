@@ -1267,3 +1267,61 @@ body.present .card {
 body.cards-float.has-cards .legend {
   display: none;
 }
+
+/* ---- Map context */
+
+.leaflet-image-layer {
+  image-rendering: pixelated;
+}
+
+.place-mark {
+  background: none !important;
+  border: 0 !important;
+}
+
+.place-label,
+.grat-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  font-size: 0.72rem;
+  font-style: italic;
+  font-weight: 500;
+  color: #161921;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff;
+  pointer-events: none;
+}
+
+/* Left of the pole ring; Shackleton sits to its lower right. */
+.pole-label {
+  transform: translate(calc(-100% - 9px), -50%);
+}
+
+.grat-label {
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  opacity: 0.8;
+}
+
+body.present .place-label {
+  font-size: 15px;
+}
+
+.artemis-mark {
+  background: none !important;
+  border: 0 !important;
+}
+
+.artemis-square {
+  display: block;
+  width: 10px;
+  height: 10px;
+  background: #ffffff;
+  border: 2px solid #161921;
+}
+
+.tip-note {
+  color: var(--muted);
+  font-size: 0.85em;
+}
