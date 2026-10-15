@@ -87,6 +87,8 @@ def load_daily_lit_config(path: Path | None = None) -> dict:
         raise ValueError("Stage A stop_rmse must stay 0.05")
     if cfg["acceptance"].get("tune_after_run") is not False:
         raise ValueError("acceptance.tune_after_run must stay false")
+    if int(cfg["pilot"]["days"]) < 2 * int(cfg["execution"]["chunk_days"]):
+        raise ValueError("pilot must span two dispatches so one is timed warm")
     return cfg
 
 
@@ -773,8 +775,11 @@ def reject_daily_lit_receipt(
 def project_node_hours(
     *,
     fixed_seconds: float,
-    epoch_seconds: float,
-    pilot_epochs: int,
+    cold_excess_seconds: float,
+    warm_seconds_per_epoch: float,
+    spice_verify_seconds: float,
+    spice_calls: int,
+    spice_seconds_per_epoch: float,
     full_epochs: int,
     io_seconds: float,
     pilot_days: int,
@@ -782,18 +787,38 @@ def project_node_hours(
     production_node_hours: float,
     stage_node_hour_cap: float,
 ) -> dict:
-    """Scale pilot timings to the full period. A projection, not a result."""
-    if min(pilot_epochs, full_epochs, pilot_days, full_days) <= 0:
+    """Scale pilot timings to the full period. A projection, not a result.
+
+    Only per-epoch costs scale with epochs: the warm dispatch rate and the
+    SPICE time left after kernel verification. Kernel verification is paid
+    once per SPICE call (one per year chunk). Start-up and the first
+    dispatch's cold excess are paid once. Write and finalize scale by days.
+    """
+    if min(spice_calls, full_epochs, pilot_days, full_days) <= 0:
         raise ValueError("pilot and full sizes must be positive")
-    if min(fixed_seconds, epoch_seconds, io_seconds) < 0.0:
+    measured = (
+        fixed_seconds,
+        cold_excess_seconds,
+        warm_seconds_per_epoch,
+        spice_verify_seconds,
+        spice_seconds_per_epoch,
+        io_seconds,
+    )
+    if min(measured) < 0.0:
         raise ValueError("measured durations must be non-negative")
-    projected_epochs = float(epoch_seconds) * full_epochs / pilot_epochs
+    projected_epochs = float(warm_seconds_per_epoch) * full_epochs
+    projected_spice = (
+        float(spice_verify_seconds) * spice_calls
+        + float(spice_seconds_per_epoch) * full_epochs
+    )
     projected_io = float(io_seconds) * full_days / pilot_days
-    wall = float(fixed_seconds) + projected_epochs + projected_io
+    once = float(fixed_seconds) + float(cold_excess_seconds)
+    wall = once + projected_epochs + projected_spice + projected_io
     hours = wall / 3600.0
     return {
-        "projected_fixed_seconds": float(fixed_seconds),
+        "projected_fixed_seconds": once,
         "projected_epoch_seconds": projected_epochs,
+        "projected_spice_seconds": projected_spice,
         "projected_io_seconds": projected_io,
         "projected_wall_seconds": wall,
         "projected_node_hours": hours,
@@ -882,6 +907,8 @@ def compute_chunks(
         "evaluate_seconds": 0.0,
         "write_seconds": 0.0,
         "pool_start_seconds": 0.0,
+        "spice_calls": 0,
+        "dispatches": [],
         "computed": [],
         "skipped": [],
     }
@@ -905,10 +932,12 @@ def compute_chunks(
             started = time.perf_counter()
             vectors = vectors_for(day_epochs(first, count))
             timings["spice_seconds"] += time.perf_counter() - started
+            timings["spice_calls"] += 1
             daily = np.empty((count, *longitude.shape), dtype=np.uint8)
             started = time.perf_counter()
             for day0 in range(0, count, chunk_days):
                 day1 = min(count, day0 + chunk_days)
+                dispatch_started = time.perf_counter()
                 daily[day0:day1] = daily_lit_hours(
                     horizons,
                     longitude,
@@ -918,6 +947,12 @@ def compute_chunks(
                     azimuth_origin_deg=azimuth_origin_deg,
                     workers=workers,
                     pool=pool,
+                )
+                timings["dispatches"].append(
+                    {
+                        "epochs": (day1 - day0) * HOURS_PER_DAY,
+                        "seconds": time.perf_counter() - dispatch_started,
+                    }
                 )
             daily[:, ~valid] = FILL_UINT8
             timings["evaluate_seconds"] += time.perf_counter() - started
@@ -1080,10 +1115,25 @@ def run_daily_lit(
         pilot_epochs = (end - start).days * HOURS_PER_DAY
         full_start, full_end = period_days(cfg, "production")
         full_days = (full_end - full_start).days
+        dispatches = timings["dispatches"]
+        if len(dispatches) < 2:
+            raise ValueError("pilot needs two dispatches to time a warm one")
+        warm = dispatches[-1]["seconds"] / dispatches[-1]["epochs"]
+        cold_excess = max(0.0, dispatches[0]["seconds"] - warm * dispatches[0]["epochs"])
+        clock = time.perf_counter()
+        verify_kernel_manifest(kernel_manifest, roles)
+        verify_seconds = time.perf_counter() - clock
+        spice_per_epoch = (
+            max(0.0, timings["spice_seconds"] - verify_seconds * timings["spice_calls"])
+            / pilot_epochs
+        )
         report["projection"] = project_node_hours(
             fixed_seconds=fixed_seconds + timings["pool_start_seconds"],
-            epoch_seconds=timings["spice_seconds"] + timings["evaluate_seconds"],
-            pilot_epochs=pilot_epochs,
+            cold_excess_seconds=cold_excess,
+            warm_seconds_per_epoch=warm,
+            spice_verify_seconds=verify_seconds,
+            spice_calls=len(year_chunks(full_start, full_end)),
+            spice_seconds_per_epoch=spice_per_epoch,
             full_epochs=full_days * HOURS_PER_DAY,
             io_seconds=timings["write_seconds"] + timings["finalize_seconds"],
             pilot_days=(end - start).days,
@@ -1091,10 +1141,16 @@ def run_daily_lit(
             production_node_hours=float(cfg["execution"]["production_node_hours"]),
             stage_node_hour_cap=float(cfg["execution"]["stage_node_hour_cap"]),
         )
+        report["projection"]["method"] = (
+            "warm second-dispatch s/epoch x full epochs; kernel verification "
+            "x production SPICE calls; remaining SPICE s/epoch x full epochs; "
+            "start-up and first-dispatch excess once; I/O x days"
+        )
         report["stage_a_reference"] = {
             "job": cfg["stage_a"]["job_id"],
             "seconds_per_epoch": float(cfg["stage_a"]["seconds_per_epoch"]),
-            "pilot_seconds_per_epoch": timings["evaluate_seconds"] / pilot_epochs,
+            "pilot_warm_seconds_per_epoch": warm,
+            "pilot_mean_seconds_per_epoch": timings["evaluate_seconds"] / pilot_epochs,
         }
         report["passed"] = bool(
             checks["lit_hours_within_0_24"]

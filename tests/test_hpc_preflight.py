@@ -250,7 +250,7 @@ def test_daily_lit_preflight_pins_stage_a_horizon_and_coverage(tmp_path, monkeyp
     assert receipt["horizon_sha256"] == hashlib.sha256(cube.read_bytes()).hexdigest()
     assert receipt["spice_covers_window"] is True
     assert receipt["stage_a_status"] == "passed"
-    assert str(windows[0][0]) == "2026-01-01" and str(windows[0][1]) == "2026-01-08"
+    assert str(windows[0][0]) == "2026-01-01" and str(windows[0][1]) == "2026-02-02"
 
     def short(kernel_manifest, roles, start, end):
         raise ValueError("kernels do not cover the period")

@@ -17,9 +17,10 @@ period:
   label: "one lunar nodal cycle of precomputed days; not a mission interval"
 
 pilot:
-  # Seven full UTC days on the full grid: 168 epochs.
+  # 32 full UTC days on the full grid: 768 epochs in two 16-day dispatches,
+  # so the second dispatch is timed warm for the projection.
   start_utc: "2026-01-01T00:00:00Z"
-  days: 7
+  days: 32
   # Rows re-evaluated with the Stage A accumulator for the equivalence check.
   check_row_stride: 32
 

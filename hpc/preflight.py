@@ -377,8 +377,9 @@ def run_preflight(receipt_path: Path) -> dict:
                 horizon_cube=horizon_cube,
                 mode=mode,
             )
-            # Refuse a period the verified kernels do not cover. This reads
-            # the kernels on the compute allocation; it does not hash the cube.
+            # Refuse a period the verified kernels do not cover. This hashes
+            # and reads the kernels wherever preflight runs (the docs require
+            # a cpudev allocation); it does not hash the horizon cube.
             start, end = daily_lit.period_days(daily_lit.load_daily_lit_config(), mode)
             coverage = daily_lit.require_spice_coverage(
                 kernel_manifest, sun_cfg["sun"]["required_kernel_roles"], start, end

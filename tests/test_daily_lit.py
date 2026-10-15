@@ -104,7 +104,7 @@ def test_config_spans_one_nodal_cycle_and_fits_the_cap():
     assert (end - start).days >= 18.6 * 365.25
     assert end.day == 1
     pilot_start, pilot_end = dl.period_days(cfg, "pilot")
-    assert (pilot_end - pilot_start).days == 7
+    assert (pilot_end - pilot_start).days == 32
     exe = cfg["execution"]
     assert exe["memory"] == "240G"
     assert exe["production_walltime"] == "03:00:00"
@@ -443,6 +443,7 @@ def _patch_runtime(monkeypatch, tmp_path, lon, lat):
         return np.stack([_south_pole_vector(value) for value in elevation])
 
     monkeypatch.setattr(dl, "sun_vectors_from_spice", vectors)
+    monkeypatch.setattr(dl, "verify_kernel_manifest", lambda *args: [])
 
 
 def test_pilot_runs_end_to_end_and_matches_stage_a_accumulator(tmp_path, monkeypatch):
@@ -477,11 +478,13 @@ def test_pilot_runs_end_to_end_and_matches_stage_a_accumulator(tmp_path, monkeyp
     assert report["checks"]["lit_hours_within_0_24"] is True
     assert report["checks"]["fill_matches_valid_mask"] is True
     assert report["checks"]["fill_matches_stage_a_nan"] is True
-    assert report["period"]["epoch_count"] == 168
+    assert report["period"]["epoch_count"] == 768
+    assert [d["epochs"] for d in report["timings_seconds"]["dispatches"]] == [384, 384]
+    assert "warm" in report["projection"]["method"]
     assert report["projection"]["production_node_hours"] == 3.0
     assert report["passed"] is True
     daily = np.load(out / "daily" / "lit-hours-2026.npy")
-    assert daily.shape == (7, 8, 5)
+    assert daily.shape == (32, 8, 5)
     assert daily[0, 0, 0] == dl.FILL_UINT8
     manifest_out = json.loads((out / "output-manifest.json").read_text())
     assert "daily/lit-hours-2026.npy" in manifest_out["outputs"]
@@ -584,3 +587,63 @@ def test_receipt_pin_rejects_drift(tmp_path):
     kernel.write_text('{"changed": true}')
     with pytest.raises(ValueError, match="kernel_manifest_sha256"):
         dl.reject_daily_lit_receipt(receipt, **args)
+
+
+def test_projection_charges_fixed_costs_once_and_scales_only_per_epoch_costs():
+    projected = dl.project_node_hours(
+        fixed_seconds=100.0,
+        cold_excess_seconds=20.0,
+        warm_seconds_per_epoch=0.02,
+        spice_verify_seconds=1.5,
+        spice_calls=19,
+        spice_seconds_per_epoch=0.0001,
+        full_epochs=163_632,
+        io_seconds=6.4,
+        pilot_days=32,
+        full_days=6_818,
+        production_node_hours=3.0,
+        stage_node_hour_cap=3.5,
+    )
+    assert projected["projected_fixed_seconds"] == 120.0
+    assert projected["projected_epoch_seconds"] == pytest.approx(0.02 * 163_632)
+    assert projected["projected_spice_seconds"] == pytest.approx(1.5 * 19 + 0.0001 * 163_632)
+    assert projected["projected_io_seconds"] == pytest.approx(6.4 * 6_818 / 32)
+    assert projected["fits_production_cap"] is True
+    over = dl.project_node_hours(
+        fixed_seconds=0.0,
+        cold_excess_seconds=0.0,
+        warm_seconds_per_epoch=0.07,
+        spice_verify_seconds=0.0,
+        spice_calls=19,
+        spice_seconds_per_epoch=0.0,
+        full_epochs=163_632,
+        io_seconds=0.0,
+        pilot_days=32,
+        full_days=6_818,
+        production_node_hours=3.0,
+        stage_node_hour_cap=3.5,
+    )
+    assert over["fits_production_cap"] is False
+
+
+def test_pilot_config_must_span_two_dispatches(tmp_path):
+    raw = dl.config_path().read_text().replace("days: 32", "days: 16")
+    path = tmp_path / "daily-lit.yaml"
+    path.write_text(raw)
+    with pytest.raises(ValueError, match="two dispatches"):
+        dl.load_daily_lit_config(path)
+
+
+def test_valid_mask_matches_stage_a_on_a_mixed_nan_column():
+    from anuma.sun import evaluate_sunlight
+
+    horizons, lon, lat = _random_fixture(rows=3, cols=4, azimuths=8)
+    horizons[:, 0, 0] = np.nan  # every azimuth NaN: out of cap
+    horizons[2:5, 1, 1] = np.nan  # some azimuths NaN: a mixed column
+    horizons[7, 2, 3] = np.nan  # one azimuth NaN
+    lon[2, 0] = np.nan
+    valid = dl.valid_pixels(horizons, lon, lat)
+    stage_a = evaluate_sunlight(horizons, lon, lat, _random_vectors(4), cadence_hours=1.0)
+    assert np.array_equal(valid, np.isfinite(stage_a["percent_time_lit"]))
+    assert not valid[0, 0] and not valid[2, 0]
+    assert valid[1, 1] and valid[2, 3]

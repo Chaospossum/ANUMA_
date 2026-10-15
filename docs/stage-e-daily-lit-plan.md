@@ -153,9 +153,22 @@ workers). 163,632 epochs × 0.0243 s ≈ **1.1 h** of evaluation. Add about
 daily files. Expect **≈1.3 node-hours**. The pilot measures this and refuses
 production (exit 4) if its projection exceeds 3.0.
 
+How the pilot projects, so fixed costs are not multiplied by about 213 (full
+epochs over pilot epochs):
+
+- Evaluation: the s/epoch of the **second (warm)** 16-day dispatch × 163,632
+  epochs. The first dispatch's excess over that rate (first touch of the
+  cube, worker start-up) is added once.
+- SPICE: kernel SHA-256 verification is timed on its own and charged once
+  per SPICE call. Production makes 19 calls, one per year chunk. The rest of
+  the SPICE time is scaled per epoch.
+- Load, hash and pool start: once. Write and finalize: scaled by days.
+
+The pilot is therefore 32 days (two dispatches), not 7.
+
 Storage (production): daily files 6,818 × 6,421,156 B = **43.8 GB**;
 cumulative 225 × 25.7 MB = **5.8 GB**; total ≈ **49.6 GB** on project
-storage. Pilot ≈ 0.1 GB. Peak RAM is expected below 30 GB: the cube
+storage. Pilot ≈ 0.2 GB. Peak RAM is expected below 30 GB: the cube
 (9.25 GB, shared copy-on-write with the forked workers), one year of daily
 counts (≤ 2.35 GB), and 128 tile slices of about 72 MB.
 
@@ -212,7 +225,7 @@ interpreter built on that module. `srun --export=ALL` is always used.
 
 These are fixed before any run and are not tuned afterwards.
 
-Pilot (7 days from 2026-01-01, 168 epochs, full grid). All must hold. The
+Pilot (32 days from 2026-01-01, 768 epochs, full grid). All must hold. The
 job exits 4 when the projection does not fit, otherwise 3 when any other
 check fails:
 
@@ -220,14 +233,14 @@ check fails:
 2. Out-of-cap pixels hold 255 on every day (`checks.fill_matches_valid_mask`),
    and that mask equals the NaN mask of Stage A `percent-time-lit.npy`
    (`checks.fill_matches_stage_a_nan`).
-3. On every 32nd row, the 7-day sum from the reader equals, bit for bit, the
+3. On every 32nd row, the 32-day sum from the reader equals, bit for bit, the
    Stage A accumulator `_advance_sunlight_block` run on the same epochs
    (`equivalence.identical`).
 4. The projected production wall time is ≤ 3.0 node-hours
    (`projection.fits_production_cap`). The report also gives the pilot's
-   s/epoch next to Stage A's 0.0243 s/epoch.
+   warm and mean s/epoch next to Stage A's 0.0243 s/epoch.
 
-A 7-day pilot cannot test the long-term mean, because south-polar
+A 32-day pilot cannot test the long-term mean, because south-polar
 illumination is strongly seasonal. That is the production check below.
 
 Production:
