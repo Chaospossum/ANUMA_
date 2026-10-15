@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import csv
 import io
+import json
 import os
 import time
 from pathlib import Path
@@ -15,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from anuma.api import INGEST_COMMAND, app, clear_cache
-from anuma.config import load_config
+from anuma.config import load_config, repo_root
 from anuma.grid import Grid
 from anuma.ingest import write_artemis_geojson
 
@@ -187,6 +188,8 @@ def test_score_returns_heatmap_sites_and_artemis(client_ingested: TestClient):
     np.testing.assert_allclose(
         sum(top["contributions"].values()), top["total"], atol=1e-5
     )
+    grid = Grid(load_config())
+    assert (top["row"], top["col"]) == _pixel(grid, 0.0, -87.0)
     assert isinstance(top["nearest"], str) and top["nearest"]
     assert top["distance_km"] is not None and top["distance_km"] >= 0.0
     assert len(body["artemis"]["regions"]) == 17
@@ -248,6 +251,14 @@ def test_layer_png_with_slope_radius(client_ingested: TestClient, monkeypatch, n
     response = client_ingested.get(f"/layer/{name}.png")
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("image/png")
+
+
+def test_layer_png_score_uses_defaults(client_ingested: TestClient):
+    response = client_ingested.get("/layer/score.png")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/png")
+    expected = client_ingested.post("/score", json={}).json()["png"]
+    assert response.content == base64.b64decode(expected)
 
 
 def test_unknown_layer_is_404(client_ingested: TestClient):
@@ -337,3 +348,81 @@ def test_index_folio_is_local():
     assert client.get("/docs").status_code == 404
     assert client.get("/redoc").status_code == 404
     assert client.get("/openapi.json").status_code == 404
+
+
+def _write_stability_summary(root: Path) -> None:
+    cfg = load_config()
+    path = root / cfg["stability"]["monte_carlo_summary"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    site = {"id": "1318:1219", "row": 1318, "col": 1219, "lat": -89.4, "lon": -137.3}
+    other = {"id": "753:1681", "row": 753, "col": 1681, "lat": -84.8, "lon": 38.9}
+    summary = {
+        "draw_count": 500,
+        "weight_ranges": {"illumination": [0.4, 0.6]},
+        "policies": {
+            "decided_per_layer": {
+                "top10_membership_frequency": [
+                    {**site, "count": 500, "frequency": 1.0},
+                    {**other, "count": 422, "frequency": 0.844},
+                ],
+                "winner_stability": {
+                    "winners": [
+                        {**site, "count": 499, "frequency": 0.998},
+                        {**other, "count": 1, "frequency": 0.002},
+                    ],
+                },
+            },
+            "legacy_global_2_98": {
+                "top10_membership_frequency": [],
+                "winner_stability": {"winners": []},
+            },
+        },
+    }
+    path.write_text(json.dumps(summary))
+
+
+def test_stability_reports_default_policy(tmp_path, monkeypatch):
+    _write_stability_summary(tmp_path)
+    monkeypatch.setenv("ANUMA_ROOT", str(tmp_path))
+    clear_cache()
+    body = TestClient(app).get("/stability.json").json()
+    assert body["available"] is True
+    assert body["job_id"] == "5332991"
+    assert body["policy"] == "decided_per_layer"
+    assert body["draw_count"] == 500
+    assert "±0.1" in body["note"] and "legacy_global_2_98" in body["note"]
+    assert body["winners"][0]["frequency"] == 0.998
+    rows = {row["id"]: row["frequency"] for row in body["top10_membership_frequency"]}
+    assert rows == {"1318:1219": 1.0, "753:1681": 0.844}
+    assert all({"row", "col"} <= set(row) for row in body["top10_membership_frequency"])
+
+
+def test_stability_without_study_file(client_empty: TestClient):
+    response = client_empty.get("/stability.json")
+    assert response.status_code == 200
+    assert response.json() == {"available": False}
+
+
+def test_stage_b_checks_file_schema(client_empty: TestClient):
+    cfg = load_config()
+    on_disk = json.loads((repo_root() / cfg["stability"]["stage_b_checks"]).read_text())
+    response = client_empty.get("/checks/stage-b-1km.json")
+    assert response.status_code == 200
+    body = response.json()
+    assert body == on_disk
+    assert body["source"]["job"] == "5334425"
+    assert body["match_km"] == 0.3
+    assert body["flag"]["field"] == "within_1km"
+    assert [site["rank_240m"] for site in body["sites"]] == list(range(1, 11))
+    for site in body["sites"]:
+        assert -90.0 <= site["lat"] <= -80.0
+        assert -180.0 <= site["lon"] <= 180.0
+        fractions = site["fraction_le_8deg"]
+        assert set(fractions) == {"in_cell", "within_500m", "within_1km"}
+        assert all(0.0 <= value <= 1.0 for value in fractions.values())
+    flagged = [
+        site["rank_240m"]
+        for site in body["sites"]
+        if site["fraction_le_8deg"]["within_1km"] < body["flag"]["below"]
+    ]
+    assert 2 in flagged and 10 in flagged

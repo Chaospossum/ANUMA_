@@ -62,6 +62,15 @@ scoring:
     hydrogen: 0.3
     earth_visibility: 0.2
 
+stability:
+  # Monte Carlo weight study behind the "Top-10 %" column; read from the data root.
+  monte_carlo_summary: out/hpc/monte-carlo-full-5332991/study-summary.json
+  monte_carlo_job: "5332991"
+  policy: decided_per_layer
+  note: "weights varied ±0.1, default normalisation; legacy_global_2_98 picks a different winner"
+  # Committed 20 m slope check for the default top 10, read from the repo.
+  stage_b_checks: data/checks/stage-b-1km.json
+
 provenance:
   illumination_affine_revision: pds3-pixel-center-v2
 

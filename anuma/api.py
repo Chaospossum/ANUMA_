@@ -7,6 +7,7 @@ with the ingest command. They do not invent or score `--synthetic` layers.
 from __future__ import annotations
 
 import base64
+import json
 import os
 from pathlib import Path
 from typing import Annotated, Any
@@ -177,6 +178,27 @@ def _artemis_payload(overlap: dict, cfg: dict) -> dict:
     }
 
 
+def _stability_payload(cfg: dict, root: Path) -> dict:
+    """Top-10 membership and winner frequency for the default policy, if on disk."""
+    spec = cfg["stability"]
+    path = root / spec["monte_carlo_summary"]
+    if not path.is_file():
+        return {"available": False}
+    summary = json.loads(path.read_text())
+    policy = spec["policy"]
+    study = summary["policies"][policy]
+    return {
+        "available": True,
+        "job_id": str(spec["monte_carlo_job"]),
+        "policy": policy,
+        "draw_count": int(summary["draw_count"]),
+        "weight_ranges": summary.get("weight_ranges"),
+        "note": spec["note"],
+        "winners": study["winner_stability"]["winners"],
+        "top10_membership_frequency": study["top10_membership_frequency"],
+    }
+
+
 def _artemis_feature_collection(cfg: dict, root: Path) -> dict:
     """Cited points come from config, not from a stale on-disk copy."""
     del root
@@ -319,6 +341,10 @@ def create_app() -> FastAPI:
 
     @app.get("/layer/{name}.png")
     def get_layer_png(name: str) -> Response:
+        if name == "score":
+            # Combined score at the config defaults, in the same viridis as /score.
+            png = base64.b64decode(_run_score()["png"])
+            return Response(content=png, media_type="image/png")
         cfg = _cfg()
         root = data_root()
         if name not in cfg["layers"]:
@@ -345,6 +371,17 @@ def create_app() -> FastAPI:
             painted = array
         png = render_png(painted, cmap="gray")
         return Response(content=png, media_type="image/png")
+
+    @app.get("/stability.json")
+    def get_stability() -> dict:
+        return _stability_payload(_cfg(), data_root())
+
+    @app.get("/checks/stage-b-1km.json")
+    def get_stage_b_checks() -> JSONResponse:
+        path = repo_root() / _cfg()["stability"]["stage_b_checks"]
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Stage B check file is missing")
+        return JSONResponse(json.loads(path.read_text()))
 
     @app.get("/artemis3.geojson")
     def get_artemis_geojson() -> JSONResponse:
