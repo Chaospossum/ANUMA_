@@ -574,6 +574,7 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
         "terrain_gate_detail": result.terrain_gate,
         "ranking_basis": _ranking_basis(result.terrain_gate),
         "weights_used": weights,
+        "hard_used": {"max_slope_deg": float(max_slope), "slope_radius_m": float(slope_radius)},
         "score_range": _score_range(result.combined),
     }
     if include_png:
@@ -583,7 +584,7 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
 
 
 def _scenario(payload: dict, body: ScoreBody | None) -> dict:
-    """The illumination window and keep-out behind an exported ranking."""
+    """The illumination window, keep-out, weights and slope rule behind an exported ranking."""
     keepout = body.keepout.model_dump() if body is not None and body.keepout else None
     detail = payload["terrain_gate_detail"]
     return {
@@ -593,6 +594,9 @@ def _scenario(payload: dict, body: ScoreBody | None) -> dict:
             key: detail.get(key)
             for key in ("status", "min_fraction", "radius_m", "layer_max_slope_deg", "message")
         },
+        "weights_used": payload["weights_used"],
+        "max_slope_deg": payload["hard_used"]["max_slope_deg"],
+        "slope_radius_m": payload["hard_used"]["slope_radius_m"],
     }
 
 

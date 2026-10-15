@@ -35,6 +35,8 @@ def _downsample(array: np.ndarray, max_dim: int) -> np.ndarray:
 # pixel: a blank pixel on the map is exactly a cell that fails the slope rule.
 # Larger arrays still fall back to nanmax blocks.
 PNG_MAX_DIM = 4096
+COLOUR_LEVELS = 255
+TRANSPARENT_INDEX = 255
 
 
 def displayed(array: np.ndarray, max_dim: int = PNG_MAX_DIM) -> np.ndarray:
@@ -58,19 +60,24 @@ def render_png(
     """
     data = _downsample(np.asarray(array, dtype=np.float64), max_dim)
     finite = np.isfinite(data)
-    h, w = data.shape
-    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    # Palette PNG: 255 colour levels plus one transparent index for NaN.
+    # About half the bytes of RGBA and several times faster to encode.
+    index = np.full(data.shape, TRANSPARENT_INDEX, dtype=np.uint8)
     if finite.any():
         lo = float(np.min(data[finite])) if vmin is None else float(vmin)
         hi = float(np.max(data[finite])) if vmax is None else float(vmax)
         if lo >= hi:
             hi = lo + 1.0
-        scaled = np.clip((np.where(finite, data, lo) - lo) / (hi - lo), 0.0, 1.0)
-        rgba = matplotlib.colormaps[cmap](scaled, bytes=True)
-        rgba[~finite] = 0
+        scaled = np.clip((data[finite] - lo) / (hi - lo), 0.0, 1.0)
+        index[finite] = np.minimum((scaled * COLOUR_LEVELS).astype(np.int64), COLOUR_LEVELS - 1)
+    colours = matplotlib.colormaps[cmap](np.linspace(0.0, 1.0, COLOUR_LEVELS), bytes=True)[:, :3]
+    palette = np.zeros((256, 3), dtype=np.uint8)
+    palette[:COLOUR_LEVELS] = colours
+    image = Image.fromarray(index, "P")
+    image.putpalette(palette.ravel().tolist())
+    alpha = bytes([255] * COLOUR_LEVELS + [0])
     buf = io.BytesIO()
-    # Low zlib effort: a 2534 px score PNG encodes in about a second.
-    Image.fromarray(np.ascontiguousarray(rgba), "RGBA").save(buf, format="png", compress_level=3)
+    image.save(buf, format="png", transparency=alpha, compress_level=6)
     return buf.getvalue()
 
 

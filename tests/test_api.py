@@ -795,3 +795,33 @@ def test_score_range_is_reported(client_ingested: TestClient):
 
 def test_api_description_is_neutral():
     assert "MAGPIE" not in (app.description or "")
+
+
+def test_render_png_is_native_with_transparent_nan():
+    import matplotlib
+
+    from anuma.heatmap import render_png
+
+    array = np.array([[0.0, np.nan], [0.5, 1.0]], dtype=np.float32)
+    image = mpimg.imread(io.BytesIO(render_png(array, cmap="viridis")), format="png")
+    assert image.shape[:2] == array.shape
+    assert image[0, 1, 3] == 0.0
+    assert image[0, 0, 3] == 1.0 and image[1, 1, 3] == 1.0
+    viridis = matplotlib.colormaps["viridis"]
+    np.testing.assert_allclose(image[0, 0, :3], viridis(0.0)[:3], atol=1 / 255)
+    np.testing.assert_allclose(image[1, 1, :3], viridis(1.0)[:3], atol=1 / 255)
+
+
+def test_exports_record_weights_and_slope_rule(client_ingested: TestClient):
+    body = {"weights": {"illumination": 2.0, "hydrogen": 1.0, "earth_visibility": 1.0},
+            "hard": {"max_slope_deg": 6.5, "slope_radius_m": 0}}
+    lines = client_ingested.post("/score.csv", json=body).text.splitlines()
+    comments = {line.split(": ", 1)[0][2:]: json.loads(line.split(": ", 1)[1])
+                for line in lines if line.startswith("#")}
+    assert comments["weights_used"] == pytest.approx(
+        {"illumination": 0.5, "hydrogen": 0.25, "earth_visibility": 0.25}
+    )
+    assert comments["max_slope_deg"] == 6.5 and comments["slope_radius_m"] == 0.0
+    props = client_ingested.post("/score.geojson", json=body).json()["properties"]
+    assert props["max_slope_deg"] == 6.5
+    assert props["weights_used"]["illumination"] == pytest.approx(0.5)
