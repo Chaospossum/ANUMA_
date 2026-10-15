@@ -15,7 +15,8 @@ interval.
 
 Outputs: `/project/home/p201619/ANUMA_/out/hpc/darkness-production-5345264/`,
 copied to `out/hpc/darkness-production-5345264/` on the laptop (period maps
-and yearly files first, then `monthly/`, 8.6 GB). Not committed.
+and yearly files first, then `monthly/`, 8.6 GB; the three month files'
+SHA-256 match `output-manifest.json`). Not committed.
 
 ## Result
 
