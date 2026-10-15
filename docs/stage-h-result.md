@@ -20,7 +20,7 @@ not committed) and `data/checks/stage-h-noise.json` when the 20 m gate is on.
 ## Result
 
 **Weights.** Under the default normalisation (`decided_per_layer`) the gated
-#1, 1350:1392 (88.81°S 123.64°E, near Peak Near Shackleton), wins **479 of 500**
+#1, 1350:1392 (88.81°S 123.64°E, at the Peak Near Shackleton site), wins **479 of 500**
 random weight sets (95.8 %). The only other winners are 748:1693 (11, 2.2 %)
 and 761:1285 (10, 2.0 %). Under `all_min_max` it wins 500 of 500. The
 comparison-only clipped policy `legacy_global_2_98` prefers 753:1671 (358 of
