@@ -30,6 +30,8 @@
   var artemisLayer = null;
   var meta = null;
   var lastScore = null;
+  var lastScoreSeq = -1;
+  var slopeBeforeLock = null;
   var overlayUrl = null;
   var selectedRank = null;
   var currentSites = null;
@@ -2319,6 +2321,7 @@
         return;
       }
       lastScore = payload;
+      lastScoreSeq = seq;
       hideVeil();
       if (keepLayer) {
         await showSingleLayer(els.layer.value);
@@ -2520,18 +2523,30 @@
     els.slope.disabled = on;
     note.hidden = !on;
     if (on && base != null && Number(els.slope.value) !== Number(base)) {
+      slopeBeforeLock = els.slope.value;
       els.slope.value = base;
       updateTerrainToggle();
       if (lastRequest) {
         scheduleScore();
+        return true;
+      }
+    } else if (!on && slopeBeforeLock != null) {
+      // Leaving presentation mode brings back the user's own limit.
+      els.slope.value = slopeBeforeLock;
+      slopeBeforeLock = null;
+      updateTerrainToggle();
+      if (lastRequest) {
+        scheduleScore();
+        return true;
       }
     }
+    return false;
   }
 
   function setPresenting(on) {
     // The page sizes in rem, so the root element carries the class too.
     document.documentElement.classList.toggle("present", on);
-    lockSlope(on);
+    var rescoring = lockSlope(on);
     document.body.classList.toggle("present", on);
     els.present.setAttribute("aria-pressed", on ? "true" : "false");
     try {
@@ -2544,7 +2559,8 @@
     if (currentSites) {
       renderCards();
     }
-    if (lastScore && lastRequest) {
+    // Only redraw the banner for the newest finished score.
+    if (!rescoring && lastScore && lastRequest && lastScoreSeq === scoreSeq) {
       renderAnswer(lastScore, lastRequest, scoreSeq);
     }
     if (map) {

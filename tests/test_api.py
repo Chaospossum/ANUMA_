@@ -907,3 +907,13 @@ def test_ui_keeps_scenario_in_url():
     for key in ("w", "slope", "sr", "terrain", "group", "keepout", "kmode", "klists", "kpen", "start", "end"):
         assert re.search(r'params\.set\(\s*"%s"' % key, app_js), key
         assert 'PARAMS.get("%s")' % key in app_js, key
+
+
+def test_ui_presentation_wording_and_slope_lock():
+    html = (repo_root() / "static" / "index.html").read_text()
+    app_js = (repo_root() / "static" / "app.js").read_text()
+    assert 'id="answer-steps"' in html and 'id="slope-lock-note"' in html
+    assert "function lockSlope" in app_js
+    assert 'PARAMS.get("slope") && !isPresenting()' in app_js
+    assert "near NASA's " in app_js and "Best screened site" not in app_js
+    assert "at mean libration" in app_js
