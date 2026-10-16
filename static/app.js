@@ -76,6 +76,7 @@
     score: document.getElementById("btn-score"),
     csv: document.getElementById("btn-csv"),
     geojson: document.getElementById("btn-geojson"),
+    link: document.getElementById("btn-link"),
     layer: document.getElementById("layer-select"),
     artemis: document.getElementById("artemis-toggle"),
     sites: document.getElementById("sites"),
@@ -2314,6 +2315,8 @@
       renderAnswer(payload, request, seq);
       els.csv.disabled = false;
       els.geojson.disabled = false;
+      els.link.disabled = false;
+      writeUrl();
     } catch (err) {
       if (seq === scoreSeq) {
         showVeil("Score failed", String(err), "", "");
@@ -2572,6 +2575,10 @@
     });
     els.layer.addEventListener("change", function () {
       showSingleLayer(els.layer.value);
+      writeUrl();
+    });
+    els.link.addEventListener("click", function () {
+      copyScenarioLink();
     });
     els.artemis.addEventListener("change", toggleArtemis);
     els.keepout.addEventListener("change", function () {
@@ -2643,6 +2650,65 @@
     }
   }
 
+  // Keep the address bar in step with the last scored scenario, so the page
+  // URL (and "Copy scenario link") reopens the same state via applyUrlScenario.
+  function writeUrl() {
+    if (!lastRequest || !window.history || !window.history.replaceState) {
+      return;
+    }
+    var params = new URLSearchParams();
+    ["present", "zoom"].forEach(function (key) {
+      if (PARAMS.get(key) != null) {
+        params.set(key, PARAMS.get(key));
+      }
+    });
+    params.set("w", [els.illum.value, els.hydro.value, els.earth.value].join(","));
+    params.set("slope", String(lastRequest.hard.max_slope_deg));
+    if (Number(lastRequest.hard.slope_radius_m) > 0) {
+      params.set("sr", String(lastRequest.hard.slope_radius_m));
+    }
+    if (lastRequest.hard.terrain_1km != null) {
+      params.set("terrain", lastRequest.hard.terrain_1km ? "1" : "0");
+    }
+    if (lastRequest.min_separation_km != null) {
+      params.set("group", String(lastRequest.min_separation_km));
+    }
+    if (lastRequest.keepout) {
+      params.set("keepout", String(lastRequest.keepout.radius_km));
+      params.set("kmode", lastRequest.keepout.mode);
+      params.set("klists", els.keepoutLists.value);
+      if (lastRequest.keepout.mode === "penalty") {
+        params.set("kpen", String(lastRequest.keepout.penalty));
+      }
+    }
+    if (lastRequest.illumination_months) {
+      params.set("start", lastRequest.illumination_months.start);
+      params.set("end", lastRequest.illumination_months.end);
+    }
+    if (els.layer.value && els.layer.value !== "score") {
+      params.set("layer", els.layer.value);
+    }
+    if (els.onlyPassing.checked) {
+      params.set("only", "1");
+    }
+    window.history.replaceState(null, "", "?" + params.toString());
+  }
+
+  async function copyScenarioLink() {
+    writeUrl();
+    var label = els.link.textContent;
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      els.link.textContent = "Link copied";
+    } catch (err) {
+      // Clipboard blocked: the address bar already holds the link.
+      els.link.textContent = "Copy it from the address bar";
+    }
+    setTimeout(function () {
+      els.link.textContent = label;
+    }, 2000);
+  }
+
   // ?layer=longest_dark shows one map layer after scoring (demos, screenshots).
   function applyUrlLayer() {
     var name = PARAMS.get("layer");
@@ -2655,6 +2721,7 @@
     if (option) {
       els.layer.value = name;
       showSingleLayer(name);
+      writeUrl();
     }
   }
 
@@ -2702,9 +2769,28 @@
       els.groupKm.value = clampGroup(PARAMS.get("group"));
       changed = true;
     }
+    if (PARAMS.get("sr") && Number(PARAMS.get("sr")) >= 0) {
+      els.slopeRadius.value = Number(PARAMS.get("sr"));
+      changed = true;
+    }
     if (PARAMS.get("keepout")) {
       els.keepout.checked = true;
       els.keepoutRadius.value = Number(PARAMS.get("keepout"));
+      if (PARAMS.get("kmode") === "hard" || PARAMS.get("kmode") === "penalty") {
+        els.keepoutMode.value = PARAMS.get("kmode");
+      }
+      if (PARAMS.get("klists") != null) {
+        var lists = PARAMS.get("klists");
+        var known = Array.prototype.some.call(els.keepoutLists.options || [], function (opt) {
+          return opt.value === lists;
+        });
+        if (known) {
+          els.keepoutLists.value = lists;
+        }
+      }
+      if (PARAMS.get("kpen") != null && isFinite(Number(PARAMS.get("kpen")))) {
+        els.keepoutPenalty.value = Number(PARAMS.get("kpen"));
+      }
       updateKeepoutNote();
       changed = true;
     }
