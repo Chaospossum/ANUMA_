@@ -970,6 +970,18 @@ body.present .answer {
   padding: 6px 16px;
 }
 
+.answer-steps {
+  display: none;
+}
+
+body.present .answer-steps {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  color: var(--muted);
+}
+
 body.present .answer-main {
   font-size: 18px;
   line-height: 1.3;

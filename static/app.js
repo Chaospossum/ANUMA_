@@ -246,7 +246,7 @@
       var range = lastScore && lastScore.score_range;
       els.legendLow.textContent = range ? range[0].toFixed(2) : "low";
       els.legendHigh.textContent = range ? range[1].toFixed(2) : "high";
-      els.legendNote.textContent = "no colour (grey terrain) = fails slope rule";
+      els.legendNote.textContent = "no colour (grey terrain) = fails a hard rule (see Why excluded)";
       return;
     }
     var info = ((meta && meta.layers) || []).filter(function (layer) {
@@ -1685,6 +1685,15 @@
     return body;
   }
 
+  // Headline place: the Artemis III candidate region when the site is within
+  // 10 km of its cited (approximate) point; no false-precision distance.
+  function regionName(site) {
+    if (site.nearest && site.distance_km != null && site.distance_km <= 10) {
+      return "near NASA's " + escapeHtml(site.nearest) + " candidate region";
+    }
+    return "at " + fmtLocation(site.lat, site.lon);
+  }
+
   // Nearest cited Artemis III point within 10 km, else coordinates.
   function placeName(site) {
     if (site.nearest && site.distance_km != null && site.distance_km <= 10) {
@@ -1711,12 +1720,15 @@
     if (v == null) {
       return "Earth view not checked";
     }
-    // Clearance toward the sub-Earth point at zero libration.
-    return (
-      "Earth clearance " + (v < 0 ? "−" : "") + Math.abs(v).toFixed(1) + "°" +
-      (v < 0 ? " (below terrain" : " (") + (v < 0 ? "; " : "") +
-      (short ? "libration not modelled)" : "mean libration; libration not modelled)")
-    );
+    // Elevation of the sub-Earth point above the local horizon at mean
+    // libration. Libration swings Earth by about ±7°, so near the pole
+    // direct contact comes and goes; contact windows are not modelled.
+    var where = v < 0
+      ? "Earth " + Math.abs(v).toFixed(1) + "° below the horizon at mean libration"
+      : "Earth " + v.toFixed(1) + "° above the horizon at mean libration";
+    return where + (short
+      ? " (contact intermittent; not modelled)"
+      : " (libration moves Earth by about ±7°, so contact near the pole is intermittent; contact windows not modelled)");
   }
 
   function flatWords(site, scenario) {
@@ -1805,7 +1817,7 @@
       var noise = noiseCheck(site);
       parts.push(noise ? noiseWords(noise) : "DEM-noise not run");
       return (
-        prefix + "<b>Best site that passes every check run on it: #" + (index + 1) + " " + placeName(site) +
+        prefix + "<b>Highest-ranked site that passes every check run on it: #" + (index + 1) + " " + placeName(site) +
         "</b> — " + escapeHtml(parts.join(", ")) + "."
       );
     }
@@ -1819,6 +1831,25 @@
       prefix + "<b>No ranked site passes every check run on it</b>: " + checked + " of " + sites.length +
       " were checked and each fails flat ground or DEM-noise; the rest are not checked."
     );
+  }
+
+  function presentWords(site, values, months) {
+    var out = [];
+    var v = values && values.values ? values.values.illumination : null;
+    if (v != null) {
+      out.push("lit " + Math.round(100 * v) + " % of the time");
+    }
+    var d = darkOf(site, months);
+    if (d && d.never) {
+      out.push("never lit");
+    } else if (d) {
+      out.push("longest night " + (d.censored ? "≥ " : "") + daysText(d.hours) + " days");
+    }
+    var flat = flatFraction(site);
+    if (flat != null) {
+      out.push(Math.round(100 * flat) + " % flat ground within 1 km");
+    }
+    return out.length ? out : ["layer values not available"];
   }
 
   async function renderAnswer(payload, request, seq) {
@@ -1848,7 +1879,11 @@
       return;
     }
     var months = request.illumination_months || null;
-    var head = "<b>Best screened site: #1 " + placeName(best) + "</b>";
+    var head = "<b>Suggested #1 " + regionName(best) + "</b>";
+    var steps = document.getElementById("answer-steps");
+    steps.textContent =
+      "Requirements → one map layer per rule → score what is left → group points within " +
+      groupText(request.min_separation_km) + " km into sites → suggested order with reasons → a person checks";
     els.answerMain.innerHTML = head + " — loading layer values…";
     var values = null;
     try {
@@ -1857,6 +1892,11 @@
       values = null;
     }
     if (seq !== scoreSeq) {
+      return;
+    }
+    if (isPresenting()) {
+      // Three facts a room can read: sunlight, longest night, flat ground.
+      els.answerMain.innerHTML = head + " — " + presentWords(best, values, months).join(" · ");
       return;
     }
     els.answerMain.innerHTML =
@@ -2472,9 +2512,26 @@
     }
   }
 
+  // In presentation mode the slope limit stays at the default, the only limit
+  // the 20 m flat-ground and robustness studies exist for.
+  function lockSlope(on) {
+    var note = document.getElementById("slope-lock-note");
+    var base = meta && meta.defaults ? meta.defaults.max_slope_deg : null;
+    els.slope.disabled = on;
+    note.hidden = !on;
+    if (on && base != null && Number(els.slope.value) !== Number(base)) {
+      els.slope.value = base;
+      updateTerrainToggle();
+      if (lastRequest) {
+        scheduleScore();
+      }
+    }
+  }
+
   function setPresenting(on) {
     // The page sizes in rem, so the root element carries the class too.
     document.documentElement.classList.toggle("present", on);
+    lockSlope(on);
     document.body.classList.toggle("present", on);
     els.present.setAttribute("aria-pressed", on ? "true" : "false");
     try {
@@ -2486,6 +2543,9 @@
     // Cards merge the Stage G rows in presentation mode.
     if (currentSites) {
       renderCards();
+    }
+    if (lastScore && lastRequest) {
+      renderAnswer(lastScore, lastRequest, scoreSeq);
     }
     if (map) {
       map.invalidateSize();
@@ -2776,7 +2836,8 @@
       syncSliderLabels();
       changed = true;
     }
-    if (PARAMS.get("slope")) {
+    // Presentation mode keeps the default slope limit (see lockSlope).
+    if (PARAMS.get("slope") && !isPresenting()) {
       els.slope.value = Number(PARAMS.get("slope"));
       updateTerrainToggle();
       changed = true;

@@ -23,6 +23,7 @@
       </header>
 
       <section class="answer" id="answer" aria-live="polite" aria-label="Answer">
+        <p class="answer-steps" id="answer-steps">Requirements → one map layer per rule → score what is left → group nearby points into sites → suggested order with reasons → a person checks</p>
         <p class="answer-main" id="answer-main">Scoring the default scenario…</p>
         <p class="answer-pass" id="answer-pass"></p>
         <p class="answer-meta" id="answer-meta"></p>
@@ -67,6 +68,7 @@
                 </div>
               </div>
               <p class="help">Slope requirement must be valid in the circle defined by the radius.</p>
+              <p class="help" id="slope-lock-note" hidden>Fixed at the default in presentation mode: the 20 m flat-ground and robustness studies were run for this limit. Another limit needs a short MeluXina rerun (minutes).</p>
             </div>
             <div class="field">
               <label for="group-km">Group sites closer than (km)</label>
@@ -174,7 +176,7 @@
               <p class="legend-ends">
                 <span id="legend-low">low</span><span id="legend-high">high</span>
               </p>
-              <p class="legend-note" id="legend-note">no colour (grey terrain) = fails slope rule</p>
+              <p class="legend-note" id="legend-note">no colour (grey terrain) = fails a hard rule (see Why excluded)</p>
               <p class="legend-note">Grey: LOLA elevation. Place names: approximate crater centres.</p>
             </div>
             <p class="map-badge" id="window-badge" hidden></p>
