@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>anuma · lunar south-pole landing-site screening</title>
     <link rel="stylesheet" href="/vendor/leaflet.css" />
-    <link rel="stylesheet" href="/style.css?v=ux-layout-1" />
+    <link rel="stylesheet" href="/style.css?v=ux-layout-2" />
   </head>
   <body>
     <div class="app">
@@ -32,12 +32,12 @@
       <section class="answer" id="answer" aria-live="polite" aria-label="Answer">
         <ol class="steps" id="answer-steps" aria-label="Workflow: requirements, one map layer per rule, score what is left, group nearby points into sites, suggested order with reasons, a person checks">
           <li><button type="button" class="step" data-step="slope" data-layer="slope"><span class="step-n">1</span><span class="step-t">Slope rule</span><span class="step-s" id="step-slope-s">≤ 8° at 240 m</span></button></li>
-          <li><button type="button" class="step" data-step="flat" data-layer="terrain_1km_fraction"><span class="step-n">2</span><span class="step-t">Flat ground</span><span class="step-s" id="step-flat-s">≥ 50 % within 1 km at 20 m</span></button></li>
-          <li><button type="button" class="step" data-step="excluded" data-layer="excluded"><span class="step-n">3</span><span class="step-t">Why excluded</span><span class="step-s" id="step-excluded-s">all hard rules on one map</span></button></li>
-          <li><button type="button" class="step" data-step="score" data-layer="score"><span class="step-n">4</span><span class="step-t">Score what is left</span><span class="step-s" id="step-score-s">sunlight · hydrogen · Earth view</span></button></li>
-          <li><button type="button" class="step" data-step="group" data-layer="score"><span class="step-n">5</span><span class="step-t">Group nearby points</span><span class="step-s" id="step-group-s">within 10 km</span></button></li>
-          <li><button type="button" class="step" data-step="order"><span class="step-n">6</span><span class="step-t">Suggested order</span><span class="step-s" id="step-order-s">with reasons, not a verdict</span></button></li>
-          <li><button type="button" class="step" data-step="check"><span class="step-n">7</span><span class="step-t">A person checks</span><span class="step-s" id="step-check-s">flat ground · DEM-noise · weight-robust</span></button></li>
+          <li><button type="button" class="step" data-step="flat" data-layer="terrain_1km_fraction" title="Share of 20 m pixels at or below the slope limit within 1 km of the cell; cells under the threshold are removed"><span class="step-n">2</span><span class="step-t">Flat ground</span><span class="step-s" id="step-flat-s">≥ 50 % flat within 1 km</span></button></li>
+          <li><button type="button" class="step" data-step="excluded" data-layer="excluded" title="Red = too steep, yellow = too little flat ground. Keep-out zones are exclusion zones in the Artemis Accords 'safety zone' sense; no site is owned or claimed (Outer Space Treaty Art. II)."><span class="step-n">3</span><span class="step-t">Why excluded</span><span class="step-s" id="step-excluded-s">keep-out off</span></button></li>
+          <li><button type="button" class="step" data-step="score" data-layer="score"><span class="step-n">4</span><span class="step-t">Score</span><span class="step-s" id="step-score-s">weights 50 / 30 / 20 %</span></button></li>
+          <li><button type="button" class="step" data-step="group" data-layer="score"><span class="step-n">5</span><span class="step-t">Group</span><span class="step-s" id="step-group-s">within 10 km</span></button></li>
+          <li><button type="button" class="step" data-step="order"><span class="step-n">6</span><span class="step-t">Suggested order</span><span class="step-s" id="step-order-s">reasons on the card, not a verdict</span></button></li>
+          <li><button type="button" class="step" data-step="check"><span class="step-n">7</span><span class="step-t">Human check</span><span class="step-s" id="step-check-s">flat ground · DEM-noise · weight-robust</span></button></li>
         </ol>
         <p class="answer-main" id="answer-main">Scoring the default scenario…</p>
         <p class="answer-pass" id="answer-pass"></p>
@@ -105,6 +105,7 @@
                   Avoid Artemis III candidate regions
                 </label>
               </div>
+              <p class="help" id="keepout-law">Exclusion zones in the Artemis Accords "safety zone" sense; no site is owned or claimed (Outer Space Treaty Art. II).</p>
               <div class="group-body" id="keepout-body" hidden>
                 <label for="keepout-lists">Candidate list</label>
                 <select id="keepout-lists">
@@ -280,6 +281,6 @@
     <script src="/vendor/leaflet.js"></script>
     <script src="/vendor/proj4.js"></script>
     <script src="/vendor/proj4leaflet.js"></script>
-    <script src="/app.js?v=ux-layout-1"></script>
+    <script src="/app.js?v=ux-layout-2"></script>
   </body>
 </html>

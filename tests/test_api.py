@@ -933,6 +933,18 @@ def test_ui_workflow_stepper_and_demo_bar():
     assert "not a verdict" in app_js
     assert "Not affiliated with or" in html
     assert "presentChips" in app_js and ":focus-visible" in css
+    # Review fixes: closing the card resets the view; the demo moves start
+    # from the overview; grouping activates step 5; counts read "338 k".
+    assert "function closeCardAndReset" in app_js and "function resetView" in app_js
+    assert app_js.count("closeCardAndReset();") >= 4
+    assert 'setStep("group")' in app_js
+    assert '" M"' in app_js and '" k"' in app_js
+    assert "Slope, normalised (1 = flattest)" in app_js
+    assert "layer built for " in app_js
+    assert '"studies: default top "' in app_js
+    assert 'id="keepout-law"' in html
+    assert "Artemis Accords" in html and "Outer Space Treaty Art. II" in html
+    assert "body.rail-more .rail-actions" in css
 
 
 def test_ui_presentation_wording_and_slope_lock():

@@ -330,8 +330,9 @@
     }
     var unit = info.unit ? " (" + info.unit + ")" : "";
     var months = name === "illumination" ? currentWindow() : null;
-    els.legendTitle.textContent =
-      layerLabel(name) + unit + (months ? " · " + windowLabel(months) : "");
+    els.legendTitle.textContent = name === "slope"
+      ? "Slope, normalised (1 = flattest)"
+      : layerLabel(name) + unit + (months ? " · " + windowLabel(months) : "");
     els.legendBar.style.background = GREY;
     // Normalised layers run 0 (worse) to 1 (better).
     if (info.mode) {
@@ -412,6 +413,10 @@
       return;
     }
     var layer = button.getAttribute("data-layer");
+    var leavingCard = (activeStep === "order" || activeStep === "check") && name !== "order" && name !== "check";
+    if (leavingCard && selectedRank != null && !cardsClosed) {
+      closeCardAndReset();
+    }
     if (layer) {
       if (els.layer.value !== layer) {
         els.layer.value = layer;
@@ -443,19 +448,36 @@
     }
     groupLayer = L.layerGroup().addTo(map);
     currentSites.forEach(function (site) {
-      L.polygon(radiusRing(site, 1000 * km), {
+      var ring = radiusRing(site, 1000 * km);
+      L.polygon(ring, {
+        className: "group-ring",
+        color: "#ffffff",
+        weight: 6,
+        opacity: 0.9,
+        fillOpacity: 0,
+        interactive: false,
+      }).addTo(groupLayer);
+      L.polygon(ring, {
         className: "group-ring",
         color: "#161921",
-        weight: 1,
-        dashArray: "3 3",
-        fillOpacity: 0.06,
+        weight: 2.5,
+        dashArray: "10 6",
+        fillOpacity: 0.08,
         interactive: false,
       }).addTo(groupLayer);
     });
   }
 
+  // "338 k", "2.7 M": readable from the back of a room.
   function fmtCount(n) {
-    return Number(n).toLocaleString("en");
+    var v = Number(n);
+    if (v >= 1e6) {
+      return (v / 1e6).toFixed(1).replace(/\.0$/, "") + " M";
+    }
+    if (v >= 1e3) {
+      return Math.round(v / 1e3) + " k";
+    }
+    return String(v);
   }
 
   function stepSub(name, text) {
@@ -478,38 +500,46 @@
     stepSub(
       "slope",
       "≤ " + hard.max_slope_deg + "° at 240 m" +
-        (hard.slope_radius_m > 0 ? " within " + hard.slope_radius_m + " m" : "") +
-        (detail.cells_passing_slope != null ? " · " + fmtCount(detail.cells_passing_slope) + " cells pass" : "")
+        (hard.slope_radius_m > 0 ? " in " + hard.slope_radius_m + " m" : "")
     );
+    var slopeStep = stepButton("slope");
+    if (slopeStep) {
+      slopeStep.title = detail.cells_passing_slope != null
+        ? Number(detail.cells_passing_slope).toLocaleString("en") + " cells pass the slope rule"
+        : "";
+    }
     var flat;
     if (status === "applied") {
       flat =
         "≥ " + Math.round(100 * (detail.min_fraction == null ? 0.5 : detail.min_fraction)) +
-        " % within " + ((detail.radius_m || 1000) / 1000) + " km at 20 m" +
+        " % flat" +
         (detail.cells_removed != null ? " · " + fmtCount(detail.cells_removed) + " removed" : "");
     } else if (status === "disabled") {
       flat = "off";
     } else if (status === "slope_mismatch") {
-      flat = "not applied: built for " + (detail.layer_max_slope_deg != null ? detail.layer_max_slope_deg : 8) + "° only";
+      flat = "off: built for " + (detail.layer_max_slope_deg != null ? detail.layer_max_slope_deg : 8) + "° only";
     } else if (status === "unavailable") {
       flat = "unavailable on this machine";
     } else {
       flat = "no 20 m rule on this server";
     }
     stepSub("flat", flat);
+    // The why-excluded layer is drawn for the default slope limit.
+    var builtFor = meta && meta.defaults ? Number(meta.defaults.max_slope_deg) : null;
+    var slopeDiffers = builtFor != null && Number(hard.max_slope_deg) !== builtFor;
     var keepout = lastRequest.keepout;
     stepSub(
       "excluded",
-      "red too steep · yellow not flat · " +
-        (keepout
-          ? "keep-out " + keepout.radius_km + " km " + keepout.mode + " around Artemis III"
-          : "keep-out off")
+      (keepout
+        ? "keep-out " + keepout.radius_km + " km " + keepout.mode + " · safety zones"
+        : "keep-out off") +
+        (slopeDiffers ? " (layer built for " + builtFor + "°)" : "")
     );
     var w = normalisedWeights(lastRequest.weights || {});
     stepSub(
       "score",
-      "sunlight " + Math.round(100 * (w.illumination || 0)) + " · hydrogen " +
-        Math.round(100 * (w.hydrogen || 0)) + " · Earth view " + Math.round(100 * (w.earth_visibility || 0))
+      "weights " + Math.round(100 * (w.illumination || 0)) + " / " +
+        Math.round(100 * (w.hydrogen || 0)) + " / " + Math.round(100 * (w.earth_visibility || 0)) + " %"
     );
     stepSub(
       "group",
@@ -520,16 +550,18 @@
     stepSub(
       "order",
       best
-        ? "#1 " + (best.nearest && best.distance_km != null && best.distance_km <= 10
-            ? "near " + best.nearest
-            : fmtLocation(best.lat, best.lon)) + " · not a verdict"
+        ? "#1: " + (best.nearest && best.distance_km != null && best.distance_km <= 10
+            ? best.nearest + " region"
+            : fmtLocation(best.lat, best.lon))
         : "no site passes the hard rules"
     );
+    // The studies cover the default top N only; the table shows n/a elsewhere.
+    var studied = checks && checks.sites ? checks.sites.length : 10;
     stepSub(
       "check",
       lastScenario && lastScenario.studiesOk
-        ? "flat ground · DEM-noise · weight-robust"
-        : "flat ground · studies n/a (default scenario only)"
+        ? "studies: default top " + studied
+        : "studies: default top " + studied + " only"
     );
   }
 
@@ -567,6 +599,7 @@
   }
 
   function demoExcluded() {
+    closeCardAndReset();
     if (els.layer.value === "excluded") {
       onStep("score");
     } else {
@@ -575,8 +608,14 @@
   }
 
   function demoGroup() {
+    closeCardAndReset();
     var km = Number(els.groupKm.value);
     els.groupKm.value = km === 2 ? defaultGroupKm() : 2;
+    if (els.layer.value !== "score") {
+      els.layer.value = "score";
+      showSingleLayer("score");
+    }
+    setStep("group");
     scheduleScore();
     updateDemoBar();
   }
@@ -586,8 +625,8 @@
       return;
     }
     if (selectedRank === 0 && !cardsClosed) {
-      cardsClosed = true;
-      renderCards();
+      closeCardAndReset();
+      setStep("score");
     } else {
       onStep("order");
     }
@@ -864,18 +903,6 @@
       site.longest_lit_hours === 0 ? "never lit" : escapeHtml(lit) + " days"
     );
     return out;
-  }
-
-  function darkWords(site, months) {
-    var d = darkOf(site, months);
-    if (!d) {
-      return null;
-    }
-    var where = months ? " in " + windowLabel(months) : " (modelled " + darkPeriod() + ")";
-    if (d.never) {
-      return "never lit" + where;
-    }
-    return "longest dark stretch " + (d.censored ? "≥ " : "") + daysText(d.hours) + " days" + where;
   }
 
 
@@ -1587,9 +1614,29 @@
     } else if (act === "unpin" || act === "close-pinned") {
       pinned = null;
     } else if (act === "close-current") {
-      cardsClosed = true;
+      closeCardAndReset();
+      return;
     }
     renderCards();
+  }
+
+  // The overview the page opens with (zoom 2: the pole out to about 85°S).
+  function resetView() {
+    if (map) {
+      map.setView([-90, 0], Number(PARAMS.get("zoom")) || 2, { animate: false });
+    }
+  }
+
+  // Closing the site card also drops the selection and the zoomed view, so
+  // the next demo move shows the whole map again instead of a zoomed patch.
+  function closeCardAndReset() {
+    cardsClosed = true;
+    selectedRank = null;
+    if (currentSites) {
+      renderSites(currentSites, currentRadius);
+    }
+    renderCards();
+    resetView();
   }
 
   // Presentation mode and short screens have no room under the table, so
@@ -1940,17 +1987,6 @@
     return "at " + fmtLocation(site.lat, site.lon);
   }
 
-  function sunlightWords(values, months) {
-    var v = values && values.values ? values.values.illumination : null;
-    if (v == null) {
-      return "sunlight not checked";
-    }
-    return (
-      "lit " + Math.round(100 * v) + " % of " +
-      (months ? windowLabel(months) + " (modelled daily)" : "the time (18.6-yr average)")
-    );
-  }
-
   function earthWords(values, short) {
     var v = values && values.values ? values.values.earth_visibility : null;
     if (v == null) {
@@ -1967,34 +2003,7 @@
       : " (libration moves Earth by about ±7°, so contact near the pole is intermittent; contact windows not modelled)");
   }
 
-  function flatWords(site, scenario) {
-    var value = flatFraction(site);
-    if (value == null) {
-      return scenario.studiesOk ? "flat ground within 1 km not checked" : "flat ground within 1 km n/a for this scenario";
-    }
-    var pass = value >= flatThreshold();
-    return (
-      Math.round(100 * value) + " % flat ground within 1 km (20 m" + flatSlopeHint() + "; " +
-      (pass ? "passes the 50 % rule" : "fails — " + flatShortfall(value)) + ")"
-    );
-  }
 
-  function robustWords(site, scenario) {
-    if (!stability || !stability.available) {
-      return "weight robustness not checked";
-    }
-    if (!scenario.studiesOk) {
-      return "weight robustness n/a for this scenario";
-    }
-    var row = stabilityRow(site);
-    var freq = row ? row.frequency : 0;
-    var win = winnerFrequency(site);
-    return (
-      "in the top 10 in " + (100 * freq).toFixed(freq === 1 || freq === 0 ? 0 : 1) +
-      " % of " + stability.draw_count + " weight draws" +
-      (win != null ? " and #1 in " + (100 * win).toFixed(1) + " %" : "")
-    );
-  }
 
   // The optional 20 m terrain gate from /score, read but never required.
   // The 20 m terrain gate from /score in words, or null if the server has none.
@@ -2135,20 +2144,11 @@
     if (seq !== scoreSeq) {
       return;
     }
-    if (isPresenting()) {
-      els.answerMain.innerHTML =
-        '<span class="answer-head">' + head + '</span><span class="answer-chips">' +
-        presentChips(best, values, months) + "</span>";
-      return;
-    }
+    // Three facts in both modes; Earth view, weight-robustness and the rest
+    // stay on the #1 card.
     els.answerMain.innerHTML =
-      head + " — " + [
-        sunlightWords(values, months),
-        darkWords(best, months),
-        earthWords(values, true),
-        flatWords(best, scenario),
-        robustWords(best, scenario),
-      ].filter(Boolean).join(", ") + ".";
+      '<span class="answer-head">' + head + '</span><span class="answer-chips">' +
+      presentChips(best, values, months) + "</span>";
   }
 
   // ---- Artemis III keep-out
@@ -2867,6 +2867,17 @@
       els.csv.click();
     });
     window.addEventListener("resize", debounce(placeCards, 150));
+    var railScroll = document.querySelector(".rail-scroll");
+    var syncRailCue = function () {
+      document.body.classList.toggle(
+        "rail-more",
+        railScroll.scrollTop + railScroll.clientHeight < railScroll.scrollHeight - 2
+      );
+    };
+    railScroll.addEventListener("scroll", syncRailCue);
+    railScroll.addEventListener("toggle", syncRailCue, true);
+    window.addEventListener("resize", debounce(syncRailCue, 150));
+    window.setTimeout(syncRailCue, 0);
     els.railToggle.addEventListener("click", function () {
       setRail(!railOpen());
       writeUrl();

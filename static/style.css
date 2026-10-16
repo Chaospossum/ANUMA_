@@ -217,9 +217,30 @@ body.rail-closed .panel-form {
 
 .rail-actions {
   flex: none;
+  position: relative;
   padding: 10px 12px 12px;
   border-top: 1px solid var(--line);
   background: var(--white);
+}
+
+/* More settings above the fold: a shadow and a hint on the pinned actions. */
+body.rail-more .rail-actions {
+  box-shadow: 0 -10px 14px -8px rgba(0, 0, 0, 0.28);
+}
+
+body.rail-more .rail-actions::before {
+  content: "▲ more settings above";
+  position: absolute;
+  top: -1px;
+  right: 10px;
+  transform: translateY(-100%);
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  font-size: 0.66rem;
+  color: var(--muted);
+  pointer-events: none;
 }
 
 .weights-help {
@@ -1081,7 +1102,7 @@ body.present .sites-table .loc {
 
 body.present .status {
   padding: 3px 12px;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 /* Only the data-source list may be cut short; the disclaimer and the
@@ -1526,7 +1547,7 @@ body.present .present-csv {
 }
 
 .steps li {
-  flex: 1 1 0;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
 }
@@ -1544,6 +1565,7 @@ body.present .present-csv {
   background: var(--white);
   text-align: left;
   line-height: 1.2;
+  overflow: hidden;
   cursor: pointer;
 }
 
@@ -1577,12 +1599,14 @@ body.present .present-csv {
 .step-t {
   font-size: 0.8rem;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .step-s {
   grid-column: 2;
   font-size: 0.68rem;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .step[aria-current="step"] .step-s {
@@ -1590,24 +1614,25 @@ body.present .present-csv {
 }
 
 body.present .steps {
-  gap: 6px;
+  gap: 4px;
   margin-bottom: 8px;
 }
 
 body.present .step {
-  padding: 4px 10px 4px 8px;
+  padding: 4px 6px 4px 5px;
+  column-gap: 5px;
 }
 
 body.present .step-t {
-  font-size: 15px;
+  font-size: 17px;
 }
 
 body.present .step-s {
-  font-size: 12px;
+  font-size: 15px;
 }
 
 body.present .step-n {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 /* Step 7 highlights the check columns in the table. */
@@ -1640,7 +1665,7 @@ body.present .demo-bar {
   padding: 5px 12px;
   border: 1.5px solid var(--ink);
   background: var(--white);
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 500;
   cursor: pointer;
 }
@@ -1730,8 +1755,15 @@ body.present .demo-bar {
 
 .chip b {
   font-family: var(--mono);
-  font-size: 1.25em;
+  font-size: 1.3em;
   font-weight: 600;
+}
+
+.answer-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
 }
 
 .chip span {
@@ -1774,14 +1806,6 @@ body.present .chip span {
     font-size: 14.5px;
   }
 
-  body.present .sites-table .wrap .a-name {
-    display: inline-block;
-    max-width: 9em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    vertical-align: bottom;
-  }
-
   body.present .table-legend {
     font-size: 13px;
   }
@@ -1793,6 +1817,10 @@ body.present .chip span {
 
   body.present .answer-main .answer-head {
     font-size: 20px;
+  }
+
+  body.present .sites-table .loc {
+    font-size: 0.95em;
   }
 }
 

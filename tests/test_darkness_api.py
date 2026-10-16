@@ -300,7 +300,7 @@ def test_ui_shows_longest_dark():
     hydrogen = html.index('<th class="contrib">Hydrogen</th>')
     assert sunlight < dark < hydrogen
     assert "darkCell(site, lastRequest && lastRequest.illumination_months)" in app_js
-    assert '"longest dark stretch "' in app_js
+    assert '"longest night"' in app_js
     assert 'fact("Longest darkness"' in app_js and '"Longest sunlight"' in app_js
     assert 'name === "longest_dark" ? currentWindow() : null' in app_js
 
