@@ -16,9 +16,31 @@ ispace. Screening tool, not a landing recommendation.
 | Compare with sites chosen by hand | Slide 5 |
 | Legal: no ownership, but exclusion zones; few good South Pole sites | Slide 6 |
 | Import/export so others can reproduce results | Slide 3 (copy link, CSV/GeoJSON) |
+| (NeoSpace briefing) value, plan and funding needs | Slide 6 |
 | End with next steps: 1 and 5 years, realistic, regulatory/business/industry/technical | Slide 7 |
 
 Keep numbers few. They like numbers, but the idea comes first.
+
+## Format and timing (from the NeoSpace briefing)
+
+**5-minute pitch + 5-minute Q&A.** The pitch must pick the strongest evidence,
+explain the solution and its value, and show the plan and funding needs.
+There is also a 10–15 page proposal (technology ~5 p, business model ~3 p,
+implementation plan ~4 p).
+
+| Slide | Time |
+| --- | --- |
+| 1 Problem | 0:30 |
+| 2 Idea (workflow) | 1:00 |
+| 3 Demo | 1:00 |
+| 4 Result + how we checked it | 0:45 |
+| 5 Rules and law | 0:30 |
+| 6 Business and funding | 0:45 |
+| 7 Next steps and the ask | 0:30 |
+| **Total** | **5:00** |
+
+Section 4b ("How we checked it") is folded into slide 4 when presenting;
+keep its full table for the proposal and the Q&A.
 
 ---
 
@@ -50,7 +72,7 @@ narrowing hundreds of candidate points down to a few sites is the hard part."
 - Public data only: NASA LOLA terrain (20 m), NASA illumination map, Lunar
   Prospector hydrogen, Earth view computed from the terrain.
 
-## 3. How a mission planner would use it (demo, under 2 minutes)
+## 3. How a mission planner would use it (demo, 1 minute)
 
 **On the slide:** three screenshots in a row (backup if the laptop fails).
 
@@ -87,7 +109,7 @@ Say the uncertainty out loud:
 - One site sits exactly on the 50 % flat-ground line.
 - "This is the order we suggest and why. A person still checks it."
 
-## 5. How we checked it
+## 4b. How we checked it (fold into slide 4; full table for the proposal)
 
 **On the slide:** two checks and one honest gap.
 - Our sunlight model matches NASA's published illumination map (error 0.0198,
@@ -98,7 +120,7 @@ Say the uncertainty out loud:
 - Gap: ispace's own Mission 2 sites (Mare Frigoris, about 60.5°N) are outside
   our 80–90°S map, so we could not compare with them yet (slide 7).
 
-## 6. Rules and law
+## 5. Rules and law
 
 **On the slide:** "Nobody can own a site on the Moon, but missions can protect
 their area with exclusion zones."
@@ -110,6 +132,26 @@ their area with exclusion zones."
   the same places.
 - ANUMA already has a keep-out switch: exclude or penalise areas around other
   missions' sites (today: the Artemis III candidate regions).
+
+## 6. Business and funding (DRAFT — team to confirm every number)
+
+**On the slide:** "Who pays: lander and payload mission-analysis teams. What they
+get: a validated first screen in hours instead of weeks."
+
+- **Customers:** mission-analysis teams at lunar lander companies and payload
+  providers (e.g. in agency programmes like CLPS or ESA's Argonaut); agencies
+  as validation partners, not first buyers.
+- **Free vs paid:**
+  - Free: the public map with default rules (builds trust and visibility).
+  - Paid: private scenarios with the customer's own rules (ellipse size,
+    slope limit, rover reach), a written screening report with the evidence
+    trail, and reruns on the supercomputer for their rules.
+- **Why not rebuild it in a week:** the value is the validated chain (frozen
+  checks against NASA data, 20 m terrain, robustness studies), not the map.
+- **Ask (placeholder, decide as a team):** 12 months, 2 people, a small HPC
+  allocation (the full study so far used about 9 node-hours), and **one
+  lander team as a design partner** to set real requirements.
+  Put a € figure here only once the team has costed it.
 
 ## 7. Next steps: 1 year and 5 years
 
@@ -128,6 +170,21 @@ their area with exclusion zones."
 
 Close with: "A transparent first screen: every rule visible, every site
 explained, every analysis shareable."
+
+## Hard Q&A (prepare these)
+
+1. "Your #1 is next to a NASA region — did you tune it?" Same public data and
+   physics; rules were frozen before each run; change the slope limit and the
+   #1 changes, so nothing is hard-coded.
+2. "Earth view near the pole?" It is Earth's elevation at mean libration; the
+   Moon's wobble (about ±7°) makes contact intermittent there. Real contact
+   windows are a 1-year step.
+3. "A 1 km circle is not a landing ellipse." Agreed; it stands in for "most of
+   the ellipse must be flat". The ellipse becomes a customer input.
+4. "Who pays, and why can't they rebuild it?" See slide 6.
+5. "Other missions near Shackleton?" The keep-out switch takes any
+   coordinates; we only loaded sets with published coordinates. That gap is
+   why a shared exclusion-zone register is the 5-year step.
 
 ## Things not to say
 
