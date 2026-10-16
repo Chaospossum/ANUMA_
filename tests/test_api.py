@@ -909,6 +909,32 @@ def test_ui_keeps_scenario_in_url():
         assert 'PARAMS.get("%s")' % key in app_js, key
 
 
+def test_ui_workflow_stepper_and_demo_bar():
+    html = (repo_root() / "static" / "index.html").read_text()
+    app_js = (repo_root() / "static" / "app.js").read_text()
+    css = (repo_root() / "static" / "style.css").read_text()
+    # The workflow is the navigation: one clickable step per rule, in order.
+    steps = re.findall(r'data-step="([a-z]+)"', html)
+    assert steps == ["slope", "flat", "excluded", "score", "group", "order", "check"]
+    for layer in ("slope", "terrain_1km_fraction", "excluded", "score"):
+        assert 'data-layer="%s"' % layer in html, layer
+    assert "function onStep" in app_js and "function updateSteps" in app_js
+    assert "detail.cells_passing_slope" in app_js and "detail.cells_removed" in app_js
+    assert 'aria-current", "step"' in app_js
+    # The three pitch moves plus the share link sit in the header in presentation mode.
+    for element_id in ("demo-bar", "demo-excluded", "demo-group", "demo-site1", "demo-link"):
+        assert 'id="%s"' % element_id in html, element_id
+    assert "body.present .demo-bar" in css and "function demoGroup" in app_js
+    # The rail is grouped by intent, with Share & export pinned at the bottom.
+    for section in ("sect-weights", "sect-rules", "sect-group", "sect-window", "sect-map"):
+        assert 'id="%s"' % section in html, section
+    assert "Share &amp; export" in html
+    # Honesty statements stay in place.
+    assert "not a verdict" in app_js
+    assert "Not affiliated with or" in html
+    assert "presentChips" in app_js and ":focus-visible" in css
+
+
 def test_ui_presentation_wording_and_slope_lock():
     html = (repo_root() / "static" / "index.html").read_text()
     app_js = (repo_root() / "static" / "app.js").read_text()
