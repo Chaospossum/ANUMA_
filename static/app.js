@@ -61,6 +61,10 @@
   var keepoutLayer = null;
   var cardsClosed = false;
   var cardsSeq = 0;
+  // Workflow stepper above the map: the active step and the grouping rings it draws.
+  var activeStep = null;
+  var groupLayer = null;
+  var STEP_FOR_LAYER = { slope: "slope", terrain_1km_fraction: "flat", excluded: "excluded", score: "score" };
   // The user's last setting of the 20 m rule switch, kept while it is disabled.
   var terrainChoice = null;
   var MAX_MONTHS = 600;
@@ -130,6 +134,11 @@
     windowReset: document.getElementById("window-reset"),
     terrain: document.getElementById("terrain-toggle"),
     terrainNote: document.getElementById("terrain-note"),
+    steps: Array.prototype.slice.call(document.querySelectorAll("#answer-steps .step")),
+    demoExcluded: document.getElementById("demo-excluded"),
+    demoGroup: document.getElementById("demo-group"),
+    demoSite1: document.getElementById("demo-site1"),
+    demoLink: document.getElementById("demo-link"),
   };
 
   function fmtLat(lat) {
@@ -361,6 +370,228 @@
     });
     overlay.addTo(map);
     updateLegend(name || "score");
+    markLayerStep(name || "score");
+  }
+
+  // ---- Workflow stepper (the rule layers as navigation)
+
+  function stepButton(name) {
+    return els.steps.filter(function (button) {
+      return button.getAttribute("data-step") === name;
+    })[0] || null;
+  }
+
+  function setStep(name) {
+    activeStep = name;
+    els.steps.forEach(function (button) {
+      if (button.getAttribute("data-step") === name) {
+        button.setAttribute("aria-current", "step");
+      } else {
+        button.removeAttribute("aria-current");
+      }
+    });
+    document.body.classList.toggle("show-checks", name === "check");
+    drawGroupRings();
+    updateDemoBar();
+  }
+
+  // The map layer decides the step, except that the score layer also serves
+  // steps 5–7 (grouping, order, checks), which keep their highlight.
+  function markLayerStep(layer) {
+    var step = STEP_FOR_LAYER[layer] || null;
+    if (layer === "score" && (activeStep === "group" || activeStep === "order" || activeStep === "check")) {
+      updateDemoBar();
+      return;
+    }
+    setStep(step);
+  }
+
+  function onStep(name) {
+    var button = stepButton(name);
+    if (!button || button.disabled) {
+      return;
+    }
+    var layer = button.getAttribute("data-layer");
+    if (layer) {
+      if (els.layer.value !== layer) {
+        els.layer.value = layer;
+      }
+      showSingleLayer(layer);
+    } else if (els.layer.value !== "score") {
+      els.layer.value = "score";
+      showSingleLayer("score");
+    }
+    setStep(name);
+    if ((name === "order" || name === "check") && currentSites && currentSites.length) {
+      selectSite(0);
+    }
+    writeUrl();
+  }
+
+  // Grouping radius around every ranked site while step 5 is active.
+  function drawGroupRings() {
+    if (groupLayer) {
+      map.removeLayer(groupLayer);
+      groupLayer = null;
+    }
+    if (activeStep !== "group" || !map || !currentSites || !currentSites.length || !lastRequest) {
+      return;
+    }
+    var km = Number(lastRequest.min_separation_km);
+    if (!(km > 0)) {
+      return;
+    }
+    groupLayer = L.layerGroup().addTo(map);
+    currentSites.forEach(function (site) {
+      L.polygon(radiusRing(site, 1000 * km), {
+        className: "group-ring",
+        color: "#161921",
+        weight: 1,
+        dashArray: "3 3",
+        fillOpacity: 0.06,
+        interactive: false,
+      }).addTo(groupLayer);
+    });
+  }
+
+  function fmtCount(n) {
+    return Number(n).toLocaleString("en");
+  }
+
+  function stepSub(name, text) {
+    var el = document.getElementById("step-" + name + "-s");
+    if (el) {
+      el.textContent = text;
+    }
+  }
+
+  // Each step's sub-line: the rule as scored and what it removed, from /score.
+  function updateSteps() {
+    if (!lastRequest || !lastScore) {
+      return;
+    }
+    var hard = lastRequest.hard || {};
+    var detail = lastScore.terrain_gate_detail || {};
+    var gate = lastScore.terrain_gate;
+    var status = gate == null ? null : typeof gate === "string" ? gate : gate.status;
+    var sites = lastScore.sites || [];
+    stepSub(
+      "slope",
+      "≤ " + hard.max_slope_deg + "° at 240 m" +
+        (hard.slope_radius_m > 0 ? " within " + hard.slope_radius_m + " m" : "") +
+        (detail.cells_passing_slope != null ? " · " + fmtCount(detail.cells_passing_slope) + " cells pass" : "")
+    );
+    var flat;
+    if (status === "applied") {
+      flat =
+        "≥ " + Math.round(100 * (detail.min_fraction == null ? 0.5 : detail.min_fraction)) +
+        " % within " + ((detail.radius_m || 1000) / 1000) + " km at 20 m" +
+        (detail.cells_removed != null ? " · " + fmtCount(detail.cells_removed) + " removed" : "");
+    } else if (status === "disabled") {
+      flat = "off";
+    } else if (status === "slope_mismatch") {
+      flat = "not applied: built for " + (detail.layer_max_slope_deg != null ? detail.layer_max_slope_deg : 8) + "° only";
+    } else if (status === "unavailable") {
+      flat = "unavailable on this machine";
+    } else {
+      flat = "no 20 m rule on this server";
+    }
+    stepSub("flat", flat);
+    var keepout = lastRequest.keepout;
+    stepSub(
+      "excluded",
+      "red too steep · yellow not flat · " +
+        (keepout
+          ? "keep-out " + keepout.radius_km + " km " + keepout.mode + " around Artemis III"
+          : "keep-out off")
+    );
+    var w = normalisedWeights(lastRequest.weights || {});
+    stepSub(
+      "score",
+      "sunlight " + Math.round(100 * (w.illumination || 0)) + " · hydrogen " +
+        Math.round(100 * (w.hydrogen || 0)) + " · Earth view " + Math.round(100 * (w.earth_visibility || 0))
+    );
+    stepSub(
+      "group",
+      "within " + groupText(lastRequest.min_separation_km) + " km → " + sites.length +
+        (sites.length === 1 ? " site" : " sites")
+    );
+    var best = sites[0];
+    stepSub(
+      "order",
+      best
+        ? "#1 " + (best.nearest && best.distance_km != null && best.distance_km <= 10
+            ? "near " + best.nearest
+            : fmtLocation(best.lat, best.lon)) + " · not a verdict"
+        : "no site passes the hard rules"
+    );
+    stepSub(
+      "check",
+      lastScenario && lastScenario.studiesOk
+        ? "flat ground · DEM-noise · weight-robust"
+        : "flat ground · studies n/a (default scenario only)"
+    );
+  }
+
+  // Steps whose layer is not on this machine stay listed but cannot be opened.
+  function syncStepAvailability() {
+    els.steps.forEach(function (button) {
+      var layer = button.getAttribute("data-layer");
+      if (!layer || layer === "score") {
+        return;
+      }
+      var option = Array.prototype.filter.call(els.layer.options, function (opt) {
+        return opt.value === layer;
+      })[0];
+      var ok = !!option && !option.disabled;
+      button.disabled = !ok;
+      button.title = ok ? "" : "Layer not available on this machine";
+    });
+  }
+
+  // ---- Demo bar (presentation mode): the three pitch moves, one click each.
+
+  function defaultGroupKm() {
+    return Number((meta && meta.defaults && meta.defaults.min_separation_km) || 10);
+  }
+
+  function updateDemoBar() {
+    var onExcluded = els.layer.value === "excluded";
+    els.demoExcluded.setAttribute("aria-pressed", onExcluded ? "true" : "false");
+    var km = lastRequest ? Number(lastRequest.min_separation_km) : defaultGroupKm();
+    var close = km === 2;
+    els.demoGroup.setAttribute("aria-pressed", close ? "true" : "false");
+    els.demoGroup.textContent = close ? "Group within " + groupText(defaultGroupKm()) + " km" : "Group within 2 km";
+    var cardOpen = selectedRank === 0 && !cardsClosed;
+    els.demoSite1.setAttribute("aria-pressed", cardOpen ? "true" : "false");
+  }
+
+  function demoExcluded() {
+    if (els.layer.value === "excluded") {
+      onStep("score");
+    } else {
+      onStep("excluded");
+    }
+  }
+
+  function demoGroup() {
+    var km = Number(els.groupKm.value);
+    els.groupKm.value = km === 2 ? defaultGroupKm() : 2;
+    scheduleScore();
+    updateDemoBar();
+  }
+
+  function demoSite1() {
+    if (!currentSites || !currentSites.length) {
+      return;
+    }
+    if (selectedRank === 0 && !cardsClosed) {
+      cardsClosed = true;
+      renderCards();
+    } else {
+      onStep("order");
+    }
+    updateDemoBar();
   }
 
   // Grey LOLA elevation under the score, so the map reads as terrain.
@@ -1312,6 +1543,7 @@
     }
     document.body.classList.toggle("has-cards", list.length > 0);
     els.cards.classList.toggle("two", list.length > 1);
+    updateDemoBar();
     if (!list.length) {
       els.cards.innerHTML = "";
       els.cards.appendChild(els.cardsEmpty);
@@ -1377,9 +1609,11 @@
       siteLayer = null;
     }
     if (!currentSites || !currentSites.length) {
+      drawGroupRings();
       return;
     }
     siteLayer = L.layerGroup().addTo(map);
+    drawGroupRings();
     var size = labelSize();
     var offsets = placeLabels(currentSites);
     currentSites.forEach(function (site, index) {
@@ -1422,7 +1656,7 @@
         site.distance_km == null
           ? ""
           : ' <span class="a-dist">' + Number(site.distance_km).toFixed(1) + " km</span>";
-      return '<span class="a-name">' + escapeHtml(site.nearest) + "</span>" + dist;
+      return '<span class="a-name" title="' + escapeHtml(site.nearest) + '">' + escapeHtml(site.nearest) + "</span>" + dist;
     }
     return '<span class="na">none cited</span>';
   }
@@ -1479,11 +1713,11 @@
         contribCell(contrib.hydrogen) +
         '</td><td class="num contrib">' +
         contribCell(contrib.earth_visibility) +
-        '</td><td class="num">' +
+        '</td><td class="num check-col">' +
         stabilityCell(site) +
-        '</td><td class="num">' +
+        '</td><td class="num check-col">' +
         flatCell(site) +
-        "</td><td>" +
+        '</td><td class="check-col">' +
         noiseCell(site) +
         '</td><td class="wrap">' +
         artemisCell(site) +
@@ -1835,23 +2069,31 @@
     );
   }
 
-  function presentWords(site, values, months) {
+  // Three facts a room can read, number first: sunlight, longest night, flat ground.
+  function presentChips(site, values, months) {
     var out = [];
     var v = values && values.values ? values.values.illumination : null;
     if (v != null) {
-      out.push("lit " + Math.round(100 * v) + " % of the time");
+      out.push([Math.round(100 * v) + " %", "lit" + (months ? " in " + windowLabel(months) : " of the time")]);
     }
     var d = darkOf(site, months);
     if (d && d.never) {
-      out.push("never lit");
+      out.push(["never lit", months ? "in " + windowLabel(months) : ""]);
     } else if (d) {
-      out.push("longest night " + (d.censored ? "≥ " : "") + daysText(d.hours) + " days");
+      out.push([(d.censored ? "≥ " : "") + daysText(d.hours) + " d", "longest night"]);
     }
     var flat = flatFraction(site);
     if (flat != null) {
-      out.push(Math.round(100 * flat) + " % flat ground within 1 km");
+      out.push([Math.round(100 * flat) + " %", "flat ground within 1 km"]);
     }
-    return out.length ? out : ["layer values not available"];
+    if (!out.length) {
+      return '<span class="chip"><span>layer values not available</span></span>';
+    }
+    return out
+      .map(function (chip) {
+        return '<span class="chip"><b>' + escapeHtml(chip[0]) + "</b><span>" + escapeHtml(chip[1]) + "</span></span>";
+      })
+      .join("");
   }
 
   async function renderAnswer(payload, request, seq) {
@@ -1882,10 +2124,7 @@
     }
     var months = request.illumination_months || null;
     var head = "<b>Suggested #1 " + regionName(best) + "</b>";
-    var steps = document.getElementById("answer-steps");
-    steps.textContent =
-      "Requirements → one map layer per rule → score what is left → group points within " +
-      groupText(request.min_separation_km) + " km into sites → suggested order with reasons → a person checks";
+    updateSteps();
     els.answerMain.innerHTML = head + " — loading layer values…";
     var values = null;
     try {
@@ -1897,8 +2136,9 @@
       return;
     }
     if (isPresenting()) {
-      // Three facts a room can read: sunlight, longest night, flat ground.
-      els.answerMain.innerHTML = head + " — " + presentWords(best, values, months).join(" · ");
+      els.answerMain.innerHTML =
+        '<span class="answer-head">' + head + '</span><span class="answer-chips">' +
+        presentChips(best, values, months) + "</span>";
       return;
     }
     els.answerMain.innerHTML =
@@ -2221,6 +2461,7 @@
       keep += '<option value="' + value + '">' + label + "</option>";
     });
     els.layer.innerHTML = keep;
+    syncStepAvailability();
   }
 
   function initMap(info) {
@@ -2361,6 +2602,13 @@
       els.csv.disabled = false;
       els.geojson.disabled = false;
       els.link.disabled = false;
+      els.demoLink.disabled = false;
+      if (activeStep === "order" || activeStep === "check") {
+        // The card those steps opened is gone with the new ranking.
+        setStep(els.layer.value === "score" ? "score" : STEP_FOR_LAYER[els.layer.value] || null);
+      }
+      updateSteps();
+      updateDemoBar();
       writeUrl();
     } catch (err) {
       if (seq === scoreSeq) {
@@ -2661,7 +2909,18 @@
       writeUrl();
     });
     els.link.addEventListener("click", function () {
-      copyScenarioLink();
+      copyScenarioLink(els.link);
+    });
+    els.demoLink.addEventListener("click", function () {
+      copyScenarioLink(els.demoLink);
+    });
+    els.demoExcluded.addEventListener("click", demoExcluded);
+    els.demoGroup.addEventListener("click", demoGroup);
+    els.demoSite1.addEventListener("click", demoSite1);
+    els.steps.forEach(function (button) {
+      button.addEventListener("click", function () {
+        onStep(button.getAttribute("data-step"));
+      });
     });
     els.artemis.addEventListener("change", function () {
       toggleArtemis();
@@ -2791,18 +3050,19 @@
     window.history.replaceState(null, "", "?" + params.toString());
   }
 
-  async function copyScenarioLink() {
+  async function copyScenarioLink(button) {
     writeUrl();
-    var label = els.link.textContent;
+    var target = button || els.link;
+    var label = target.textContent;
     try {
       await navigator.clipboard.writeText(window.location.href);
-      els.link.textContent = "Link copied";
+      target.textContent = "Link copied";
     } catch (err) {
       // Clipboard blocked: the address bar already holds the link.
-      els.link.textContent = "Copy it from the address bar";
+      target.textContent = "Copy it from the address bar";
     }
     setTimeout(function () {
-      els.link.textContent = label;
+      target.textContent = label;
     }, 2000);
   }
 

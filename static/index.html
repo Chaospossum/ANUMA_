@@ -5,12 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>anuma · lunar south-pole landing-site screening</title>
     <link rel="stylesheet" href="/vendor/leaflet.css" />
-    <link rel="stylesheet" href="/style.css?v=demo-story-6" />
+    <link rel="stylesheet" href="/style.css?v=ux-layout-1" />
   </head>
   <body>
     <div class="app">
       <header class="header">
         <h1>anuma</h1>
+        <nav class="demo-bar" id="demo-bar" aria-label="Demo moves">
+          <span class="demo-label">Demo</span>
+          <button type="button" class="demo-btn" id="demo-excluded" title="Show the Why excluded layer: red = too steep, yellow = too little flat ground">Why excluded</button>
+          <button type="button" class="demo-btn" id="demo-group" title="Group sites closer than 2 km instead of 10 km; the study badges switch to n/a">Group within 2 km</button>
+          <button type="button" class="demo-btn" id="demo-site1" title="Open the #1 site card: what the score is made of">#1 site card</button>
+          <button type="button" class="demo-btn" id="demo-link" disabled title="Copy a link that reopens this scenario">Copy scenario link</button>
+        </nav>
         <div class="header-right">
           <button type="button" id="rail-toggle" class="present-toggle rail-toggle" aria-expanded="true" aria-controls="rail">
             Scenario ◂
@@ -23,7 +30,15 @@
       </header>
 
       <section class="answer" id="answer" aria-live="polite" aria-label="Answer">
-        <p class="answer-steps" id="answer-steps">Requirements → one map layer per rule → score what is left → group nearby points into sites → suggested order with reasons → a person checks</p>
+        <ol class="steps" id="answer-steps" aria-label="Workflow: requirements, one map layer per rule, score what is left, group nearby points into sites, suggested order with reasons, a person checks">
+          <li><button type="button" class="step" data-step="slope" data-layer="slope"><span class="step-n">1</span><span class="step-t">Slope rule</span><span class="step-s" id="step-slope-s">≤ 8° at 240 m</span></button></li>
+          <li><button type="button" class="step" data-step="flat" data-layer="terrain_1km_fraction"><span class="step-n">2</span><span class="step-t">Flat ground</span><span class="step-s" id="step-flat-s">≥ 50 % within 1 km at 20 m</span></button></li>
+          <li><button type="button" class="step" data-step="excluded" data-layer="excluded"><span class="step-n">3</span><span class="step-t">Why excluded</span><span class="step-s" id="step-excluded-s">all hard rules on one map</span></button></li>
+          <li><button type="button" class="step" data-step="score" data-layer="score"><span class="step-n">4</span><span class="step-t">Score what is left</span><span class="step-s" id="step-score-s">sunlight · hydrogen · Earth view</span></button></li>
+          <li><button type="button" class="step" data-step="group" data-layer="score"><span class="step-n">5</span><span class="step-t">Group nearby points</span><span class="step-s" id="step-group-s">within 10 km</span></button></li>
+          <li><button type="button" class="step" data-step="order"><span class="step-n">6</span><span class="step-t">Suggested order</span><span class="step-s" id="step-order-s">with reasons, not a verdict</span></button></li>
+          <li><button type="button" class="step" data-step="check"><span class="step-n">7</span><span class="step-t">A person checks</span><span class="step-s" id="step-check-s">flat ground · DEM-noise · weight-robust</span></button></li>
+        </ol>
         <p class="answer-main" id="answer-main">Scoring the default scenario…</p>
         <p class="answer-pass" id="answer-pass"></p>
         <p class="answer-meta" id="answer-meta"></p>
@@ -33,6 +48,8 @@
         <section class="panel panel-form" id="rail" aria-label="Scenario">
           <form id="score-form" onsubmit="return false;">
             <div class="rail-scroll">
+            <details class="sect" id="sect-weights" open>
+            <summary>What matters</summary>
             <p class="help weights-help">Weights are relative; the score uses each one's share of the total.</p>
             <div class="field">
               <label for="w-illum">Sunlight</label>
@@ -56,6 +73,9 @@
               </div>
             </div>
             <p class="help error" id="weights-error" role="alert" hidden></p>
+            </details>
+            <details class="sect" id="sect-rules" open>
+            <summary>Hard rules</summary>
             <div class="field">
               <div class="field-pair">
                 <div>
@@ -69,11 +89,6 @@
               </div>
               <p class="help">Slope requirement must be valid in the circle defined by the radius.</p>
               <p class="help" id="slope-lock-note" hidden>Fixed at the default in presentation mode: the 20 m flat-ground and robustness studies were run for this limit. Another limit needs a short MeluXina rerun (minutes).</p>
-            </div>
-            <div class="field">
-              <label for="group-km">Group sites closer than (km)</label>
-              <input id="group-km" type="number" min="0.5" max="100" step="0.5" value="10" />
-              <p class="help">Candidates within this distance count as one site; the best one is kept.</p>
             </div>
             <div class="field check terrain-field">
               <label>
@@ -117,8 +132,19 @@
                 <p class="help" id="keepout-note">Approximate points (Goossens et al. 2025), not NASA centres.</p>
               </div>
             </fieldset>
+            </details>
+            <details class="sect" id="sect-group" open>
+            <summary>Grouping</summary>
+            <div class="field">
+              <label for="group-km">Group sites closer than (km)</label>
+              <input id="group-km" type="number" min="0.5" max="100" step="0.5" value="10" />
+              <p class="help">Candidates within this distance count as one site; the best one is kept.</p>
+            </div>
+            </details>
+            <details class="sect" id="sect-window">
+            <summary>Time window</summary>
             <fieldset class="field group" id="window-group">
-              <legend>Illumination window</legend>
+              <legend class="visually-hidden">Illumination window</legend>
               <div class="field-pair">
                 <div>
                   <label for="window-start" class="sub">From</label>
@@ -132,6 +158,9 @@
               <p class="help" id="window-note">Scenario window, not mission dates.</p>
               <button type="button" id="window-reset" class="link-button">18.6-yr average (published map)</button>
             </fieldset>
+            </details>
+            <details class="sect" id="sect-map">
+            <summary>Show on map</summary>
             <div class="field">
               <label for="layer-select">Show single layer</label>
               <select id="layer-select">
@@ -149,8 +178,10 @@
               <p class="help" id="artemis-note"></p>
               <ol id="artemis-list" class="artemis-list"></ol>
             </details>
+            </details>
             </div>
-            <div class="rail-actions">
+            <div class="rail-actions" aria-label="Share and export">
+              <p class="rail-actions-title">Share &amp; export</p>
               <button type="button" id="btn-score" class="primary">Score</button>
               <div class="export-actions" aria-label="Download ranked sites">
                 <button type="button" id="btn-csv" disabled>Download CSV</button>
@@ -249,6 +280,6 @@
     <script src="/vendor/leaflet.js"></script>
     <script src="/vendor/proj4.js"></script>
     <script src="/vendor/proj4leaflet.js"></script>
-    <script src="/app.js?v=demo-story-6"></script>
+    <script src="/app.js?v=ux-layout-1"></script>
   </body>
 </html>
