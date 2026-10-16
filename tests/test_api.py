@@ -887,3 +887,11 @@ def test_export_records_min_separation(client_ingested: TestClient):
     assert "# min_separation_km: 25.0" in text
     geo = json.loads(client_ingested.post("/score.geojson", json={"min_separation_km": 25}).text)
     assert geo["properties"]["min_separation_km"] == 25.0
+
+
+def test_score_default_separation_matches_omitted_key(client_ingested: TestClient):
+    cfg = load_config()
+    sep = float(cfg["scoring"]["min_separation_km"])
+    plain = client_ingested.post("/score", json={}).json()["sites"]
+    explicit = client_ingested.post("/score", json={"min_separation_km": sep}).json()["sites"]
+    assert [(s["row"], s["col"]) for s in plain] == [(s["row"], s["col"]) for s in explicit]

@@ -408,3 +408,12 @@ def test_keepout_requires_radius_and_can_mask_or_penalise(grid, cfg):
     assert np.isfinite(penalised.combined[row, col])
     assert float(penalised.combined[row, col]) < float(result.combined[row, col])
     assert float(penalised.combined[row_b, col_b]) == float(result.combined[row_b, col_b])
+
+
+def test_rank_sites_small_separation_keeps_close_sites(grid, cfg):
+    # Two passing peaks 3 pixels (720 m) apart: one site at 1 km, two at 0.5 km.
+    r, c = _pixel(grid, 0.0, -87.0)
+    layers = _peak_layers(grid, [(r, c, 100.0, 1.0), (r, c + 3, 95.0, 1.0)])
+    result = score(layers, cfg["scoring"]["weights"], cfg["hard"], grid=grid, cfg=cfg)
+    assert len(rank_sites(result, n=5, min_separation_km=1.0)) == 1
+    assert len(rank_sites(result, n=5, min_separation_km=0.5)) == 2

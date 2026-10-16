@@ -914,11 +914,26 @@
     return verdictHtml(noiseKind(found), "", noiseWords(found));
   }
 
+  function groupText(km) {
+    var v = Number(km != null ? km : (meta && meta.defaults && meta.defaults.min_separation_km) || 10);
+    return v % 1 ? v.toFixed(1) : String(v);
+  }
+
+  // Grouping distance from the input, clamped to what /score accepts.
+  function clampGroup(value) {
+    var v = Number(value);
+    if (!isFinite(v) || String(value).trim() === "") {
+      return Number((meta && meta.defaults && meta.defaults.min_separation_km) || 10);
+    }
+    return Math.min(100, Math.max(0.5, v));
+  }
+
   function renderTableNote() {
     var parts = [];
     parts.push(
       "<p><b>Score</b> 0–1: weighted sum of normalised sunlight, hydrogen and Earth view. " +
-      "Sites must pass the slope rule on the 240 m grid. Ranked sites are at least 10 km apart.</p>"
+      "Sites must pass the slope rule on the 240 m grid. Ranked sites are at least " +
+      groupText(lastRequest && lastRequest.min_separation_km) + " km apart.</p>"
     );
     if (stability && stability.available) {
       var text =
@@ -2062,10 +2077,7 @@
       // default and reports why the rule is off.
       n: (meta.defaults && meta.defaults.n) || 10,
     };
-    var group = Number(els.groupKm.value);
-    if (group >= 0.5 && group <= 100) {
-      request.min_separation_km = group;
-    }
+    request.min_separation_km = clampGroup(els.groupKm.value);
     if (!els.terrain.disabled) {
       request.hard.terrain_1km = els.terrain.checked;
     }
@@ -2589,10 +2601,8 @@
       scheduleScore();
     });
     els.groupKm.addEventListener("change", function () {
-      var v = Number(els.groupKm.value);
-      if (v >= 0.5 && v <= 100) {
-        scheduleScore();
-      }
+      els.groupKm.value = clampGroup(els.groupKm.value);
+      scheduleScore();
     });
     ["input", "change"].forEach(function (type) {
       els.slope.addEventListener(type, updateTerrainToggle);
@@ -2689,7 +2699,7 @@
       changed = true;
     }
     if (PARAMS.get("group")) {
-      els.groupKm.value = Number(PARAMS.get("group"));
+      els.groupKm.value = clampGroup(PARAMS.get("group"));
       changed = true;
     }
     if (PARAMS.get("keepout")) {
