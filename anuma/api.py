@@ -29,7 +29,7 @@ from anuma.darkness import INDEX_NAME as DARKNESS_INDEX
 from anuma.darkness import DarknessCube
 from anuma.export import sites_csv, sites_geojson
 from anuma.grid import Grid
-from anuma.heatmap import displayed, render_png, render_ramp_png
+from anuma.heatmap import displayed, render_category_png, render_png, render_ramp_png
 from anuma.score import (
     apply_keepout,
     artemis_overlap,
@@ -40,6 +40,7 @@ from anuma.score import (
     rank_sites,
     score,
     scored_weights,
+    terrain_pass,
 )
 
 INGEST_COMMAND = "python3 -m anuma.ingest"
@@ -1056,12 +1057,87 @@ def _site_values(row: int, col: int, window: MonthWindow | None) -> dict:
         "units": units,
         "illumination_window": illumination,
         "darkness": _site_darkness(dark["cube"], row, col, use_window),
+        "checks": _site_checks(cfg, root, store, row, col),
         "darkness_status": {
             "available": dark["available"],
             "reason": dark["reason"],
             "window": dark_window,
         },
     }
+
+
+EXCLUDED_LAYER = "excluded"
+EXCLUDED_SLOPE = 1
+EXCLUDED_TERRAIN = 2
+EXCLUDED_COLOURS = {
+    EXCLUDED_SLOPE: (215, 48, 39),  # too steep at 240 m
+    EXCLUDED_TERRAIN: (255, 214, 0),  # too little flat 20 m ground within 1 km
+}
+
+
+def _default_flat_rule(cfg: dict, terrain: dict) -> float | None:
+    """The flat-ground threshold the default /score applies, or None when the
+    default ranking does not use the 20 m rule (switched off, layer missing,
+    or built for another slope limit)."""
+    spec = cfg["hard"].get("terrain_1km") or {}
+    layer_slope = (terrain.get("meta") or {}).get("max_slope_deg")
+    applies = bool(
+        spec.get("enabled", False)
+        and terrain["available"]
+        and layer_slope is not None
+        and math.isclose(float(layer_slope), float(cfg["hard"]["max_slope_deg"]))
+    )
+    return float(spec.get("min_fraction", 0.5)) if applies else None
+
+
+def _exclusion_codes(cfg: dict, root: Path, store: dict) -> np.ndarray:
+    """Why each cell fails the default hard rules: 0 passes or no data,
+    1 fails the slope rule, 2 passes slope but fails the 1 km flat-ground check.
+
+    Uses the config defaults (max slope, slope radius, flat-ground threshold);
+    keep-out is per request and is drawn by the app, not here.
+    """
+    terrain = _terrain_layer(cfg, root, store)
+    min_fraction = _default_flat_rule(cfg, terrain)
+    key = (EXCLUDED_LAYER, min_fraction)
+    if key in store:
+        return store[key]
+    slope = store["layers"]["slope"]
+    slope_ok = hard_mask(slope, cfg=cfg, resolution_m=store["grid"].resolution_m)
+    codes = np.zeros(slope.shape, dtype=np.uint8)
+    codes[np.isfinite(slope) & ~slope_ok] = EXCLUDED_SLOPE
+    if min_fraction is not None:
+        flat_ok = terrain_pass(terrain["array"], min_fraction, slope.shape)
+        codes[slope_ok & ~flat_ok] = EXCLUDED_TERRAIN
+    store[key] = codes
+    return codes
+
+
+def _site_checks(cfg: dict, root: Path, store: dict, row: int, col: int) -> dict:
+    """Pass/fail of each default hard rule at one cell, with the value tested."""
+    slope = _finite_or_none(store["layers"]["slope"][row, col])
+    code = int(_exclusion_codes(cfg, root, store)[row, col])
+    checks = {
+        "slope": {
+            "value": slope,
+            "limit": float(cfg["hard"]["max_slope_deg"]),
+            "unit": "deg",
+            # With a slope radius a cell can fail because of a neighbour.
+            "radius_m": float(cfg["hard"].get("slope_radius_m", 0.0)),
+            "passes": None if slope is None else code != EXCLUDED_SLOPE,
+        }
+    }
+    terrain = _terrain_layer(cfg, root, store)
+    limit = _default_flat_rule(cfg, terrain)
+    if limit is not None:
+        fraction = _finite_or_none(terrain["array"][row, col])
+        checks["flat_ground_1km"] = {
+            "value": fraction,
+            "limit": limit,
+            "unit": "fraction",
+            "passes": None if fraction is None else fraction >= limit,
+        }
+    return checks
 
 
 def _display_range(cfg: dict, name: str, array: np.ndarray) -> tuple[float, float] | None:
@@ -1158,6 +1234,22 @@ def create_app() -> FastAPI:
                     command=None if available else STAGE_F_COMMAND,
                 )
             layers.append(entry)
+        layers.append(
+            {
+                "name": EXCLUDED_LAYER,
+                "label": "Why excluded (hard rules)",
+                "unit": None,
+                "mode": None,
+                "citation": "ANUMA hard rules at the default settings",
+                "present": not missing,
+                "display_only": True,
+                "excluded": True,
+                "scored": False,
+                "available": not missing,
+                "flat_ground": _default_flat_rule(cfg, terrain),
+                "command": None,
+            }
+        )
         shape = None if missing else (grid.height, grid.width)
         darkness = _darkness_meta(cfg, root, _open_darkness(cfg, root, shape))
         period_label = darkness["period_label"] or _darkness_spec(cfg).get("period_label") or "modelled period"
@@ -1255,6 +1347,10 @@ def create_app() -> FastAPI:
             return Response(content=png, media_type="image/png")
         cfg = _cfg()
         root = data_root()
+        if name == EXCLUDED_LAYER:
+            store = _load_store(cfg, root)
+            png = render_category_png(_exclusion_codes(cfg, root, store), EXCLUDED_COLOURS)
+            return Response(content=png, media_type="image/png")
         if name in DARKNESS_LAYERS:
             store = _load_store(cfg, root)
             if window is not None:

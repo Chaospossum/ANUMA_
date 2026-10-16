@@ -785,3 +785,77 @@ def test_exports_record_weights_and_slope_rule(client_ingested: TestClient):
     props = client_ingested.post("/score.geojson", json=body).json()["properties"]
     assert props["max_slope_deg"] == 6.5
     assert props["weights_used"]["illumination"] == pytest.approx(0.5)
+
+
+# ------------------------------------------------- why-excluded layer
+
+
+def test_excluded_layer_marks_steep_cells(client_ingested: TestClient):
+    cfg = load_config()
+    grid = Grid(cfg)
+    response = client_ingested.get("/layer/excluded.png")
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("image/png")
+    image = mpimg.imread(io.BytesIO(response.content))
+    steep = _pixel(grid, 45.0, -87.0)  # fixture slope 20° > 8°
+    flat = _pixel(grid, 0.0, -87.0)  # fixture slope 1°
+    assert image[steep][3] > 0.9
+    np.testing.assert_allclose(image[steep][:3], np.array([215, 48, 39]) / 255, atol=0.01)
+    assert image[flat][3] == 0.0  # passes: transparent
+    assert image[0, 0][3] == 0.0  # no data: transparent
+    layers = client_ingested.get("/layers").json()["layers"]
+    entry = next(layer for layer in layers if layer["name"] == "excluded")
+    assert entry["available"] is True and entry["scored"] is False
+    assert entry["flat_ground"] is None  # no Stage F layer in the fixture
+
+
+def test_site_checks_follow_the_slope_rule(client_ingested: TestClient):
+    grid = Grid(load_config())
+    steep = client_ingested.get("/site/%d/%d" % _pixel(grid, 45.0, -87.0)).json()["checks"]
+    flat = client_ingested.get("/site/%d/%d" % _pixel(grid, 0.0, -87.0)).json()["checks"]
+    assert steep["slope"]["passes"] is False and steep["slope"]["value"] == 20.0
+    assert flat["slope"]["passes"] is True and flat["slope"]["limit"] == 8.0
+    assert "flat_ground_1km" not in flat  # only when the Stage F layer is present
+    empty = client_ingested.get("/site/0/0").json()["checks"]
+    assert empty["slope"]["passes"] is None
+
+
+def test_exclusion_codes_flat_ground_only_after_slope(monkeypatch):
+    from anuma import api
+
+    cfg = load_config()
+    cfg["hard"]["slope_radius_m"] = 0.0  # a 1x4 array fails any positive radius
+    cfg["hard"]["terrain_1km"]["enabled"] = True
+    slope = np.array([[1.0, 20.0, 1.0, np.nan]])
+    fraction = np.array([[0.9, 0.1, 0.2, 0.9]])
+    store = {"layers": {"slope": slope}, "grid": type("G", (), {"resolution_m": 240.0})()}
+    monkeypatch.setattr(
+        api,
+        "_terrain_layer",
+        lambda cfg, root, store: {
+            "available": True,
+            "array": fraction,
+            "meta": {"max_slope_deg": cfg["hard"]["max_slope_deg"]},
+        },
+    )
+    codes = api._exclusion_codes(cfg, Path("."), store)
+    # pass, too steep (slope wins over flat ground), too little flat ground, no data
+    assert codes.tolist() == [[0, 1, 2, 0]]
+
+
+def test_exclusion_codes_skip_flat_ground_when_default_rule_is_off(monkeypatch):
+    from anuma import api
+
+    cfg = load_config()
+    cfg["hard"]["slope_radius_m"] = 0.0
+    slope = np.array([[1.0, 1.0]])
+    fraction = np.array([[0.9, 0.1]])
+    store = {"layers": {"slope": slope}, "grid": type("G", (), {"resolution_m": 240.0})()}
+    terrain = {"available": True, "array": fraction, "meta": {"max_slope_deg": 8.0}}
+    monkeypatch.setattr(api, "_terrain_layer", lambda cfg, root, store: terrain)
+    cfg["hard"]["terrain_1km"]["enabled"] = False
+    assert api._exclusion_codes(cfg, Path("."), store).tolist() == [[0, 0]]
+    # Layer built for another slope limit: /score would not apply it either.
+    cfg["hard"]["terrain_1km"]["enabled"] = True
+    terrain["meta"] = {"max_slope_deg": 10.0}
+    assert api._exclusion_codes(cfg, Path("."), dict(store)).tolist() == [[0, 0]]

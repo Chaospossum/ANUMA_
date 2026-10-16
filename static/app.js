@@ -261,6 +261,21 @@
         "passes at ≥ " + cut + " %; a hard rule, not scored; blank = no data";
       return;
     }
+    if (info.excluded) {
+      // Category layer: the first default hard rule each cell fails.
+      var flatCut = info.flat_ground == null ? null : Math.round(100 * info.flat_ground);
+      els.legendTitle.textContent = "Why excluded (default hard rules)";
+      els.legendBar.style.background = flatCut == null
+        ? "rgb(215, 48, 39)"
+        : "linear-gradient(to right, rgb(215, 48, 39) 50%, rgb(255, 214, 0) 50%)";
+      els.legendLow.textContent = "too steep";
+      els.legendHigh.textContent = flatCut == null ? "" : "too little flat ground";
+      els.legendNote.innerHTML =
+        '<i class="sw sw-steep"></i>slope above the limit at 240 m' +
+        (flatCut == null ? "" : '<i class="sw sw-flat"></i>under ' + flatCut + " % flat 20 m ground within 1 km") +
+        "; no colour = passes; keep-out is drawn separately";
+      return;
+    }
     if (info.darkness) {
       // Stage G days on a fixed grey ramp; never-lit pixels in black.
       var dm = name === "longest_dark" ? currentWindow() : null;

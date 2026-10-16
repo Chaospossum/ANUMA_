@@ -1473,6 +1473,15 @@ body.present .present-csv {
   margin-left: 0;
 }
 
+.sw-steep {
+  background: rgb(215, 48, 39);
+  margin-left: 0;
+}
+
+.sw-flat {
+  background: rgb(255, 214, 0);
+}
+
 .sites-table .dark-col .unit {
   font-family: var(--sans);
   font-size: 0.85em;

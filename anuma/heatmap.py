@@ -81,6 +81,27 @@ def render_png(
     return buf.getvalue()
 
 
+def render_category_png(codes: np.ndarray, colours: dict[int, tuple[int, int, int]]) -> bytes:
+    """One fixed colour per integer code; codes not in ``colours`` are transparent.
+
+    Drawn pixel for pixel (no downsampling), so the array must fit PNG_MAX_DIM.
+    """
+    codes = np.asarray(codes)
+    if max(codes.shape) > PNG_MAX_DIM:
+        raise ValueError("category layer is larger than PNG_MAX_DIM")
+    index = np.full(codes.shape, TRANSPARENT_INDEX, dtype=np.uint8)
+    palette = np.zeros((256, 3), dtype=np.uint8)
+    for slot, (code, rgb) in enumerate(sorted(colours.items())):
+        index[codes == code] = slot
+        palette[slot] = rgb
+    image = Image.fromarray(index, "P")
+    image.putpalette(palette.ravel().tolist())
+    alpha = bytes([255] * len(colours) + [0] * (256 - len(colours)))
+    buf = io.BytesIO()
+    image.save(buf, format="png", transparency=alpha, compress_level=6)
+    return buf.getvalue()
+
+
 FLAG_INDEX = 254
 
 
