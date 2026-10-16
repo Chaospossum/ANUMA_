@@ -7,6 +7,7 @@ import csv
 import io
 import json
 import os
+import re
 import shutil
 import time
 from datetime import date
@@ -895,3 +896,14 @@ def test_score_default_separation_matches_omitted_key(client_ingested: TestClien
     plain = client_ingested.post("/score", json={}).json()["sites"]
     explicit = client_ingested.post("/score", json={"min_separation_km": sep}).json()["sites"]
     assert [(s["row"], s["col"]) for s in plain] == [(s["row"], s["col"]) for s in explicit]
+
+
+def test_ui_keeps_scenario_in_url():
+    html = (repo_root() / "static" / "index.html").read_text()
+    app_js = (repo_root() / "static" / "app.js").read_text()
+    assert 'id="btn-link"' in html
+    assert "function writeUrl" in app_js and "history.replaceState" in app_js
+    # Every switch the writer emits is read back on load.
+    for key in ("w", "slope", "sr", "terrain", "group", "keepout", "kmode", "klists", "kpen", "start", "end"):
+        assert re.search(r'params\.set\(\s*"%s"' % key, app_js), key
+        assert 'PARAMS.get("%s")' % key in app_js, key

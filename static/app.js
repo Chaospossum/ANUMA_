@@ -51,6 +51,7 @@
   var siteValueCache = {};
   // The request behind the table on screen, and how it differs from the defaults.
   var lastRequest = null;
+  var lastKeepoutLists = null;
   var lastScenario = null;
   // A pinned site card for side-by-side comparison: a snapshot, kept across re-scores.
   var pinned = null;
@@ -2300,6 +2301,7 @@
         previousRanks = null;
       }
       lastRequest = request;
+      lastKeepoutLists = els.keepoutLists.value;
       lastScenario = scenarioOf(request);
       lastScenario.studiesOk = lastScenario.isDefault && studiesMatch(payload);
       var legendNa = document.getElementById("legend-na");
@@ -2530,15 +2532,20 @@
     els.present.addEventListener("click", function () {
       setPresenting(!isPresenting());
       setRail(!isPresenting());
+      writeUrl();
     });
     els.cards.addEventListener("click", onCardClick);
-    els.onlyPassing.addEventListener("change", syncFilter);
+    els.onlyPassing.addEventListener("change", function () {
+      syncFilter();
+      writeUrl();
+    });
     document.getElementById("present-csv").addEventListener("click", function () {
       els.csv.click();
     });
     window.addEventListener("resize", debounce(placeCards, 150));
     els.railToggle.addEventListener("click", function () {
       setRail(!railOpen());
+      writeUrl();
     });
     els.infoButton.addEventListener("click", function (event) {
       event.stopPropagation();
@@ -2580,7 +2587,10 @@
     els.link.addEventListener("click", function () {
       copyScenarioLink();
     });
-    els.artemis.addEventListener("change", toggleArtemis);
+    els.artemis.addEventListener("change", function () {
+      toggleArtemis();
+      writeUrl();
+    });
     els.keepout.addEventListener("change", function () {
       updateKeepoutNote();
       showKeepoutError();
@@ -2657,16 +2667,24 @@
       return;
     }
     var params = new URLSearchParams();
-    ["present", "zoom"].forEach(function (key) {
-      if (PARAMS.get(key) != null) {
-        params.set(key, PARAMS.get(key));
-      }
-    });
-    params.set("w", [els.illum.value, els.hydro.value, els.earth.value].join(","));
-    params.set("slope", String(lastRequest.hard.max_slope_deg));
-    if (Number(lastRequest.hard.slope_radius_m) > 0) {
-      params.set("sr", String(lastRequest.hard.slope_radius_m));
+    if (isPresenting()) {
+      params.set("present", "1");
     }
+    if (PARAMS.get("zoom") != null) {
+      params.set("zoom", PARAMS.get("zoom"));
+    }
+    if (PARAMS.has("rail") || railOpen() === isPresenting()) {
+      // Only when the drawer differs from the mode's default (or was set).
+      params.set("rail", railOpen() ? "1" : "0");
+    }
+    // The weights that were scored, not unscored slider moves.
+    var w = lastRequest.weights || {};
+    params.set(
+      "w",
+      [w.illumination || 0, w.hydrogen || 0, w.earth_visibility || 0].map(String).join(",")
+    );
+    params.set("slope", String(lastRequest.hard.max_slope_deg));
+    params.set("sr", String(lastRequest.hard.slope_radius_m));
     if (lastRequest.hard.terrain_1km != null) {
       params.set("terrain", lastRequest.hard.terrain_1km ? "1" : "0");
     }
@@ -2676,7 +2694,7 @@
     if (lastRequest.keepout) {
       params.set("keepout", String(lastRequest.keepout.radius_km));
       params.set("kmode", lastRequest.keepout.mode);
-      params.set("klists", els.keepoutLists.value);
+      params.set("klists", lastKeepoutLists || els.keepoutLists.value);
       if (lastRequest.keepout.mode === "penalty") {
         params.set("kpen", String(lastRequest.keepout.penalty));
       }
@@ -2690,6 +2708,9 @@
     }
     if (els.onlyPassing.checked) {
       params.set("only", "1");
+    }
+    if (els.artemis.checked) {
+      params.set("artemis", "1");
     }
     window.history.replaceState(null, "", "?" + params.toString());
   }

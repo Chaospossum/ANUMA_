@@ -42,9 +42,14 @@ Talking points:
 
 ## 3. Demo (3 clicks, under 2 minutes)
 
-1. Click through the mask layers: slope → flat ground within 1 km → keep-out.
-2. Show the "why excluded" colours on the map.
-3. Open the #1 site card: why it ranks first, and its checks.
+1. Show single layer → **Why excluded**: red = too steep, yellow = too little
+   flat ground within 1 km. Tick keep-out to add the Artemis III disks.
+2. Change **Group sites closer than** from 10 to 2 km: more, closer sites
+   appear, and the robustness badges switch to n/a (they were measured at
+   10 km).
+3. Open the #1 site card: the line under the score says what the score is
+   made of and that it is a suggested order. Then **Copy scenario link** to
+   show the analysis can be shared and reopened.
 
 Have a screenshot of each step as a backup slide in case the laptop fails.
 
@@ -77,9 +82,9 @@ Talking points:
 | Our #1 vs NASA's Artemis III candidate regions | 0.1 km from the Peak Near Shackleton point | Stage F |
 | Cost | ≈ 9 node-hours on the MeluXina supercomputer | myquota |
 
-Planned (only if done before the event): compare with the four Mission 2
-candidate sites in ispace's public 2024 figure. Same region found = good sign;
-an exact match is not expected because the requirements differ.
+Not possible yet: ispace's Mission 2 targeted Mare Frigoris (about 60.5°N,
+4.6°W; ispace, Sept 2024), outside ANUMA's 80–90°S map. Comparing against
+manually chosen sites in other regions is a next step (slide 7).
 
 ## 6. Rules and law
 
@@ -99,9 +104,10 @@ Talking points:
 
 **Within 1 year**
 - Rover reach: from each landing point, the area a rover can actually drive to.
+- Extend the map beyond 80°S and compare with sites chosen by hand (for
+  example ispace's Mission 2 area in Mare Frigoris, Apollo target sites).
 - Real mission dates instead of scenario windows.
 - User-placed relay satellites for communication coverage (simple orbits).
-- Save, share and reload a full analysis.
 
 **Within 5 years**
 - A shared map of declared exclusion zones from all South Pole missions.

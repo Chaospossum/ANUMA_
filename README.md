@@ -124,6 +124,10 @@ button, or open `/?present=1`): the scenario rail becomes a drawer behind
 
 For a prepared view, URL switches set the same state:
 `?present=1&site=1&pin=3&keepout=5&start=2027-01&end=2027-03&w=0.6,0.2,0.2`.
+The page keeps the scored scenario in its URL; **Copy scenario link** copies it.
+Further switches: `slope`, `sr` (slope radius, m), `terrain=0|1`, `group` (km),
+`kmode=hard|penalty`, `kpen`, `klists=2022,2024|2024`, `layer`, `only=1`,
+`artemis=1`, `rail=0|1`.
 
 Unit tests use constructed arrays and `--synthetic` ingest only:
 
