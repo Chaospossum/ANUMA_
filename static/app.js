@@ -1101,11 +1101,46 @@
     return {
       site: currentSites[index],
       rank: index + 1,
+      leaderTotal: currentSites[0] ? currentSites[0].total : null,
       scenario: scenario,
       scenarioText: scenario.parts.length ? scenario.parts.join(" · ") : "defaults",
       months: (lastRequest && lastRequest.illumination_months) || null,
       maxSlope: lastRequest ? lastRequest.hard.max_slope_deg : null,
     };
+  }
+
+  // Why the site sits at its rank: what its score is made of, and the gap to #1.
+  function whyRank(card) {
+    var c = card.site.contributions || {};
+    var parts = [
+      ["sunlight", c.illumination],
+      ["hydrogen", c.hydrogen],
+      ["Earth view", c.earth_visibility],
+    ].filter(function (p) {
+      return p[1] != null && Number(p[1]) > 0;
+    }).sort(function (a, b) {
+      return Number(b[1]) - Number(a[1]);
+    });
+    var made = parts.length
+      ? "Score " + Number(card.site.total).toFixed(3) + " = " +
+        parts.map(function (p) {
+          return p[0] + " " + contribCell(p[1]);
+        }).join(" + ")
+      : "Score " + Number(card.site.total).toFixed(3);
+    var sum = parts.reduce(function (acc, p) {
+      return acc + Number(p[1]);
+    }, 0);
+    var penalty = sum - Number(card.site.total);
+    if (parts.length && penalty > 0.0005) {
+      made += " − keep-out penalty " + penalty.toFixed(2);
+    }
+    var gap = "";
+    if (card.rank > 1 && card.leaderTotal != null) {
+      gap = "; " + (Number(card.leaderTotal) - Number(card.site.total)).toFixed(3) + " below #1";
+    } else if (card.rank === 1) {
+      gap = "; highest score that passes every hard rule";
+    }
+    return made + gap + ". Suggested order, not a verdict: check the site before choosing.";
   }
 
   function fact(label, html) {
@@ -1233,6 +1268,7 @@
       '<div class="card-score"><span class="card-total">' + Number(site.total).toFixed(3) + "</span>" +
       '<span class="card-bar">' + bar + "</span></div>" +
       '<p class="card-key">' + key + "</p>" +
+      '<p class="card-why">' + escapeHtml(whyRank(card)) + "</p>" +
       '<dl class="card-facts">' + rawFacts(card, values) + checkFacts(card) + "</dl>" +
       "</article>"
     );
