@@ -1,118 +1,133 @@
 # ANUMA pitch — slide content and talking points
 
-For Juliette and Daniel, who build the slides. One section per slide. Every
-number has its source; do not round them differently on the slides.
+For Juliette and Daniel, who build the slides. Not affiliated with NASA, ESA or
+ispace. Screening tool, not a landing recommendation.
 
-Not affiliated with NASA, ESA or ispace. Screening tool, not a landing
-recommendation.
+## What the ispace feedback asked for (16 Oct call), and where it is
 
-Why this order: feedback from the ispace call (16 Oct) was that the concept
-and how the tool is built matter more than the code. The demo shows the idea;
-it is not the centrepiece. Keep the claims realistic (next 5 years).
+| They said | Where in the pitch |
+| --- | --- |
+| The idea and the presentation matter more than the code; the code demonstrates it | Slides 2–3 carry the pitch; the demo is one slide |
+| Show how the tool is logically built and how a user would use it | Slides 2 and 3 |
+| The hard part is stacking rules and narrowing hundreds of candidates | Slide 1 |
+| Group candidates that are metres apart; don't treat them as separate sites | Slide 2, demo step 2 |
+| One layer per rule, clickable, showing why an area is excluded | Slide 2, demo step 1 |
+| Ranking with uncertainty, but "the order we suggest, and why", with a human check | Slide 4 |
+| Compare with sites chosen by hand | Slide 5 |
+| Legal: no ownership, but exclusion zones; few good South Pole sites | Slide 6 |
+| Import/export so others can reproduce results | Slide 3 (copy link, CSV/GeoJSON) |
+| End with next steps: 1 and 5 years, realistic, regulatory/business/industry/technical | Slide 7 |
+
+Keep numbers few. They like numbers, but the idea comes first.
 
 ---
 
 ## 1. The problem
 
 **On the slide:** "Writing landing requirements is easy. Combining them and
-narrowing hundreds of candidates down to a few is the hard part."
+narrowing hundreds of candidate points down to a few sites is the hard part."
 
-Talking points:
-- A lander needs flat ground, sunlight for power, a view of Earth for radio,
-  and something worth exploring nearby.
-- Each rule is simple. Stacked together over the whole South Pole they leave
-  hundreds of candidate points, many of them a few metres apart.
-- Today the last step, choosing among them, is a lot of manual checking.
+- A lander needs flat ground, sunlight for power and a view of Earth for radio.
+  Each rule is simple.
+- Stacked over the whole South Pole they still leave hundreds of points, many
+  only metres apart, and someone checks them one by one.
+- ANUMA makes that last step faster and explainable, not automatic.
 
-## 2. The idea: a transparent screening workflow (centrepiece)
+## 2. The idea: a transparent workflow (centrepiece)
 
-**On the slide:** a left-to-right diagram
+**On the slide:** one left-to-right diagram
 
-`Requirements → one mask per rule → score what is left → group nearby sites → human check`
+`Requirements → one map layer per rule → score what is left → group nearby points → suggested order + reasons → human check`
 
-Talking points:
-- Every rule is its own map layer, so you can see what each rule removes
-  ("too steep here", "too little sun here").
-- What survives is scored with weights the user sets.
-- Nearby candidates are grouped, so 20 points in one flat area count as one
-  site.
-- The tool suggests an order and says why. A person makes the final choice.
+- **One layer per rule.** Each rule is its own map, so you can click through
+  them and see what each removes: "too steep here", "too little flat ground".
+- **Score what survives** with weights the user sets (sunlight, hydrogen, Earth
+  view).
+- **Group nearby points.** Points within a chosen distance (default 10 km)
+  count as one site, so the list shows places, not pixels.
+- **Suggested order with reasons.** Every site says what its score is made of.
+  A person makes the final choice.
 - Public data only: NASA LOLA terrain (20 m), NASA illumination map, Lunar
-  Prospector hydrogen, Earth visibility computed from the terrain.
+  Prospector hydrogen, Earth view computed from the terrain.
 
-## 3. Demo (3 clicks, under 2 minutes)
+## 3. How a mission planner would use it (demo, under 2 minutes)
 
-1. Show single layer → **Why excluded**: red = too steep, yellow = too little
-   flat ground within 1 km. Tick keep-out to add the Artemis III disks.
-2. Change **Group sites closer than** from 10 to 2 km: more, closer sites
-   appear, and the robustness badges switch to n/a (they were measured at
-   10 km).
-3. Open the #1 site card: the line under the score says what the score is
-   made of and that it is a suggested order. Then **Copy scenario link** to
-   show the analysis can be shared and reopened.
+**On the slide:** three screenshots in a row (backup if the laptop fails).
 
-Have a screenshot of each step as a backup slide in case the laptop fails.
+1. **Why excluded:** Show single layer → *Why excluded*. Red = too steep,
+   yellow = too little flat ground within 1 km. Tick keep-out to add zones
+   around other missions.
+2. **Group sites:** change *Group sites closer than* from 10 to 2 km. More,
+   closer sites appear. The robustness badges switch to n/a, because those
+   studies used 10 km: the tool says when its own checks no longer apply.
+3. **Reasons and sharing:** open the #1 site card. The line under the score
+   says what the score is made of and that it is a suggested order. Then
+   *Copy scenario link*: a colleague opens the same analysis on their own
+   computer (CSV and GeoJSON downloads too).
 
-## 4. Result: an order, with reasons
+Talking point: requirements and dates change all the time in a real mission,
+so every setting is an input you can change and share.
 
-**On the slide:** "Our suggested #1: 88.81°S 123.64°E, next to the Peak Near
-Shackleton region."
+## 4. The result: an order, with reasons
 
-| Fact | Number | Source |
-| --- | --- | --- |
-| Flat ground within 1 km (share of 20 m pixels ≤ 8°) | 66 % (rule: ≥ 50 %) | Stage F, job 5345446 |
-| Longest continuous darkness, 2026–2044 (modelled) | 5.8 days; a typical polar spot ≈ 22 days | Stage G, job 5345264 |
-| Stays #1 when the weights change (±0.1) | 479 of 500 draws (95.8 %) | Stage H, job 5345720 |
-| Ranks 1–6 in the top 10 | in every one of the 500 draws | Stage H, job 5345720 |
-| Survives NASA's published height error | 11 of the top 12 sites pass in every draw | Stage H, job 5345720 |
+**On the slide:** "Suggested #1: 88.81°S 123.64°E, next to the Peak Near
+Shackleton region — and why."
 
-Talking points:
-- Present it as "the order we suggest, and why". Do not say "97 % beats 96 %".
-- Say what is uncertain: ranks 7–12 move when the weights change; one site
-  sits exactly on the 50 % flat-ground line.
-- Darkness is "any part of the Sun above the horizon", not a power or
-  thermal result.
+Three reasons, one number each:
+- **Flat enough:** 66 % of the ground within 1 km is flat at 20 m (rule ≥ 50 %).
+  Source: Stage F, job 5345446.
+- **Short nights:** longest continuous darkness 5.8 days, against about
+  22 days at a typical polar spot (modelled 2026–2044). Source: Stage G,
+  job 5345264.
+- **Stable:** stays #1 in 479 of 500 runs with changed weights (95.8 %).
+  Source: Stage H, job 5345720.
+
+Say the uncertainty out loud:
+- Ranks 7–12 move when the weights change.
+- One site sits exactly on the 50 % flat-ground line.
+- "This is the order we suggest and why. A person still checks it."
 
 ## 5. How we checked it
 
-| Check | Result | Source |
-| --- | --- | --- |
-| Our sun model vs NASA's published illumination map | error (RMSE) 0.0198, limit set beforehand 0.05 | Stage A, job 5334265 |
-| Coarse 240 m map vs fine 20 m terrain | 7.5 % of "landable" 240 m cells fail at 20 m, so we added the 20 m check | Stage B, job 5334425 |
-| Our #1 vs NASA's Artemis III candidate regions | 0.1 km from the Peak Near Shackleton point | Stage F |
-| Cost | ≈ 9 node-hours on the MeluXina supercomputer | myquota |
-
-Not possible yet: ispace's Mission 2 targeted Mare Frigoris (about 60.5°N,
-4.6°W; ispace, Sept 2024), outside ANUMA's 80–90°S map. Comparing against
-manually chosen sites in other regions is a next step (slide 7).
+**On the slide:** two checks and one honest gap.
+- Our sunlight model matches NASA's published illumination map (error 0.0198,
+  limit set beforehand 0.05). Source: Stage A, job 5334265.
+- Our #1 lies 0.1 km from NASA's hand-picked Artemis III "Peak Near
+  Shackleton" candidate region: the same kind of place experts choose.
+  Source: Stage F.
+- Gap: ispace's own Mission 2 sites (Mare Frigoris, about 60.5°N) are outside
+  our 80–90°S map, so we could not compare with them yet (slide 7).
 
 ## 6. Rules and law
 
-**On the slide:** "Nobody can own a site on the Moon, but missions can declare
-exclusion zones."
+**On the slide:** "Nobody can own a site on the Moon, but missions can protect
+their area with exclusion zones."
 
-Talking points:
 - Outer Space Treaty: no national appropriation. Artemis Accords: "safety
   zones" around operations.
 - Only about half a dozen South Pole areas are really worth going to, and
-  several missions are planned there in the next few years, so they will
-  compete for the same sites.
-- ANUMA already has a keep-out toggle: exclude or penalise areas around other
+  several missions are planned there in the next few years, so they will want
+  the same places.
+- ANUMA already has a keep-out switch: exclude or penalise areas around other
   missions' sites (today: the Artemis III candidate regions).
 
-## 7. Next steps (realistic, 1 and 5 years)
+## 7. Next steps: 1 year and 5 years
 
 **Within 1 year**
-- Rover reach: from each landing point, the area a rover can actually drive to.
-- Extend the map beyond 80°S and compare with sites chosen by hand (for
-  example ispace's Mission 2 area in Mare Frigoris, Apollo target sites).
-- Real mission dates instead of scenario windows.
-- User-placed relay satellites for communication coverage (simple orbits).
+- *Technical:* rover reach — from each landing point, the area a rover can
+  actually drive to (a long narrow corridor is not the same as an open area).
+- *Technical:* extend the map beyond 80°S and compare with sites chosen by
+  hand (ispace Mission 2 area, Apollo target sites).
+- *Industry:* real mission dates and user-placed relay satellites as inputs.
 
 **Within 5 years**
-- A shared map of declared exclusion zones from all South Pole missions.
-- Use in early mission planning: a fast, reproducible first screen before
-  detailed engineering tools.
+- *Regulatory:* a shared map of declared exclusion zones from all South Pole
+  missions, so planners see where others will be.
+- *Business:* a fast, reproducible first screen that mission teams use in early
+  planning, before detailed engineering tools.
+
+Close with: "A transparent first screen: every rule visible, every site
+explained, every analysis shareable."
 
 ## Things not to say
 
@@ -122,3 +137,5 @@ Talking points:
   centre of the pitch.
 - That hydrogen means extractable water.
 - That the 1 km circle is a real landing ellipse.
+- Far-future assumptions ("a GPS constellation around the Moon"). Keep it to
+  the next 5 years.
