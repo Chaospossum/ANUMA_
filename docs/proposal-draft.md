@@ -61,7 +61,7 @@ setting is an input.
 | 240 m vs 20 m slope | 7.5 % of 240 m "landable" cells fail at 20 m → 20 m flat-ground rule added | Stage B, job 5334425 |
 | Robustness to weights | #1 wins 479 of 500 draws (±0.1); ranks 1–6 always in the top 10 | Stage H, job 5345720 |
 | Robustness to terrain error | 11 of the top 12 pass in every one of 200 noise draws | Stage H, job 5345720 |
-| Agreement with expert choice | #1 lies 0.1 km from NASA's Peak Near Shackleton candidate point | Stage F, job 5345446 |
+| Agreement with expert choice | #1 lies 0.1 km from the approximate point (Goossens et al. 2025) of NASA's Peak Near Shackleton candidate region | Stage F, job 5345446 |
 
 Suggested #1: 88.81°S 123.6°E, 66 % flat ground within 1 km, longest
 continuous darkness 5.8 days (modelled 2026–2044) against about 22 days at a
