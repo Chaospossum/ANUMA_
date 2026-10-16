@@ -329,7 +329,7 @@ def test_gate_fields_coexist_with_ui_fields(gated_root, monkeypatch):
     keys = [line.split(":", 1)[0] for line in lines if line.startswith("#")]
     assert keys == [
         "# illumination_window", "# keepout", "# terrain_gate",
-        "# weights_used", "# max_slope_deg", "# slope_radius_m",
+        "# weights_used", "# max_slope_deg", "# slope_radius_m", "# min_separation_km",
     ]
     # The gate layer keeps its fixed 0..1 range basis.
     png = client.get(f"/layer/{LAYER}.png")

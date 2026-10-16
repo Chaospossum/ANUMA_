@@ -144,6 +144,8 @@ class ScoreBody(BaseModel):
     weights: dict[str, Annotated[float, Field(ge=0.0)]] | None = None
     hard: HardBody | None = None
     n: int | None = Field(default=None, ge=1, le=50)
+    # Candidates closer than this are one site (greedy NMS in rank_sites).
+    min_separation_km: float | None = Field(default=None, ge=0.5, le=100.0)
     keepout: KeepOutBody | None = None
     illumination_months: MonthWindow | None = None
 
@@ -925,6 +927,11 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
         else float(cfg["hard"]["slope_radius_m"])
     )
     n = body.n if body.n is not None else int(cfg["scoring"]["n_sites"])
+    separation_km = (
+        body.min_separation_km
+        if body.min_separation_km is not None
+        else float(cfg["scoring"]["min_separation_km"])
+    )
     layers = store["layers"]
     window = _default_window(cfg)
     if body.illumination_months is not None:
@@ -957,7 +964,7 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     result = _with_keepout(result, body)
-    sites = rank_sites(result, n=n)
+    sites = rank_sites(result, n=n, min_separation_km=separation_km)
     if terrain["available"]:
         for site in sites:
             site["terrain_1km_fraction"] = float(terrain["array"][site["row"], site["col"]])
@@ -981,6 +988,7 @@ def _run_score(body: ScoreBody | None = None, include_png: bool = True) -> dict:
         ),
         "weights_used": weights,
         "hard_used": {"max_slope_deg": float(max_slope), "slope_radius_m": float(slope_radius)},
+        "min_separation_km": float(separation_km),
         "score_range": _score_range(result.combined),
         "darkness": {
             "available": darkness["available"],
@@ -1009,6 +1017,7 @@ def _scenario(payload: dict, body: ScoreBody | None) -> dict:
         "weights_used": payload["weights_used"],
         "max_slope_deg": payload["hard_used"]["max_slope_deg"],
         "slope_radius_m": payload["hard_used"]["slope_radius_m"],
+        "min_separation_km": payload["min_separation_km"],
     }
 
 
@@ -1285,6 +1294,7 @@ def create_app() -> FastAPI:
                 "max_slope_deg": float(cfg["hard"]["max_slope_deg"]),
                 "slope_radius_m": float(cfg["hard"]["slope_radius_m"]),
                 "n": int(cfg["scoring"]["n_sites"]),
+                "min_separation_km": float(cfg["scoring"]["min_separation_km"]),
             },
             "illumination_window": _window_meta(cfg, root),
             "terrain_gate": _terrain_summary(cfg, terrain),

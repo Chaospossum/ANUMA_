@@ -859,3 +859,31 @@ def test_exclusion_codes_skip_flat_ground_when_default_rule_is_off(monkeypatch):
     cfg["hard"]["terrain_1km"]["enabled"] = True
     terrain["meta"] = {"max_slope_deg": 10.0}
     assert api._exclusion_codes(cfg, Path("."), dict(store)).tolist() == [[0, 0]]
+
+
+# ------------------------------------------------- site grouping distance
+
+
+def test_score_min_separation_groups_nearby_sites(client_ingested: TestClient):
+    # The two passing fixture peaks are about 50 km apart.
+    near = client_ingested.post("/score", json={"min_separation_km": 10}).json()
+    far = client_ingested.post("/score", json={"min_separation_km": 80}).json()
+    assert len(near["sites"]) == 2 and near["min_separation_km"] == 10.0
+    assert len(far["sites"]) == 1 and far["min_separation_km"] == 80.0
+
+
+def test_score_min_separation_default_and_bounds(client_ingested: TestClient):
+    cfg = load_config()
+    body = client_ingested.post("/score", json={}).json()
+    assert body["min_separation_km"] == float(cfg["scoring"]["min_separation_km"])
+    defaults = client_ingested.get("/layers").json()["defaults"]
+    assert defaults["min_separation_km"] == float(cfg["scoring"]["min_separation_km"])
+    for bad in (0, 0.1, 101, -5):
+        assert client_ingested.post("/score", json={"min_separation_km": bad}).status_code == 422
+
+
+def test_export_records_min_separation(client_ingested: TestClient):
+    text = client_ingested.post("/score.csv", json={"min_separation_km": 25}).text
+    assert "# min_separation_km: 25.0" in text
+    geo = json.loads(client_ingested.post("/score.geojson", json={"min_separation_km": 25}).text)
+    assert geo["properties"]["min_separation_km"] == 25.0

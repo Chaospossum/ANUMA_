@@ -72,6 +72,7 @@
     earthVal: document.getElementById("w-earth-val"),
     slope: document.getElementById("max-slope"),
     slopeRadius: document.getElementById("slope-radius"),
+    groupKm: document.getElementById("group-km"),
     score: document.getElementById("btn-score"),
     csv: document.getElementById("btn-csv"),
     geojson: document.getElementById("btn-geojson"),
@@ -1616,6 +1617,10 @@
     if (radiusChanged) {
       parts.push("slope checked within " + request.hard.slope_radius_m + " m");
     }
+    var groupDefault = Number(defaults.min_separation_km || 10);
+    if (request.min_separation_km != null && Number(request.min_separation_km) !== groupDefault) {
+      parts.push("sites grouped within " + request.min_separation_km + " km");
+    }
     if (request.keepout) {
       parts.push(
         "keep-out " + request.keepout.radius_km + " km around " + request.keepout.points.length +
@@ -2057,6 +2062,10 @@
       // default and reports why the rule is off.
       n: (meta.defaults && meta.defaults.n) || 10,
     };
+    var group = Number(els.groupKm.value);
+    if (group >= 0.5 && group <= 100) {
+      request.min_separation_km = group;
+    }
     if (!els.terrain.disabled) {
       request.hard.terrain_1km = els.terrain.checked;
     }
@@ -2110,6 +2119,9 @@
     }
     if (info.defaults && info.defaults.slope_radius_m != null) {
       els.slopeRadius.value = info.defaults.slope_radius_m;
+    }
+    if (info.defaults && info.defaults.min_separation_km != null) {
+      els.groupKm.value = info.defaults.min_separation_km;
     }
     syncSliderLabels();
   }
@@ -2576,6 +2588,12 @@
       terrainChoice = els.terrain.checked;
       scheduleScore();
     });
+    els.groupKm.addEventListener("change", function () {
+      var v = Number(els.groupKm.value);
+      if (v >= 0.5 && v <= 100) {
+        scheduleScore();
+      }
+    });
     ["input", "change"].forEach(function (type) {
       els.slope.addEventListener(type, updateTerrainToggle);
     });
@@ -2668,6 +2686,10 @@
     if (PARAMS.get("terrain") && !els.terrain.disabled) {
       els.terrain.checked = PARAMS.get("terrain") === "1";
       terrainChoice = els.terrain.checked;
+      changed = true;
+    }
+    if (PARAMS.get("group")) {
+      els.groupKm.value = Number(PARAMS.get("group"));
       changed = true;
     }
     if (PARAMS.get("keepout")) {
